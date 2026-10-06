@@ -1,0 +1,4 @@
+# lofi-studio Python 依賴
+# 主要用於音軌分離；ACE-Step / ComfyUI 走自己的環境。
+demucs>=4.0.1
+numpy

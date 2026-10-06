@@ -1,0 +1,27 @@
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+
+# 輸出（大檔，不進版控）
+output/mixes/*
+output/videos/*
+output/stems/*
+output/*.mp4
+output/*.wav
+!output/**/.gitkeep
+
+# 素材（AI 生成的大檔）
+assets/tracks/*.wav
+assets/tracks/*.mp3
+assets/tracks/*.flac
+assets/demo/*
+assets/visuals/*.png
+assets/visuals/*.jpg
+
+# 模型權重
+models/*
+!models/README.md
+
+# macOS
+.DS_Store
