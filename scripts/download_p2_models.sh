@@ -8,6 +8,7 @@
 #   ./download_p2_models.sh              # 全部下載
 #   ./download_p2_models.sh --ace        # 只下 ACE-Step
 #   ./download_p2_models.sh --sd         # 只下 SD1.5
+#   ./download_p2_models.sh --upscale    # 只下放大模型（Real-ESRGAN 動畫）
 #
 # 支援中斷續傳（curl -C -）。
 #
@@ -24,7 +25,8 @@ DL=()
 case "${1:-all}" in
   --ace) DL=(ace) ;;
   --sd)  DL=(sd) ;;
-  all)   DL=(ace sd workflow) ;;
+  --upscale) DL=(upscale) ;;
+  all)   DL=(ace sd upscale workflow) ;;
   *) echo "未知參數: $1" >&2; exit 1 ;;
 esac
 
@@ -38,6 +40,11 @@ ACE_FILES=(
 
 SD_FILES=(
 "models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors|https://huggingface.co/Comfy-Org/stable-diffusion-v1-5-archive/resolve/main/v1-5-pruned-emaonly-fp16.safetensors|2132696762"
+)
+
+# 生圖放大（AI upscale）：動畫向 6B 模型，適合 SD1.5 線稿風
+UPSCALE_FILES=(
+"models/upscale_models/RealESRGAN_x4plus_anime_6B.pth|https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth|17938799"
 )
 
 WORKFLOW_FILES=(
@@ -84,6 +91,10 @@ fi
 if [[ " ${DL[*]} " == *" sd "* ]]; then
   echo "==> Stable Diffusion 1.5 (fp16)"
   for f in "${SD_FILES[@]}"; do download_one "$f" || fail=1; done
+fi
+if [[ " ${DL[*]} " == *" upscale "* ]]; then
+  echo "==> AI 放大模型（Real-ESRGAN anime 6B）"
+  for f in "${UPSCALE_FILES[@]}"; do download_one "$f" || fail=1; done
 fi
 if [[ " ${DL[*]} " == *" workflow "* ]]; then
   echo "==> ComfyUI 工作流範本"

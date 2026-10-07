@@ -122,6 +122,7 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 ```
 
 - 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/` 最新一張。
+- 生圖預設會做 **AI 放大**（`RealESRGAN_x4plus_anime_6B`，768×512→1536×1024），讓 1080p 更銳利；`--no-upscale` 可關。模型安裝：`./scripts/download_p2_models.sh --upscale`（17MB）。
 - 上傳階段預設 `--privacy private`（＝上線前自動、公開手動）；`--no-upload` / `--no-cleanup` 可在 `all` 時略過第 4/5 段。
 - 整理階段把 `output/episodes/<episode>/` 搬到外接 `archive/<episode>/` 並刪中間檔（`--keep-visual` 可保留 `visual_loop.mp4`）。
 
@@ -261,7 +262,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `build_long_mix.sh` | `OUTPUT CROSSFADE_SECONDS TRACK1 TRACK2 ...`（lofi 建議 6–10 秒淡入） |
 | `make_visual_loop.sh` | `INPUT_IMAGE OUTPUT.mp4 [DURATION=15] [FPS=30]` |
 | `make_cinemagraph.py` | `IMAGE OUT.mp4 [--duration 15] [--fps 30] [--check-loop] [--zoom .02] [--drift .004] [--temp .02] [--glow .55] [--flicker 0] [--carlight 0] [--steam 0] [--drops 0] [--dust .5] [--sway .012] [--curtain-sway 0] [--sheen .22] [--rain 0]` + 各分區 `--window/--lamp/--plant/--curtain-region/--steam-pos/--drop-region/--dust-region/--sheen-region`（強度設 0 即關；`--zoom 0 --drift 0` = 嚴格局部；完整參數見 `--help`） |
-| `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--dry-run]` |
+| `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--upscale MODEL] [--upscale-out WxH] [--dry-run]` |
 | `render_video.sh` | `VISUAL_LOOP AUDIO OUTPUT.mp4 [FPS=30] [CRF=20]` |
 | `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--episode NAME] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼；`--episode` 一集一包） |
 | `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video\|upload\|cleanup] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--privacy private] [--archive DIR] [--no-upload] [--no-cleanup] [--smoke] [--dry-run]`（五段產線：音樂→圖片→影片→上傳→整理，可一條龍或分段測試；`--smoke` 小測試到上傳前） |

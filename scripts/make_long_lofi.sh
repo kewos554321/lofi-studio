@@ -194,7 +194,7 @@ echo "==> [B] 產生 ${LOOP}s 無縫 loop @ ${FPS}fps"
 
 echo "    升到 1080p / 16:9（硬體編碼）…"
 "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i "$CINE_LOOP" \
-  -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" \
+  -vf "scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos,crop=1920:1080" \
   -c:v h264_videotoolbox -b:v 9M -pix_fmt yuv420p "$LOOP_1080"
 echo "    冷卻 8s…"; sleep 8
 

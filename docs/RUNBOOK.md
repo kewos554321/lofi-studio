@@ -178,6 +178,15 @@ python3 scripts/generate_visual.py --ckpt meinamix_meinaV11.safetensors \
 > 建議模型：**MeinaMix v11**、AnythingV5、Counterfeit。皆為 SD1.5 架構，M4 16GB 可跑（實測約 40 秒／張）。
 > 要**純風景**（不要人）：`--prompt "scenery, no humans, indoors, ..."`。原本負向詞含 `people, face, hands` 會讓人出不來，已移除；`1girl, solo, ...` 就會有女生。
 
+**建議加 AI 放大**（768×512 直接升到 1080p 會軟糊）：
+
+```bash
+./scripts/download_p2_models.sh --upscale   # 一次性：Real-ESRGAN anime 6B（17MB）
+python3 scripts/generate_visual.py --count 3 --size 768x512 \
+  --upscale RealESRGAN_x4plus_anime_6B.pth  # 768×512 -> 1536×1024
+```
+> `make_episode.sh` 裝了模型後會**自動放大**（`--no-upscale` 可關）；`make_long_lofi.sh` 升頻已改用 lanczos。
+
 ### 6.2 做局部微動循環（Cinemagraph）
 
 ```bash

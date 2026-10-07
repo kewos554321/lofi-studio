@@ -29,6 +29,9 @@
 #   --tracks A B C ...             影片指定曲目（給了就跳過 library 挑選）
 #   --images N                     圖片階段生幾張（預設 1）
 #   --image PATH                   影片沿用既有圖（給了就跳過 image 階段）
+#   --upscale NAME                 生圖放大模型（預設 RealESRGAN_x4plus_anime_6B.pth；未安裝則跳過）
+#   --upscale-out WxH              放大後尺寸（預設生成尺寸×2）
+#   --no-upscale                   關閉生圖放大
 #   --size WxH                     生圖尺寸（預設 768x512）
 #   --ckpt NAME                    生圖 checkpoint（預設 meinamix_meinaV11.safetensors）
 #   --seed N                       固定亂數種子（音樂/圖片共用）
@@ -58,6 +61,9 @@ RUN_ID=""
 LIMIT=16
 IMAGES=1
 IMAGE=""
+UPSCALE="RealESRGAN_x4plus_anime_6B.pth"
+UPSCALE_OUT=""
+NO_UPSCALE=0
 SIZE="768x512"
 CKPT="meinamix_meinaV11.safetensors"
 SEED=""
@@ -96,6 +102,9 @@ while [ $# -gt 0 ]; do
     --tracks)  shift; TRACKS=(); TRACKS_SET=1; while [ $# -gt 0 ] && [ "${1:0:2}" != "--" ]; do TRACKS+=("$1"); shift; done;;
     --images)  IMAGES="$2"; shift 2;;
     --image)   IMAGE="$2"; shift 2;;
+    --upscale) UPSCALE="$2"; shift 2;;
+    --upscale-out) UPSCALE_OUT="$2"; shift 2;;
+    --no-upscale) NO_UPSCALE=1; shift;;
     --size)    SIZE="$2"; shift 2;;
     --ckpt)    CKPT="$2"; shift 2;;
     --seed)    SEED="$2"; shift 2;;
@@ -177,8 +186,18 @@ stage_image() {
   need_comfy
   local sargs=()
   if [ -n "$SEED" ]; then sargs=(--seed "$SEED"); fi
+  local uargs=()
+  if [ "$NO_UPSCALE" = 0 ]; then
+    if [ -f "$HOME/ComfyUI/models/upscale_models/${UPSCALE}" ]; then
+      uargs=(--upscale "$UPSCALE")
+      if [ -n "$UPSCALE_OUT" ]; then uargs+=(--upscale-out "$UPSCALE_OUT"); fi
+      echo "  AI 放大: ${UPSCALE}${UPSCALE_OUT:+ -> $UPSCALE_OUT}"
+    else
+      echo "  （未安裝放大模型 ${UPSCALE}；跳過。可跑 ./scripts/download_p2_models.sh --upscale）"
+    fi
+  fi
   run "$PY" scripts/generate_visual.py --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
-      --prefix "$EPISODE" "${sargs[@]+"${sargs[@]}"}"
+      --prefix "$EPISODE" "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
   echo "  → 圖片階段完成（assets/visuals/${EPISODE}*.png）"
 }
 
