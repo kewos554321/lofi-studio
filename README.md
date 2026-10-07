@@ -120,8 +120,7 @@ lofi-studio/
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
 │   ├── expand_style.py        # ★ 用風格骨架展開同風格曲目清單（CSV）
-│   ├── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py  # 相容 shim
-│   └── collect_comfy_outputs.sh # 把 ComfyUI 輸出收進 assets/tracks
+│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py  # 相容 shim
 ├── tests/                     # python3 -m unittest discover -s tests -v
 ├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
@@ -213,7 +212,6 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `batch_run.sh` | `--csv PATH [--chunk N] [--sleep S] [--rest S] [--total N] [--run-id NAME] [--clean-raw] [--gen-args "..."]`（量產 runner：分塊+log+續傳） |
 | `library.py` | `build \| query [--tag T] [--style S] [--verdict V] [--min-score N] \| summary \| tag --auto \| set-status keep ...`（SQLite 圖書館+自動標籤） |
 | `expand_style.py` | `--style NAME [--count 20] [--seed N] [--out PATH] [--dry-run]` |
-| `collect_comfy_outputs.sh` | `[--move] [--rename]` |
 | `backfill_catalog.py` | `[--dry-run] [--force]`（把既有音檔補進目錄） |
 | `auto_qc.py` | `[FILE...] [--all] [--force] [--dedupe] [--index] [--json] [--set KEY=VAL]`（自動品檢） |
 | `make_meta.py` | `--video PATH --style NAME [--tracks ...] [--xfade N] [--tracklist JSON] [--title T] [--print]`（產生上片資訊） |
