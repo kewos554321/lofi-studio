@@ -222,13 +222,14 @@ def main():
             if not src.exists():
                 print(f"    ⚠️  找不到輸出檔 {src}")
                 continue
-            dst = TRACKS_DIR / a["filename"]
+            dst = cat.track_subdir(style, args.run_id) / a["filename"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
             # 防覆蓋：若同名檔已存在（跨批次殘留），自動加序號
             if dst.exists():
                 stem, ext = Path(a["filename"]).stem, Path(a["filename"]).suffix
                 k = 2
                 while dst.exists():
-                    dst = TRACKS_DIR / f"{stem}-{k}{ext}"
+                    dst = dst.with_name(f"{stem}-{k}{ext}")
                     k += 1
             shutil.copy2(src, dst)
             if args.clean_raw:

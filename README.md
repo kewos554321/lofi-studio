@@ -63,21 +63,21 @@ python3 scripts/library.py set-status keep --verdict pass --min-score 90
 python3 scripts/library.py query --tag style:rainy_lofi --status keep
 
 # 拼成長片音訊（-14 LUFS 正規化）
-./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/rainy_lofi_*.mp3
+./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/rainy_lofi/*/*.mp3
 ```
 
 **Step 5 — 做視覺並合成影片（最省電）**
 ```bash
 # 生一張場景圖 → 30 分鐘影片（唯一動 GPU 的是生圖）
 ./scripts/make_long_lofi.sh --generate --minutes 30 \
-    --tracks assets/tracks/rainy_lofi_*.mp3 --style rainy_lofi
+    --tracks assets/tracks/rainy_lofi/*/*.mp3 --style rainy_lofi
 #   加 --style 會在渲染後自動產生上片資訊（Step 6）
 ```
 
 **Step 6 — 產生上片資訊**
 ```bash
 python3 scripts/make_meta.py --video output/videos/lofi_30min.mp4 \
-    --style rainy_lofi --tracks assets/tracks/rainy_lofi_*.mp3 --xfade 8
+    --style rainy_lofi --tracks assets/tracks/rainy_lofi/*/*.mp3 --xfade 8
 #   → publish/lofi_30min.json + .md（title/描述/章節/tags，可直接複製到 YouTube）
 ```
 
@@ -131,7 +131,7 @@ lofi-studio/
 │   ├── youtube/               # 上片 metadata 範本（title/描述/tags），對應同名 style
 │   └── generated/             # expand_style.py 產出的曲目清單
 ├── assets/
-│   ├── tracks/                # 生成的曲子放這裡（輸入）；每首附 .json 側錄（來源/品檢/標籤）
+│   ├── tracks/<style>/<run>/  # 生成的曲子（分層）；每首附 .json 側錄（來源/品檢/標籤）
 │   └── visuals/               # AI 生成的場景圖放這裡
 ├── catalog/                   # 音樂目錄（P0/P1）
 │   ├── tracks.jsonl           # 事件流：每次生成/品檢/… 一行
@@ -175,7 +175,7 @@ cd ai-music/lofi-studio
 ./scripts/make_demo_tracks.sh
 
 # 2) 交叉淡入成一首長片（3 首 8 秒、淡入 2 秒 -> 約 20 秒）
-./scripts/build_long_mix.sh output/mixes/demo_mix.wav 2 assets/tracks/demo_a.wav assets/tracks/demo_b.wav assets/tracks/demo_c.wav
+./scripts/build_long_mix.sh output/mixes/demo_mix.wav 2 assets/tracks/misc/demo/demo_a.wav assets/tracks/misc/demo/demo_b.wav assets/tracks/misc/demo/demo_c.wav
 
 # 3) 做視覺循環（15 秒）
 ./scripts/make_visual_loop.sh assets/visuals/demo_visual.png output/visual_loop.mp4 15 30
@@ -188,7 +188,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 ./scripts/render_video.sh output/visual_loop.mp4 output/mixes/demo_mix.wav output/videos/demo_lofi.mp4
 
 # 5)（可選）去人聲
-./scripts/separate_stems.sh assets/tracks/demo_a.wav vocals
+./scripts/separate_stems.sh assets/tracks/misc/demo/demo_a.wav vocals
 ```
 
 > 記得先 `chmod +x scripts/*.sh`。
@@ -287,9 +287,21 @@ python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit
 
 生成時就自動記錄來源與參數，之後才能「調閱出品質不好的 prompt」。每次 `batch_generate.py` 生成成功會：
 
-- 在 `assets/tracks/<檔名>.json` 寫一份**側錄**（prompt / seed / steps / cfg / temperature / style 版本 / 時長…）。
+- 在 `assets/tracks/<style>/<run>/<檔名>.json` 寫一份**側錄**（prompt / seed / steps / cfg / temperature / style 版本 / 時長…）。
 - 追加一行到 `catalog/tracks.jsonl`（事件流，失敗也記）。
 - 立刻跑 `auto_qc.py` 自動品檢，結果寫回側錄。
+
+### 曲目檔案佈局
+
+生成檔放在 `assets/tracks/<style>/<run_id>/`（`<run_id>` 由 `--run-id` 決定，沒有則 `legacy`），每首音檔旁有一份同名 `.json` 側錄。**分層讓每個資料夾最多一個批次**，瀏覽與歸檔都容易。
+
+- 批次選曲（bash glob）：`assets/tracks/<style>/*/*.mp3`
+- 最穩健：用圖書館查路徑
+  ```bash
+  ./scripts/build_long_mix.sh output/mixes/mix.wav 8 \
+      $(python3 scripts/library.py query --style rainy_lofi --status keep --limit 30 --paths)
+  ```
+- 舊版扁平結構遷移：`python3 scripts/migrate_tracks_layout.py`（預設 dry-run；`--apply` 才執行，會寫 manifest，`--revert` 可還原）。
 
 ### 回填既有曲子
 
@@ -506,11 +518,11 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 ```bash
 # 產生上片資訊（章節由軌道清單推算）
 python3 scripts/make_meta.py --video output/videos/lofi_30min_cozy.mp4 \
-    --style cozy_morning --tracks assets/tracks/cozy_morning_*.mp3 --xfade 8
+    --style cozy_morning --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
 # 或渲染時就自動產生
 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png --minutes 30 \
-    --tracks assets/tracks/cozy_morning_*.mp3 --style cozy_morning
+    --tracks assets/tracks/cozy_morning/*/*.mp3 --style cozy_morning
 ```
 
 ### 哪些是今天可以上傳的？
@@ -552,7 +564,7 @@ python3 scripts/batch_generate.py --csv prompts/generated/dusk_jazz.csv --clean-
 
 ```bash
 # 生成的檔是 .mp3；示範檔是 .wav，一起帶入
-./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/*.mp3 assets/tracks/*.wav
+./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/*/*/*.mp3 assets/tracks/*/*/*.wav
 ./scripts/render_video.sh output/visual_loop.mp4 output/mixes/mix_1hr.wav output/videos/lofi_1hr.mp4
 ```
 

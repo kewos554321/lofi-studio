@@ -140,21 +140,25 @@ def build_where(args):
 
 def cmd_query(args):
     con = connect()
+    con.row_factory = sqlite3.Row
     where, params = build_where(args)
-    sql = f"SELECT t.track_id,t.style,t.bpm,t.verdict,t.score,t.status,t.rating,t.mood FROM tracks t WHERE {where} ORDER BY t.score DESC"
+    sql = ("SELECT t.track_id,t.file,t.style,t.bpm,t.verdict,t.score,t.status,t.rating,t.mood "
+           f"FROM tracks t WHERE {where} ORDER BY t.score DESC")
     if args.limit:
         sql += f" LIMIT {int(args.limit)}"
-    rows = con.execute(sql, params).fetchall()
+    rows = [dict(r) for r in con.execute(sql, params).fetchall()]
     con.close()
+    if getattr(args, "paths", False):
+        for r in rows:
+            print(r["file"])
+        return
     if args.json:
-        print(json.dumps([dict(zip(
-            ["track_id", "style", "bpm", "verdict", "score", "status", "rating", "mood"], r)) for r in rows],
-            ensure_ascii=False, indent=2))
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
     print(f"符合 {len(rows)} 首")
     for r in rows:
-        print(f"  {r[0]:<34} [{r[1] or '-':<14}] {str(r[2]):>4}bpm {str(r[3]):>4} score={r[4]}"
-              f" {r[5]:<10} {r[7] or ''}")
+        print(f"  {r['track_id']:<34} [{r['style'] or '-':<14}] {str(r['bpm']):>4}bpm"
+              f" {str(r['verdict']):>4} score={r['score']} {r['status']:<10} {r['mood'] or ''}")
 
 
 def cmd_summary(args):
@@ -269,6 +273,7 @@ def main():
 
     q = sub.add_parser("query"); add_filters(q)
     q.add_argument("--limit", type=int, default=30); q.add_argument("--json", action="store_true")
+    q.add_argument("--paths", action="store_true", help="只輸出檔案路徑（給 bash 用）")
 
     sub.add_parser("summary")
 

@@ -12,7 +12,7 @@ ComfyUI + ACE-Step 生音樂、SD1.5 生場景圖、ffmpeg 做視覺循環與合
 ```
 src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import ...`）
   paths.py         # ROOT 解析（env LOFI_ROOT 或往上找 prompts/styles）
-  catalog.py       # 音樂目錄：sidecar assets/tracks/*.json + catalog/tracks.jsonl
+  catalog.py       # 音樂目錄：sidecar assets/tracks/<style>/<run>/*.json + catalog/tracks.jsonl
   qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
   generate.py      # 批次生成（ComfyUI API）
   backfill.py      # 回填既有音檔
@@ -24,7 +24,7 @@ scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可�
 scripts/*.sh       # ffmpeg/ComfyUI 重流程（build_long_mix / make_long_lofi / render_video …）
 prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
-assets/tracks/      # 生成音檔 + 每首 sidecar（音檔 gitignore，sidecar 進版控）
+assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（音檔 gitignore，sidecar 進版控）
 catalog/            # tracks.jsonl + index.csv（library.db 為衍生物，gitignore）
 publish/            # 上片資訊 + 狀態
 output/             # symlink → 外接碟（74xxxGB）；log 例外，放內接 logs/
@@ -49,7 +49,7 @@ python3 -m unittest discover -s tests -v
 - **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）。沒記錄等於沒做。
 - **唯一命名**：生成檔名含 `--run-id`，禁止讓不同批次產生同名檔（會被覆蓋）。
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
-- **不進版控**：`assets/tracks/*.mp3|wav`、`output/`、`logs/`、`catalog/*.db`、`.venv`、models。
+- **不進版控**：`assets/**/*.mp3|wav|flac`、`output/`、`logs/`、`catalog/*.db`、`.venv`、models。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
 - **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
 - **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。

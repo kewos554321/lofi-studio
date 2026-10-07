@@ -13,7 +13,7 @@
 """
 import sys
 
-from lofi import backfill, generate, library, meta, publish, qc
+from lofi import backfill, generate, library, meta, migrate, publish, qc
 
 COMMANDS = {
     "generate": generate,
@@ -22,6 +22,7 @@ COMMANDS = {
     "meta": meta,
     "publish": publish,
     "backfill": backfill,
+    "migrate": migrate,
 }
 
 HELP = "用法: lofi <command> [options]\n\ncommands:\n" + "\n".join(

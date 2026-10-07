@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
-TRACKS="$ROOT/assets/tracks"
+TRACKS="$ROOT/assets/tracks/misc/demo"
 VIS="$ROOT/assets/visuals"
 mkdir -p "$TRACKS" "$VIS"
 

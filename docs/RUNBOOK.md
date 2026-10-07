@@ -141,7 +141,7 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 ## 5. 拼接成長片（P1 已完成）
 
 ```bash
-./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/*.wav
+./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/*/*/*.wav
 ```
 
 - `8` 是交叉淡入秒數（lofi 建議 6–10 秒）。
@@ -290,7 +290,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 ```bash
 # 產生 title / 描述（含章節）/ tags → publish/<影片>.json + .md
 python3 scripts/make_meta.py --video output/videos/xxx.mp4 --style cozy_morning \
-    --tracks assets/tracks/cozy_morning_*.mp3 --xfade 8
+    --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
 python3 scripts/upload_status.py --ready     # 今天可上傳的
 python3 scripts/upload_status.py --mark-uploaded xxx --url https://youtu.be/...

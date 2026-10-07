@@ -10,10 +10,10 @@ __pycache__/
 # 衍生資料庫（由 sidecar 重建）
 catalog/*.db
 
-# 素材（AI 生成的大檔）
-assets/tracks/*.wav
-assets/tracks/*.mp3
-assets/tracks/*.flac
+# 素材（AI 生成的大檔）；分層 <style>/<run_id>/ 故用 **
+assets/**/*.wav
+assets/**/*.mp3
+assets/**/*.flac
 assets/demo/*
 assets/visuals/*.png
 assets/visuals/*.jpg

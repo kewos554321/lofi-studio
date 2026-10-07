@@ -52,12 +52,20 @@ def sha1_file(path, chunk=1 << 20):
 
 
 def iter_audio_files():
-    """依檔名排序走訪 assets/tracks 下的音檔。"""
+    """遞迴走訪 assets/tracks 下的所有音檔（支援 <style>/<run_id>/ 分層）。"""
     if not TRACKS_DIR.exists():
         return
-    for p in sorted(TRACKS_DIR.iterdir()):
+    for p in sorted(TRACKS_DIR.rglob("*")):
         if p.is_file() and is_audio(p):
             yield p
+
+
+def track_subdir(style, run_id):
+    """回傳某風格/批次的存放子目錄：assets/tracks/<style>/<run_id>/。"""
+    def clean(v, default):
+        v = (v or "").strip().replace(" ", "_").replace("/", "_")
+        return v or default
+    return TRACKS_DIR / clean(style, "misc") / clean(run_id, "legacy")
 
 
 def read_jsonl():

@@ -59,12 +59,12 @@ META=1
 THREADS="${THREADS:-0}"
 NICE="${NICE:-10}"
 TRACKS=(
-  assets/tracks/rainy_lofi_01_00001.mp3
-  assets/tracks/jazzhop_lounge_01_00001.mp3
-  assets/tracks/cozy_morning_01_00001.mp3
-  assets/tracks/tokyo_night_01_00001.mp3
-  assets/tracks/focus_minimal_01_00001.mp3
-  assets/tracks/rnb_soul_01_00001.mp3
+  assets/tracks/rainy_lofi/legacy/rainy_lofi_01_00001.mp3
+  assets/tracks/jazzhop_lounge/legacy/jazzhop_lounge_01_00001.mp3
+  assets/tracks/cozy_morning/legacy/cozy_morning_01_00001.mp3
+  assets/tracks/tokyo_night/legacy/tokyo_night_01_00001.mp3
+  assets/tracks/focus_minimal/legacy/focus_minimal_01_00001.mp3
+  assets/tracks/rnb_soul/legacy/rnb_soul_01_00001.mp3
 )
 
 while [ $# -gt 0 ]; do
