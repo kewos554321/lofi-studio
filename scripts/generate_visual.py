@@ -21,16 +21,17 @@ VIS_DIR = ROOT / "assets" / "visuals"
 COMFY_OUT = Path.home() / "ComfyUI" / "output"
 CKPT = "v1-5-pruned-emaonly-fp16.safetensors"
 
-DEFAULT_POS = ("cozy lofi study room at night, rain on the window, warm desk lamp, "
-               "coffee mug, books, potted plant, lo-fi anime illustration, soft warm lighting, "
-               "detailed background, muted colors, nostalgic, masterpiece, best quality")
-DEFAULT_NEG = ("lowres, blurry, bad anatomy, watermark, signature, text, error, "
-               "people, face, hands, extra limbs, jpeg artifacts")
+DEFAULT_POS = ("1girl, solo, anime girl sitting at a cozy desk by the window at night, "
+               "warm desk lamp, coffee mug, books, potted plant, long hair, looking at viewer, "
+               "lo-fi anime illustration, soft warm lighting, detailed background, "
+               "muted colors, nostalgic, masterpiece, best quality")
+DEFAULT_NEG = ("lowres, blurry, bad anatomy, bad hands, extra digits, fewer digits, bad proportions, "
+               "2girls, multiple girls, extra limbs, watermark, signature, text, error, jpeg artifacts")
 
 
-def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix):
+def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=CKPT):
     return {
-        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["4", 1]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": ["4", 1]}},
         "5": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
@@ -63,6 +64,7 @@ def main():
     ap.add_argument("--cfg", type=float, default=6.5)
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--prefix", default="lofi_scene")
+    ap.add_argument("--ckpt", default=CKPT, help="checkpoint 檔名（放在 ComfyUI/models/checkpoints）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -85,7 +87,7 @@ def main():
             print("   ", args.prompt[:100], "…")
             continue
         r = api(args.url, "/prompt", {"prompt": build_prompt(
-            args.prompt, args.negative, w, h, seed, args.steps, args.cfg, args.prefix),
+            args.prompt, args.negative, w, h, seed, args.steps, args.cfg, args.prefix, args.ckpt),
             "client_id": "lofi-visual"})
         pid = r["prompt_id"]
         t0 = time.time()

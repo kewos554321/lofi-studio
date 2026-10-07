@@ -94,6 +94,17 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 ### 2.4 挑選
 只留「能撐 2 分鐘不無聊」的。淘汰的不要省，硬用會讓長片變難聽。
 
+### 2.5 音樂目錄與品管（P0/P1）
+
+目的是讓每一首都能回溯到「當時送出的完整 prompt 與參數」，這樣品質差的才好回頭檢討改 prompt。
+
+- `batch_generate.py` 成功後會自動寫側錄（`assets/tracks/<檔>.json`）+ 事件流（`catalog/tracks.jsonl`）+ 跑自動品檢。
+- 既有舊曲用 `python3 scripts/backfill_catalog.py` 補（會從 `output/logs/*.log` 撈回 seed）。
+- 自動品檢：`python3 scripts/auto_qc.py --all --index`。`fail`（無聲／截斷／嚴重削波）會自動標 `reject`；`warn` 進人工複審。
+- 詳細判定與側錄格式見 `README.md` 的「音樂目錄與品管」一節。
+
+> 之後（P2/P3，尚未實作）會在此基礎上做：試聽評分工具、`prompt_report.py` 把壞 prompt 的維度統計出來、標籤與由標籤重組歌單。
+
 ---
 
 ## 3. 後製（Reaper + 免費外掛）
@@ -140,22 +151,115 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 
 ## 6. 原創視覺
 
-1. 用 AI 生圖（例如本地 Stable Diffusion）做一張 lofi 場景（書桌、雨窗、咖啡）。
-2. 做**細微循環動畫**（雨滴、蒸氣、燈光閃爍）——這是你的「原創性」來源。
+視覺分兩步：**AI 生靜圖** → **程序化做局部微動循環**。這是「原創性」的來源。
+> 為什麼不用 AnimateDiff / SVD？Cinemagraph 需求是「90% 靜止、只有極小局部在動」，這需要逐像素座標控制；在 M4 16GB 上 AI 影片模型又慢又易爆記憶體，且無法只鎖定「窗上的雨、檯燈的光暈」。程序化做法秒級完成、零額外下載、逐像素精準。
 
-本專案提供 ffmpeg 版本，從一張靜圖做無縫循環：
+### 6.1 生場景圖（SD1.5 / 日系模型）
+
+**預設 prompt 已改成「靠窗書桌的動漫女生」**（含 `1girl, solo`，負向詞不再擋人物）：
 
 ```bash
-./scripts/make_visual_loop.sh assets/visuals/desk.png output/visual_loop.mp4 15 30
+python3 scripts/generate_visual.py --count 3 --size 768x512          # 預設 SD1.5
 ```
 
-### 6.1 合成影片（P1 已完成）
+想更接近 lofi 動漫風，換 SD1.5 架構的日系 checkpoint（`--ckpt`）：
+
+```bash
+# 下載（本流程實測可用，2.1GB）
+curl -L -o ~/ComfyUI/models/checkpoints/meinamix_meinaV11.safetensors \
+  https://huggingface.co/Xiero/Meinamix/resolve/main/meinamix_meinaV11.safetensors
+
+python3 scripts/generate_visual.py --ckpt meinamix_meinaV11.safetensors \
+  --count 3 --size 768x512
+```
+> 建議模型：**MeinaMix v11**、AnythingV5、Counterfeit。皆為 SD1.5 架構，M4 16GB 可跑（實測約 40 秒／張）。
+> 要**純風景**（不要人）：`--prompt "scenery, no humans, indoors, ..."`。原本負向詞含 `people, face, hands` 會讓人出不來，已移除；`1girl, solo, ...` 就會有女生。
+
+### 6.2 做局部微動循環（Cinemagraph）
+
+```bash
+# 先用 --check-loop 驗證頭尾無縫（必做）
+python3 scripts/make_cinemagraph.py assets/visuals/scene.png --check-loop
+
+# 預設輸出＝只有顆粒＋靜態調色（其餘完全靜止）
+python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4
+
+# 要局部微動再逐一開啟（分區要對準圖上位置）
+python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4 \
+  --glow 0.5 --lamp 0.42,0.27,0.22 --sway 0.012 --plant 0.18,0.10,0.32,0.34
+
+# 先看有哪些效果參數
+python3 scripts/make_cinemagraph.py --help
+```
+
+效果模組與分區（比例 0~1，換圖只調這裡）：
+
+| 類別 | 效果 | 參數 | 預設強度 | 預設分區 |
+|---|---|---|---|---|
+| 光線 | 檯燈呼吸 | `--glow` `--lamp cx,cy,r` | `0`（關） | `0.88,0.48,0.22` |
+| 光線 | 燈光微閃 | `--flicker` `--flicker-region` | `0`（關） | `0.88,0.48,0.22` |
+| 光線 | 車燈掃過 | `--carlight` `--carlight-region` | `0`（關） | 同 window |
+| 光線 | 色溫呼吸 | `--temp` | `0`（關） | 全域 |
+| 物體 | 蒸氣上升 | `--steam` `--steam-pos cx,cy,r` | `0`（關） | `0.62,0.72,0.10` |
+| 物體 | 玻璃水珠 | `--drops` `--drop-region` | `0`（關） | 同 window |
+| 物體 | 灰塵微粒 | `--dust` `--dust-region` | `0`（關） | 同 window |
+| 物體 | 盆栽微晃 | `--sway` `--plant` | `0`（關） | `0.04,0.52,0.70,0.82` |
+| 物體 | 窗簾輕擺 | `--curtain-sway` `--curtain-region` | `0`（關） | `0.51,0.15,0.63,0.66` |
+| 表面 | 書頁光暈 | `--sheen` `--sheen-region` | `0`（關） | `0.55,0.87,0.30` |
+| 基礎 | 全域呼吸 | `--zoom` `--drift` | `0` / `0`（關） | 全域 |
+| 基礎 | 顆粒/暗角/對比/飽和 | `--grain` `--vignette` `--contrast` `--saturation` | `.012`/`.35`/`1.04`/`1.08`（**開**） | 全域 |
+| 選用 | 窗內雨絲 | `--rain` `--window` | **`0`（預設關）** | `0.33,0.045,0.70,0.585` |
+
+> - **預設只開顆粒＋靜態調色（暗角/對比/飽和）**；所有「會動的」效果（全域呼吸、燈光、灰塵、盆栽、書頁、色溫，以及需要分區的蒸氣/水珠/車燈/窗簾/微閃/雨）預設全部關閉，避免換圖時分區錯位。要用時逐一開啟並把座標指到圖上正確位置。
+> - 雨滴預設關閉的原因：雨絲畫在畫面空間，若沒精準貼合玻璃會被誤看成「室內下雨」。貼在玻璃上的水痕請改用 `--drops`（玻璃水珠滑落）。
+> - 蒸氣要**背景偏暗**才明顯；若杯子後面是明亮的窗，熱氣會看不清楚。
+> - 車燈用**兩道光帶**模擬車頭燈（`--carlight-sep` 控制間距，設 0 變單道）。
+
+**無縫原理**：所有時變項週期都等於循環秒數 D（`sin/cos(2πt/D)`；雨滴速度取「整數倍窗高 / D」），因此 t=D 與 t=0 完全相同，`--check-loop` 實測差值 ≈ 0。
+**注意**：`--window` 等分區要對準你圖上的實際位置；分區錯了效果會落在錯的地方（用內建的視覺檢查：抽出兩格做差異圖即可確認）。
+
+> 舊版 `make_visual_loop.sh`（純 ffmpeg 慢平移+顆粒+暗角）仍保留，適合快速、不需分區控制的場合。
+
+### 6.3 合成影片（P1 已完成）
 
 ```bash
 ./scripts/render_video.sh output/visual_loop.mp4 output/mixes/mix_1hr.wav output/videos/lofi_1hr.mp4
 ```
 
 視覺會無限循環到音訊結束，輸出 1080p30 H.264 + AAC。
+
+### 6.4 低負載輸出長片（避免過熱）
+
+**問題**：`make_cinemagraph.py --duration 600` 會逐格算 18,000 格，CPU 滿載數分鐘、明顯發燙；`render_video.sh` 用 libx264 medium 重編整段也會讓 CPU 長時間滿載。
+
+**對策**：`make_long_lofi.sh` 只算**一個短 loop**，再用 `concat -c copy` 複製成整部片（**零重編碼**），升頻/淡入淡出用硬體 `h264_videotoolbox`：
+
+```bash
+./scripts/make_long_lofi.sh --generate --minutes 10            # 生圖 + 10 分鐘（只有生圖動 GPU）
+./scripts/make_long_lofi.sh --image assets/visuals/scene.png   # 沿用既有圖，完全不開 ComfyUI
+./scripts/make_long_lofi.sh --image assets/visuals/scene.png --vbitrate 5      # 檔案更小
+THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png # 更保守
+```
+
+流程：生圖(可選) → 20s 無縫 loop → 1080p 硬體升頻 → 6 首 crossfade(-14 LUFS) 裁到 N 分 → concat copy → 封裝。
+
+- `--loop` 必須整除總長（600/20=30、3600/20=180）。
+- 成功後自動刪中間檔（`--keep-temp` 可保留），一次約省 1GB。
+- 重步驟之間會 sleep 降溫；`--no-video-fade` 可再省一次重編碼。
+- 散熱監控：`pmset -g therm`（**勿用** `pmset -g thermlog`，它會持續輸出）。
+
+### 6.5 容量管理
+
+成片會累積（每分鐘約 37MB、每小時約 2.2GB），內接容易吃爆。策略：素材與程式留內接，`output/` 指到外接碟。
+
+```bash
+./scripts/disk_report.sh              # 容量一覽
+./scripts/cleanup_outputs.sh          # 預覽要清什麼（預設保留最新 3 支影片）
+./scripts/cleanup_outputs.sh --apply  # 真的刪
+```
+
+- 遷移與 ExFAT 注意事項詳見 `README.md` 的「容量管理與外接碟」。
+- `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
 ---
 
@@ -178,6 +282,21 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 | Chapters | 每首曲子的時間戳，讓 YouTube 看到策展痕跡。 |
 | 縮圖 | 每支片都要不同，別用同一模板換字。 |
 | Content ID | 只用你有權利的音訊；本流程產出沒問題。 |
+
+### 8.1 自動產生上片資訊
+
+```bash
+# 產生 title / 描述（含章節）/ tags → publish/<影片>.json + .md
+python3 scripts/make_meta.py --video output/videos/xxx.mp4 --style cozy_morning \
+    --tracks assets/tracks/cozy_morning_*.mp3 --xfade 8
+
+python3 scripts/upload_status.py --ready     # 今天可上傳的
+python3 scripts/upload_status.py --mark-uploaded xxx --url https://youtu.be/...
+```
+
+- metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）。
+- 章節時間戳是 YouTube 需要的「策展痕跡」，務必帶上。
+- `make_long_lofi.sh --style <name>` 會在渲染後自動產生上片資訊。
 
 ---
 

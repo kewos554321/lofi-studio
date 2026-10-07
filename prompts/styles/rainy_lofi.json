@@ -1,0 +1,38 @@
+{
+  "name": "rainy_lofi",
+  "description": "雨夜讀書系 lofi：統一的磁帶暖聲與刷鼓骨架，適合深夜長片。",
+  "backbone": "lofi hip hop, warm tape saturation, dusty vinyl crackle, mellow, instrumental, sidechain compression",
+  "closing": "calm, nostalgic, low fidelity texture",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients",
+  "duration": 120,
+  "bpm_range": [64, 82],
+  "keys": [
+    "D minor",
+    "A minor",
+    "B minor",
+    "C minor",
+    "E minor",
+    "F major",
+    "G major"
+  ],
+  "instruments": [
+    "mellow piano chords, brushed drums, upright bass",
+    "rhodes electric piano, muted trumpet, boom bap drums",
+    "soft guitar loop, soft kick, upright bass",
+    "ambient synth pad, lofi keys, slow dusty drums",
+    "jazz piano voicings, upright bass, brushed drums",
+    "ukulele, warm pads, shaker percussion",
+    "plucked keys, chill synth chords, soft dusty drums",
+    "slow piano notes, ambient pads, deep sub bass"
+  ],
+  "moods": [
+    "rainy night study session",
+    "rain on the window",
+    "midnight study",
+    "late night city drive",
+    "cozy room at night",
+    "quiet cafe in the rain",
+    "sleepy late hours",
+    "slow evening wind-down"
+  ]
+}

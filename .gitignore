@@ -3,13 +3,8 @@
 __pycache__/
 *.pyc
 
-# 輸出（大檔，不進版控）
-output/mixes/*
-output/videos/*
-output/stems/*
-output/*.mp4
-output/*.wav
-!output/**/.gitkeep
+# 輸出（大檔，不進版控；output 已 symlink 到外接碟）
+/output
 
 # 素材（AI 生成的大檔）
 assets/tracks/*.wav

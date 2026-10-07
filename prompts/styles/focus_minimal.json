@@ -1,0 +1,23 @@
+{
+  "name": "focus_minimal",
+  "description": "專注極簡系：乾淨、留白、低乾擾，適合讀書與工作。",
+  "backbone": "instrumental lofi, minimal, clean, low fidelity texture, no vocals",
+  "closing": "calm, spacious, steady",
+  "negative": "no vocals, no melody clutter, no loud transients, no EDM",
+  "duration": 120,
+  "bpm_range": [78, 90],
+  "keys": ["C major", "G major", "D major", "A minor", "E minor"],
+  "instruments": [
+    "minimal piano, soft sub bass, light shaker",
+    "simple rhodes loop, soft kick, subtle percussion",
+    "clean plucked keys, soft hi-hat, warm pad",
+    "sparse guitar notes, soft bass, minimal drums"
+  ],
+  "moods": [
+    "deep focus work",
+    "quiet study session",
+    "calm concentration",
+    "clear morning focus",
+    "steady flow state"
+  ]
+}

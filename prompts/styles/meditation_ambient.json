@@ -1,0 +1,26 @@
+{
+  "name": "meditation_ambient",
+  "description": "冥想 / 療癒環境音：無節拍、持續 drone、頌缽與自然聲，空間感大。",
+  "backbone": "ambient meditation, calm healing, spacious reverb, sustained drone pads, beatless, instrumental, no vocals",
+  "closing": "peaceful, serene, expansive",
+  "negative": "no drums, no beat, no percussion, no vocals, no sudden changes, no loud transients, no melody clutter",
+  "duration": 120,
+  "bpm_range": [40, 56],
+  "keys": ["C major", "A minor", "D major", "G major", "E minor", "F major"],
+  "instruments": [
+    "warm drone pads, singing bowl, soft piano notes",
+    "ambient synth layers, gentle chimes, deep reverb",
+    "soft piano, sustained string pad, subtle bells",
+    "ocean wave ambience, warm pad, slow breathing texture",
+    "tibetan singing bowls, airy pad, distant wind chimes",
+    "soft organ drone, rain ambience, faint piano"
+  ],
+  "moods": [
+    "deep meditation",
+    "breathing exercise",
+    "sleep and deep relax",
+    "zen garden stillness",
+    "forest morning calm",
+    "healing space"
+  ]
+}

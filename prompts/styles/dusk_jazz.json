@@ -1,0 +1,27 @@
+{
+  "name": "dusk_jazz",
+  "version": 1,
+  "description": "黃昏爵士 lofi：氈鋼琴、刷鼓、低音提琴、vibraphone，A 小調的沉靜夜暮。參考「Soft Steps into Dusk」。",
+  "backbone": "lofi jazzhop, felt piano, warm tape saturation, dusty vinyl crackle, mellow, instrumental, sidechain compression",
+  "closing": "smoky, nostalgic, late evening calm, low fidelity texture",
+  "negative": "no vocals, no brass section, no loud horns, no EDM drop, no harsh synths",
+  "duration": 120,
+  "bpm_range": [62, 78],
+  "keys": ["A minor", "D minor", "E minor", "C minor", "G minor"],
+  "instruments": [
+    "felt piano, brushed jazz drums, upright bass",
+    "jazz piano voicings, vibraphone accents, brushed drums",
+    "muted trumpet, upright bass, soft ride cymbal",
+    "rhodes electric piano, upright bass, gentle brushed drums",
+    "plucked keys, vibraphone, deep sub bass",
+    "slow piano notes, upright bass, soft brush groove"
+  ],
+  "moods": [
+    "soft steps into dusk",
+    "quiet jazz evening",
+    "empty lounge after hours",
+    "smoky late twilight",
+    "winding down at dusk",
+    "rainy jazz night"
+  ]
+}

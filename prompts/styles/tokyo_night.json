@@ -1,0 +1,23 @@
+{
+  "name": "tokyo_night",
+  "description": "東京夜景系：chill synthwave 合成器、霓虹城市氛圍，適合夜間長片。",
+  "backbone": "lofi hip hop, chill synthwave chords, city night ambience, warm analog tape, instrumental, no vocals",
+  "closing": "moody, dreamy, nostalgic",
+  "negative": "no vocals, no hard synthwave, no loud snare, no aggressive sound",
+  "duration": 120,
+  "bpm_range": [72, 84],
+  "keys": ["F# minor", "B minor", "C# minor", "E minor", "A minor"],
+  "instruments": [
+    "plucked keys, chill synth pads, soft dusty drums",
+    "retro synth lead, deep sub bass, gated drums",
+    "bell keys, warm pads, soft kick",
+    "dreamy synth arpeggio, lofi keys, slow drums"
+  ],
+  "moods": [
+    "tokyo night walk",
+    "neon rain street",
+    "last train home",
+    "midnight skyline",
+    "quiet city night"
+  ]
+}

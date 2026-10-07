@@ -1,0 +1,27 @@
+{
+  "name": "cozy_morning_v2",
+  "description": "暖陽 cozy 2.0：更明確的 lofi hip hop 律動（boom bap + 黑膠雜訊 + 磁帶暖聲），BPM 收在 62–76，樂器組更多樣。",
+  "backbone": "lofi hip hop, instrumental, boom bap, dusty vinyl crackle, warm tape saturation, mellow, head-nodding, laid-back groove",
+  "closing": "warm, nostalgic, cozy, soft focus",
+  "negative": "vocals, singing, voice, lyrics, rap, fast tempo, harsh synths, edm, distortion, clipping, overcompressed, sharp highs",
+  "duration": 120,
+  "bpm_range": [62, 76],
+  "keys": ["D major", "G major", "F major", "A major", "C major", "D minor", "A minor", "E minor"],
+  "instruments": [
+    "mellow rhodes chords, boom bap drums, warm upright bass",
+    "soft acoustic guitar, brushed drums, deep round bass",
+    "warm piano chords, dusty drums, rounded bass",
+    "muted trumpet, soft kick, walking upright bass",
+    "vinyl-warm keys, swung drums, smooth sub bass",
+    "soft ukulele, light shaker, mellow bass",
+    "dreamy rhodes pad, soft rimshot drums, warm bass"
+  ],
+  "moods": [
+    "cozy morning coffee",
+    "sunlit desk by the window",
+    "slow rainy morning",
+    "quiet reading in a warm room",
+    "gentle start of the day",
+    "soft blanket afternoon"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "coastal_guitar",
+  "version": 1,
+  "description": "海岸木吉他 lofi：慵懶撥弦、海浪與海鷗氛圍，適合午後與黃昏。參考「Sunset Serenity / Coastal Daydreams」。",
+  "backbone": "lofi chillhop, clean electric guitar, warm tape saturation, soft vinyl crackle, mellow, instrumental",
+  "closing": "sunny, breezy, nostalgic, low fidelity texture",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients",
+  "duration": 120,
+  "bpm_range": [66, 82],
+  "keys": ["G major", "D major", "A major", "E major", "C major"],
+  "instruments": [
+    "clean electric guitar plucks, soft kick, warm bass",
+    "nylon-string guitar, light shaker, soft brushed drums",
+    "mellow guitar loop, soft percussion, upright bass",
+    "warm guitar chords, mellow pads, soft dusty drums",
+    "fingerpicked guitar, gentle bass, light cajon",
+    "dreamy guitar arpeggio, soft sub bass, shaker percussion"
+  ],
+  "moods": [
+    "beachside afternoon",
+    "sunset by the sea",
+    "coastal daydream",
+    "warm breeze at the shore",
+    "golden hour on the coast",
+    "slow tide evening"
+  ]
+}

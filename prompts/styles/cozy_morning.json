@@ -1,0 +1,23 @@
+{
+  "name": "cozy_morning",
+  "description": "暖陽晨間系：木吉他、輕柔節奏，明亮但不吵，適合白天放鬆。",
+  "backbone": "lofi hip hop, warm and cozy, soft tape saturation, instrumental, no vocals",
+  "closing": "warm, uplifting, nostalgic",
+  "negative": "no vocals, no fast tempo, no harsh synths, no distortion",
+  "duration": 120,
+  "bpm_range": [74, 88],
+  "keys": ["D major", "G major", "F major", "A major", "C major"],
+  "instruments": [
+    "mellow acoustic guitar, soft kick, rhodes chords",
+    "warm ukulele, light shaker, soft bass",
+    "gentle piano chords, brushed drums, warm bass",
+    "soft guitar fingerpicking, mellow pads, soft kick"
+  ],
+  "moods": [
+    "cozy morning coffee",
+    "sunlit window",
+    "slow weekend",
+    "gentle start of the day",
+    "spring morning breeze"
+  ]
+}

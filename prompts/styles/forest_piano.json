@@ -1,0 +1,27 @@
+{
+  "name": "forest_piano",
+  "version": 1,
+  "description": "森林黃昏鋼琴 lofi：柔和鋼琴、自然環境音，適合讀書與靜心。參考「Golden Hour Lofi Piano in the Forest」。",
+  "backbone": "lofi piano, warm tape saturation, soft vinyl crackle, ambient nature texture, mellow, instrumental",
+  "closing": "dreamy, nostalgic, peaceful, low fidelity texture",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients",
+  "duration": 120,
+  "bpm_range": [60, 76],
+  "keys": ["C major", "F major", "G major", "D minor", "A minor"],
+  "instruments": [
+    "soft felt piano, warm pads, subtle percussion",
+    "gentle piano melody, deep sub bass, soft brushes",
+    "mellow piano chords, ambient synth pad, slow drums",
+    "plucked piano notes, warm strings, soft kick",
+    "upright piano, light shaker, warm bass",
+    "slow piano notes, ambient pads, distant birdsong texture"
+  ],
+  "moods": [
+    "golden hour in the forest",
+    "sunset through the trees",
+    "quiet woodland evening",
+    "misty forest morning",
+    "peaceful nature study",
+    "dreamy autumn light"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "rnb_soul",
+  "description": "慢板 R&B / soul：電鋼琴、滑順貝斯、finger snap，柔順性感，適合深夜長片。",
+  "backbone": "lofi r&b, smooth soul, warm tape saturation, mellow, instrumental, no vocals",
+  "closing": "smooth, warm, sensual",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients",
+  "duration": 120,
+  "bpm_range": [60, 78],
+  "keys": ["D minor", "G minor", "Bb major", "Eb major", "F major", "C minor"],
+  "instruments": [
+    "rhodes chords, smooth bass, soft rimshot drums",
+    "electric piano, finger snaps, warm pads",
+    "mellow guitar licks, deep sub bass, slow drums",
+    "warm synth keys, soft claps, smooth bass",
+    "lush rhodes pads, muted plucks, laid back drums"
+  ],
+  "moods": [
+    "late night smooth",
+    "midnight slow jam",
+    "quiet soul evening",
+    "rainy evening soul",
+    "after hours chill",
+    "warm bedroom soul"
+  ]
+}

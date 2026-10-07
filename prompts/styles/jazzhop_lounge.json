@@ -1,0 +1,23 @@
+{
+  "name": "jazzhop_lounge",
+  "description": "爵士酒館系：爵士鋼琴、低音提琴、刷鼓，煙霧感深夜電台。",
+  "backbone": "lofi jazzhop, smoky lounge, warm tape hiss, instrumental, no vocals",
+  "closing": "smoky, mellow, sophisticated",
+  "negative": "no vocals, no upright brass section, no loud horns, no upbeat",
+  "duration": 120,
+  "bpm_range": [60, 74],
+  "keys": ["Eb major", "Bb major", "C minor", "F minor", "G minor"],
+  "instruments": [
+    "jazz piano voicings, upright bass, brushed drums",
+    "muted trumpet, rhodes, soft ride cymbal",
+    "double bass, lounge piano, soft snare",
+    "smoky jazz keys, walking bass, light brushes"
+  ],
+  "moods": [
+    "late night lounge",
+    "rainy jazz cafe",
+    "smoky bar at 2am",
+    "slow jazz evening",
+    "quiet after-hours club"
+  ]
+}
