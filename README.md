@@ -132,6 +132,8 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 4. 「Credentials → Create credentials → OAuth client ID」，類型選 **Desktop app**，下載 JSON。
 5. 把 JSON 放到本專案 **`.secrets/client_secret.json`**（`.secrets/` 已 gitignore），或設環境變數 `YT_CLIENT_SECRET` 指向它。
 6. 執行 `./scripts/make_episode.sh --style <style> --stage upload --episode <名稱>`（或 `lofi upload`）。首次會開瀏覽器要你登入該帳號並同意，token 快取在 `.secrets/yt_token.json`。
+   - 想先單獨完成授權（不必先有影片）：`.venv/bin/python scripts/yt_upload.py --auth-only`
+   - 想先驗證憑證/權限（不留任何影片）：`.venv/bin/python scripts/yt_upload.py --check`
 
 > ⚠️ 上傳時的 **AI 揭露（變造或合成內容）** 無法用 API 設定，請在 YouTube Studio 手動勾選（metadata 內已記 `ai_disclosure: true`）。
 > ℹ️ 每日 API 配額預設 10,000 單位，一次上傳約 1,600 單位 → 約 6 支/天；要更多需在 Console 申請提高配額。

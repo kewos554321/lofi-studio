@@ -126,14 +126,49 @@ def get_credentials(client_secret, token_path):
 
 def main():
     ap = argparse.ArgumentParser(description="上傳成片到 YouTube（上線前自動，之後手動）")
-    ap.add_argument("--episode", required=True, help="上片識別名（對應 publish/<名稱>.json）")
+    ap.add_argument("--episode", default="", help="上片識別名（對應 publish/<名稱>.json）")
     ap.add_argument("--video", default="", help="覆寫影片路徑")
     ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"],
                     help="上傳後的可見性（預設 private，之後手動公開）")
     ap.add_argument("--client-secret", default="", help="OAuth client secret JSON 路徑")
     ap.add_argument("--token", default="", help="token 快取路徑")
+    ap.add_argument("--auth-only", action="store_true", help="只做 OAuth 授權並快取 token，不上傳")
+    ap.add_argument("--check", action="store_true", help="驗證憑證/上傳權限（開一個可續傳工作階段後取消，不留影片）")
     ap.add_argument("--dry-run", action="store_true", help="只驗證與印出，不上傳")
     args = ap.parse_args()
+
+    if args.auth_only:
+        client_secret = args.client_secret or str(DEFAULT_CLIENT_SECRET)
+        token_path = args.token or str(DEFAULT_TOKEN)
+        get_credentials(client_secret, token_path)
+        print(f"✅ 授權完成，token 已快取：{token_path}")
+        print("   之後 --stage upload 不必再開瀏覽器。")
+        return
+
+    if args.check:
+        client_secret = args.client_secret or str(DEFAULT_CLIENT_SECRET)
+        token_path = args.token or str(DEFAULT_TOKEN)
+        creds = get_credentials(client_secret, token_path)
+        print("==> 驗證上傳權限（不會建立影片）")
+        from google.auth.transport.requests import AuthorizedSession
+        session = AuthorizedSession(creds)
+        url = ("https://www.googleapis.com/upload/youtube/v3/videos"
+               "?uploadType=resumable&part=snippet,status")
+        probe = {"snippet": {"title": "lofi-studio auth check", "categoryId": "10"},
+                 "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False}}
+        r = session.post(url, json=probe, headers={
+            "X-Upload-Content-Type": "video/mp4", "X-Upload-Content-Length": "0"})
+        if r.status_code not in (200, 201):
+            sys.exit(f"❌ 驗證失敗 HTTP {r.status_code}：{r.text[:400]}")
+        loc = r.headers.get("Location")
+        print(f"✅ 上傳端點可用（HTTP {r.status_code}）")
+        if loc:
+            session.delete(loc)   # 取消工作階段，不留任何影片
+            print("   已取消工作階段，頻道上不會有東西。")
+        return
+
+    if not args.episode:
+        sys.exit("需要 --episode（或 --auth-only 只授權）")
 
     rec_path, rec = load_record(args.episode)
     video = resolve_video(args.episode, rec, args.video)

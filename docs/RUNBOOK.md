@@ -306,7 +306,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 1. Google Cloud 專案 → 啟用 **YouTube Data API v3**。
 2. OAuth consent screen：External，把要上傳的帳號加進 Test users，scope 加 `.../auth/youtube.upload`。
 3. Credentials → OAuth client ID → **Desktop app** → 下載 JSON，放到 `.secrets/client_secret.json`（或設 `YT_CLIENT_SECRET`）。
-4. 首次 `--stage upload` 會開瀏覽器授權，token 快取在 `.secrets/yt_token.json`。
+4. 首次 `--stage upload` 會開瀏覽器授權，token 快取在 `.secrets/yt_token.json`（可先單獨跑 `.venv/bin/python scripts/yt_upload.py --auth-only`）。
 5. 上傳後影片為 **private**；請到 Studio 手動公開/排程、勾 **AI 揭露**、上傳縮圖、加播放清單。
 
 > 依賴：`google-api-python-client` / `google-auth-oauthlib` / `google-auth-httplib2`（已列入 `requirements.txt`，裝在 `.venv`）。
