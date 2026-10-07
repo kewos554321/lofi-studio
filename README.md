@@ -91,6 +91,36 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 
 ---
 
+## 三段式產線：音樂 → 圖片 → 影片
+
+整條產線拆成**三段**，平常一條龍跑，也能**分段單獨執行**（測試/除錯）：
+
+| 段 | 產物 | 底層工具 |
+|---|---|---|
+| 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar | `expand_style` → `batch_run` → `auto_qc` → `library` |
+| 2 圖片 | `assets/visuals/*.png` | `generate_visual`（ComfyUI + SD1.5） |
+| 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成） |
+
+```bash
+# 一條龍（三段全跑）：30 分鐘一集
+./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 20
+
+# 分段單獨跑（測試用）——每段產物就是下一段的輸入，可任意從中段接續
+./scripts/make_episode.sh --style rainy_lofi --stage music --count 20   # 只生音樂
+./scripts/make_episode.sh --style rainy_lofi --stage image --images 3   # 只生圖
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 \
+    --image assets/visuals/rl01_00001_.png \
+    --tracks assets/tracks/rainy_lofi/*/*.mp3                          # 只合成影片
+
+# 先看會做什麼（不執行）
+./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
+```
+
+- 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/` 最新一張。
+- 三段可獨立驗證：音樂段產 `assets/tracks`、圖片段產 `assets/visuals`、影片段產 `output/episodes`。
+
+---
+
 ## 目錄結構
 
 ```
@@ -116,6 +146,7 @@ lofi-studio/
 │   ├── make_visual_loop.sh    # 靜圖 -> 無縫循環動態影片（平移+顆粒+暗角）
 │   ├── render_video.sh        # ★ 視覺 + 音訊 -> 最終 mp4
 │   ├── make_long_lofi.sh      # ★ 低負載長片：短 loop + 複製（避免 CPU/GPU 過熱）
+│   ├── make_episode.sh        # ★ 三段產線 orchestrator（音樂→圖片→影片，可一條龍或分段）
 │   ├── batch_run.sh           # ★ 量產 runner（分塊 + 續傳 + log）
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
@@ -208,7 +239,8 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `make_cinemagraph.py` | `IMAGE OUT.mp4 [--duration 15] [--fps 30] [--check-loop] [--zoom .02] [--drift .004] [--temp .02] [--glow .55] [--flicker 0] [--carlight 0] [--steam 0] [--drops 0] [--dust .5] [--sway .012] [--curtain-sway 0] [--sheen .22] [--rain 0]` + 各分區 `--window/--lamp/--plant/--curtain-region/--steam-pos/--drop-region/--dust-region/--sheen-region`（強度設 0 即關；`--zoom 0 --drift 0` = 嚴格局部；完整參數見 `--help`） |
 | `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--dry-run]` |
 | `render_video.sh` | `VISUAL_LOOP AUDIO OUTPUT.mp4 [FPS=30] [CRF=20]` |
-| `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼） |
+| `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--episode NAME] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼；`--episode` 一集一包） |
+| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--dry-run]`（三段產線：音樂→圖片→影片，可一條龍或分段測試） |
 | `separate_stems.sh` | `INPUT [four\|vocals] [OUTDIR]` |
 | `download_p2_models.sh` | `[--ace\|--sd\|all]`（下載到 `~/ComfyUI/models`） |
 | `launch_comfyui.sh` | 啟動 ComfyUI（MPS + fallback） |

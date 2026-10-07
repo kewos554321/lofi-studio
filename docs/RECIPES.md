@@ -97,6 +97,13 @@ python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit
 
 ## 5. 一集（End-to-End）範本 — 直接複製
 
+> 最省事：三段一條龍交給 orchestrator（音樂→圖片→影片）
+> ```bash
+> ./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 40 --limit 16
+> # 也可分段：--stage music | image | video（詳見 RUNBOOK 6.6）
+> ```
+> 下面是想手動控制每一步時的完整版。
+
 ```bash
 STYLE=rainy_lofi
 RUN="${STYLE}-$(date +%m%d)"

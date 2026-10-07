@@ -270,6 +270,32 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 - `output/episodes/<name>/` 整包視為一支成片，`cleanup_outputs.sh --keep/--older-than` 以資料夾為單位處理；中間檔（`_loop_1080.mp4`、`_video_copy.mp4`、`_mix_raw.wav`）也會一併列入清理。
 - `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
+### 6.6 三段式產線（一條龍 / 分段測試）
+
+把「音樂 → 圖片 → 影片」包成一支 orchestrator，`--stage` 控制要跑哪一段：
+
+```bash
+# 一條龍（三段全跑）
+./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 20
+
+# 分段單獨跑（測試/接續）
+./scripts/make_episode.sh --style rainy_lofi --stage music --count 20
+./scripts/make_episode.sh --style rainy_lofi --stage image --images 3
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/rl01_00001_.png
+
+# 只印指令、不執行
+./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
+```
+
+| 段 | 指令本體 | 產物 |
+|---|---|---|
+| `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
+| `image` | `generate_visual`（ComfyUI + SD1.5） | `assets/visuals/<episode>*.png` |
+| `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
+
+- 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/` 最新圖。
+- `--count 0`（預設）＝音樂段不生成、沿用既有曲目。
+
 ---
 
 ## 7. OBS 24/7 直播

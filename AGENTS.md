@@ -24,7 +24,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
 scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用
-scripts/*.sh       # ffmpeg/ComfyUI 重流程（build_long_mix / make_long_lofi / render_video …）
+scripts/*.sh       # ffmpeg/ComfyUI 重流程（make_episode 三段產線 / build_long_mix / make_long_lofi / render_video …）
 prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（音檔 gitignore，sidecar 進版控）
@@ -45,6 +45,8 @@ lofi meta --video output/videos/x.mp4 --style cozy_morning
 lofi publish --ready
 lofi expand --style rainy_lofi --count 20 --seed 42
 lofi visual --count 3 --size 768x512
+./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 20   # 三段產線一條龍
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑影片段
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
 python3 -m unittest discover -s tests -v
