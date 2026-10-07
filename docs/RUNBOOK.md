@@ -287,6 +287,9 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 
 # 只印指令、不執行
 ./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
+
+# 小測試到「上傳前」：1 分鐘、生 2 首、1 張圖、不上傳、不整理
+./scripts/make_episode.sh --style rainy_lofi --smoke
 ```
 
 | 段 | 指令本體 | 產物 |

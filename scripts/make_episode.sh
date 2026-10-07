@@ -39,6 +39,7 @@
 #   --archive DIR                  封存目標（預設 output 同層的 archive/）
 #   --keep-visual                  封存時保留 visual_loop.mp4
 #   --no-upload / --no-cleanup     all 時略過第 4/5 段
+#   --smoke                        小測試預設：1 分鐘、生 2 首、1 張圖、不上傳、不整理（可再覆寫）
 #   --dry-run                      只印指令，不執行
 #
 # 前置：ComfyUI 需執行中（music / image 階段）；upload 需 Google 憑證（見 README）。
@@ -76,6 +77,13 @@ DRY=0
 TRACKS=()
 TRACKS_SET=0
 
+# --smoke：小測試預設（1 分鐘、生 2 首、1 張圖、低碼率、不上傳、不整理）；其餘旗標仍可覆寫
+SMOKE=0
+for _a in "$@"; do [ "$_a" = "--smoke" ] && SMOKE=1; done
+if [ "$SMOKE" = 1 ]; then
+  MIN=1; COUNT=2; IMAGES=1; VBR=2; XFADE=4; NO_UPLOAD=1; NO_CLEANUP=1
+fi
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --stage)   STAGE="$2"; shift 2;;
@@ -103,6 +111,7 @@ while [ $# -gt 0 ]; do
     --keep-visual) KEEP_VISUAL=1; shift;;
     --no-upload) NO_UPLOAD=1; shift;;
     --no-cleanup) NO_CLEANUP=1; shift;;
+    --smoke)   shift;;
     --dry-run) DRY=1; shift;;
     -h|--help) awk 'NR==1{next} /^[^#]/{exit} {print}' "$0"; exit 0;;
     *) echo "未知參數: $1（用 --help）" >&2; exit 1;;
@@ -110,7 +119,9 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$STYLE" ] || { echo "錯誤: 需要 --style（見 prompts/styles/）" >&2; exit 1; }
-[ -z "$EPISODE" ] && EPISODE="${STYLE}-$(date +%m%d-%H%M)"
+if [ -z "$EPISODE" ]; then
+  if [ "$SMOKE" = 1 ]; then EPISODE="${STYLE}-smoke"; else EPISODE="${STYLE}-$(date +%m%d-%H%M)"; fi
+fi
 [ -z "$RUN_ID" ] && RUN_ID="$EPISODE"
 
 PY="$ROOT/.venv/bin/python"

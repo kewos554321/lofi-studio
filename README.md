@@ -116,6 +116,9 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 
 # 先看會做什麼（不執行）
 ./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
+
+# 小測試（跑到「上傳前」為止）：1 分鐘、生 2 首、1 張圖、不上傳、不整理
+./scripts/make_episode.sh --style rainy_lofi --smoke
 ```
 
 - 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/` 最新一張。
@@ -261,7 +264,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--dry-run]` |
 | `render_video.sh` | `VISUAL_LOOP AUDIO OUTPUT.mp4 [FPS=30] [CRF=20]` |
 | `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--episode NAME] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼；`--episode` 一集一包） |
-| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video\|upload\|cleanup] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--privacy private] [--archive DIR] [--no-upload] [--no-cleanup] [--dry-run]`（五段產線：音樂→圖片→影片→上傳→整理，可一條龍或分段測試） |
+| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video\|upload\|cleanup] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--privacy private] [--archive DIR] [--no-upload] [--no-cleanup] [--smoke] [--dry-run]`（五段產線：音樂→圖片→影片→上傳→整理，可一條龍或分段測試；`--smoke` 小測試到上傳前） |
 | `archive_episode.sh` | `--episode NAME [--dest DIR] [--keep-visual] [--dry-run]`（封存到外接 archive/ 並清中間檔） |
 | `yt_upload.py` | `--episode NAME [--privacy private\|unlisted\|public] [--video PATH] [--dry-run]`（上傳到 YouTube；需 Google 憑證，見「自動上傳設定」） |
 | `separate_stems.sh` | `INPUT [four\|vocals] [OUTDIR]` |
