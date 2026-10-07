@@ -24,6 +24,7 @@ from lofi import meta as mm
 ROOT = cat.ROOT
 PUBLISH_DIR = ROOT / "publish"
 VIDEOS_DIR = ROOT / "output" / "videos"
+EPISODES_DIR = ROOT / "output" / "episodes"
 LEGACY = {"demo_lofi"}  # 測試片不算正式成片
 
 ICON = {"pending": "🟢", "scheduled": "🟡", "uploaded": "✅"}
@@ -41,13 +42,24 @@ def load_records():
 
 
 def all_videos():
-    if not VIDEOS_DIR.exists():
-        return {}
+    """回傳 {識別名: 影片路徑}。
+
+    - 舊佈局：output/videos/<name>.mp4，識別名 = 檔名
+    - 一集一包：output/episodes/<name>/video.mp4，識別名 = 資料夾名
+    """
     out = {}
-    for p in sorted(VIDEOS_DIR.glob("*.mp4")):
-        if p.stem in LEGACY:
-            continue
-        out[p.stem] = p
+    if VIDEOS_DIR.exists():
+        for p in sorted(VIDEOS_DIR.glob("*.mp4")):
+            if p.stem in LEGACY:
+                continue
+            out[p.stem] = p
+    if EPISODES_DIR.exists():
+        for d in sorted(EPISODES_DIR.iterdir()):
+            if not d.is_dir() or d.name in LEGACY:
+                continue
+            v = d / "video.mp4"
+            if v.exists():
+                out[d.name] = v
     return out
 
 

@@ -30,6 +30,7 @@
 #   --keep-temp          保留中間檔（預設成功後自動刪除，省空間）
 #   --vbitrate N         最終影片位元率 Mbps（預設 9；lofi 用 4~5 就很夠，檔案小一半）
 #   --out PATH           輸出檔，預設 output/videos/lofi_<minutes>min.mp4
+#   --episode NAME       一集一包：全部輸出放 output/episodes/<NAME>/（video.mp4 + mix.wav + visual_loop.mp4）
 #   --style NAME         渲染後自動產生上片資訊（publish/；style 見 prompts/styles/）
 #   --no-meta            不要產生上片資訊
 #
@@ -55,6 +56,7 @@ CG_ARGS=""
 FADE=1
 OUT=""
 STYLE=""
+EPISODE=""
 META=1
 THREADS="${THREADS:-0}"
 NICE="${NICE:-10}"
@@ -85,6 +87,7 @@ while [ $# -gt 0 ]; do
     --keep-temp) KEEP=1; shift;;
     --vbitrate) VBR="$2"; shift 2;;
     --out)     OUT="$2"; shift 2;;
+    --episode) EPISODE="$2"; shift 2;;
     --style)   STYLE="$2"; shift 2;;
     --no-meta) META=0; shift;;
     --tracks)  shift; TRACKS=(); while [ $# -gt 0 ] && [ "${1:0:2}" != "--" ]; do TRACKS+=("$1"); shift; done;;
@@ -94,7 +97,29 @@ while [ $# -gt 0 ]; do
 done
 
 TOTAL=$((MIN * 60))
-[ -z "$OUT" ] && OUT="output/videos/lofi_${MIN}min.mp4"
+
+# ---------- 輸出佈局 ----------
+# --episode NAME：一集一包，全部放 output/episodes/<NAME>/（好備份、好上片、好清理）
+# 未指定：維持舊行為（output/videos + output/mixes）
+if [ -n "$EPISODE" ]; then
+  WORK="output/episodes/$EPISODE"
+  mkdir -p "$WORK"
+  [ -z "$OUT" ] && OUT="$WORK/video.mp4"
+  CINE_LOOP="$WORK/visual_loop.mp4"
+  LOOP_1080="$WORK/_loop_1080.mp4"
+  MIX_RAW="$WORK/_mix_raw.wav"
+  MIX_FINAL="$WORK/mix.wav"
+  VID_COPY="$WORK/_video_copy.mp4"
+  LIST="$WORK/_loop_list.txt"
+else
+  [ -z "$OUT" ] && OUT="output/videos/lofi_${MIN}min.mp4"
+  CINE_LOOP="output/lofi_loop.mp4"
+  LOOP_1080="output/lofi_loop_1080.mp4"
+  MIX_RAW="output/mixes/lofi_long_raw.wav"
+  MIX_FINAL="output/mixes/lofi_long_${TOTAL}.wav"
+  VID_COPY="output/lofi_video_${TOTAL}.mp4"
+  LIST="output/_loop_list.txt"
+fi
 
 # 用 nice 包裝（nice -n 0 也合法，故陣列永遠非空，避免 bash3.2 + set -u 的空陣列問題）
 PY="$ROOT/.venv/bin/python"
@@ -137,7 +162,7 @@ echo "=================================================="
 "${NICEP[@]}" true 2>/dev/null || true
 pmset -g therm 2>/dev/null | sed 's/^/  /' || true
 
-mkdir -p output/videos output/mixes
+mkdir -p "$(dirname "$OUT")" "$(dirname "$MIX_FINAL")"
 
 # ---------- 階段 A：取得場景圖 ----------
 echo
@@ -164,56 +189,60 @@ echo "    冷卻 10s…"; sleep 10
 echo
 echo "==> [B] 產生 ${LOOP}s 無縫 loop @ ${FPS}fps"
 # shellcheck disable=SC2086
-"${NICEP[@]}" "$PY" scripts/make_cinemagraph.py "$IMAGE" output/lofi_loop.mp4 \
+"${NICEP[@]}" "$PY" scripts/make_cinemagraph.py "$IMAGE" "$CINE_LOOP" \
   --duration "$LOOP" --fps "$FPS" $CG_ARGS
 
 echo "    升到 1080p / 16:9（硬體編碼）…"
-"${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i output/lofi_loop.mp4 \
+"${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i "$CINE_LOOP" \
   -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" \
-  -c:v h264_videotoolbox -b:v 9M -pix_fmt yuv420p output/lofi_loop_1080.mp4
+  -c:v h264_videotoolbox -b:v 9M -pix_fmt yuv420p "$LOOP_1080"
 echo "    冷卻 8s…"; sleep 8
 
 # ---------- 階段 C：10 分鐘音訊（CPU 極輕）----------
 echo
 echo "==> [C] 音樂：交叉淡入 ${#TRACKS[@]} 首（xfade ${XF}s）"
-./scripts/build_long_mix.sh output/mixes/lofi_long_raw.wav "$XF" "${TRACKS[@]}"
+./scripts/build_long_mix.sh "$MIX_RAW" "$XF" "${TRACKS[@]}"
 echo "    裁成 ${TOTAL}s 並加頭尾 2s 淡入淡出…"
 AF="afade=t=in:d=2,afade=t=out:st=$((TOTAL-2)):d=2"
-"${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i output/mixes/lofi_long_raw.wav \
-  -threads "$THREADS" -af "$AF" -t "$TOTAL" -c:a pcm_s24le "output/mixes/lofi_long_${TOTAL}.wav"
+"${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i "$MIX_RAW" \
+  -threads "$THREADS" -af "$AF" -t "$TOTAL" -c:a pcm_s24le "$MIX_FINAL"
 echo "    冷卻 5s…"; sleep 5
 
 # ---------- 階段 D：合成 10 分鐘母帶（複製，零重編碼）----------
 echo
 echo "==> [D] 複製 loop 成 ${MIN} 分鐘（concat + copy，秒級、不重編碼）"
-LIST="output/_loop_list.txt"
 : > "$LIST"
 for _ in $(seq 1 $((TOTAL / LOOP))); do
-  printf "file '%s/output/lofi_loop_1080.mp4'\n" "$ROOT" >> "$LIST"
+  printf "file '%s/%s'\n" "$ROOT" "$LOOP_1080" >> "$LIST"
 done
 "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i "$LIST" \
-  -threads "$THREADS" -c copy -t "$TOTAL" "output/lofi_video_${TOTAL}.mp4"
+  -threads "$THREADS" -c copy -t "$TOTAL" "$VID_COPY"
 rm -f "$LIST"
 
 echo "    最後封裝（只編音訊；影像 copy 或硬體淡化）…"
 if [ "$FADE" = 1 ]; then
   "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y \
-    -i "output/lofi_video_${TOTAL}.mp4" -i "output/mixes/lofi_long_${TOTAL}.wav" \
+    -i "$VID_COPY" -i "$MIX_FINAL" \
     -map 0:v:0 -map 1:a:0 \
     -threads "$THREADS" -vf "fade=t=in:st=0:d=2,fade=t=out:st=$((TOTAL-2)):d=2" \
     -c:v h264_videotoolbox -b:v "${VBR}M" -pix_fmt yuv420p \
     -c:a aac -b:a 192k -ar 44100 -t "$TOTAL" -movflags +faststart "$OUT"
 else
   "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y \
-    -i "output/lofi_video_${TOTAL}.mp4" -i "output/mixes/lofi_long_${TOTAL}.wav" \
+    -i "$VID_COPY" -i "$MIX_FINAL" \
     -map 0:v:0 -map 1:a:0 \
     -c:v copy -c:a aac -b:a 192k -ar 44100 -t "$TOTAL" -movflags +faststart "$OUT"
 fi
 
 # ---------- 清中間檔（預設）----------
 if [ "$KEEP" = 0 ]; then
-  rm -f "output/lofi_video_${TOTAL}.mp4" output/mixes/lofi_long_raw.wav "output/mixes/lofi_long_${TOTAL}.wav"
-  echo "   （已清除中間檔；加 --keep-temp 可保留）"
+  if [ -n "$EPISODE" ]; then
+    rm -f "$LOOP_1080" "$VID_COPY" "$MIX_RAW" "$LIST"
+    echo "   （保留 video.mp4 / mix.wav / visual_loop.mp4；其餘中間檔已清）"
+  else
+    rm -f "$VID_COPY" "$MIX_RAW" "$MIX_FINAL" "$CINE_LOOP" "$LOOP_1080" "$LIST"
+    echo "   （已清除中間檔；加 --keep-temp 可保留）"
+  fi
 fi
 
 # ---------- 回報 ----------
@@ -226,8 +255,10 @@ awk -v d="$DUR" -v r="$RES" -v s="$SIZE" 'BEGIN{printf "   %s  %d分%02d秒  %s\
 echo
 # ---------- 上片資訊（YouTube title/description/chapters/tags）----------
 if [ "$META" = 1 ] && [ -n "$STYLE" ]; then
-  echo "==> 產生上片資訊（style=$STYLE）…"
-  "${NICEP[@]}" "$PY" scripts/make_meta.py --video "$OUT" --style "$STYLE" \
+  echo "==> 產生上片資訊（style=${STYLE}）…"
+  NAME_ARG=()
+  [ -n "$EPISODE" ] && NAME_ARG=(--name "$EPISODE")
+  "${NICEP[@]}" "$PY" scripts/make_meta.py --video "$OUT" --style "$STYLE" "${NAME_ARG[@]}" \
       --xfade "$XF" --tracks "${TRACKS[@]}" || echo "   （上片資訊產生失敗，可稍後手動跑 make_meta.py）"
   echo
 fi

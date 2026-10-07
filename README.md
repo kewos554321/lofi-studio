@@ -104,23 +104,23 @@ lofi-studio/
 │   ├── backfill.py            # 回填既有音檔
 │   ├── meta.py                # YouTube 上片資訊
 │   ├── publish.py             # 上片佇列
-│   └── library.py             # SQLite 圖書館 + 自動標籤
+│   ├── library.py             # SQLite 圖書館 + 自動標籤
+│   ├── expand.py              # 用風格骨架展開同風格曲目清單（CSV）
+│   ├── visual.py              # 用 ComfyUI + SD1.5 生 lofi 場景圖
+│   └── cinemagraph.py         # 靜圖 -> 局部微動無縫循環（需 numpy）
 ├── scripts/                   # bash 管線 + Python 相容 shim（呼叫 src/lofi）
 │   ├── check_env.sh           # 環境檢查
 │   ├── setup_python_env.sh    # 建立 .venv 並裝 demucs
 │   ├── make_demo_tracks.sh    # 產生測試用示範音檔/圖片
 │   ├── build_long_mix.sh      # ★ 交叉淡入 + -14 LUFS 正規化
 │   ├── make_visual_loop.sh    # 靜圖 -> 無縫循環動態影片（平移+顆粒+暗角）
-│   ├── make_cinemagraph.py    # ★ 靜圖 -> 局部微動無縫循環（Cinemagraph，零新依賴）
-│   ├── generate_visual.py     # 用 ComfyUI + SD1.5 生 lofi 場景圖（--ckpt 可換日系模型）
 │   ├── render_video.sh        # ★ 視覺 + 音訊 -> 最終 mp4
 │   ├── make_long_lofi.sh      # ★ 低負載長片：短 loop + 複製（避免 CPU/GPU 過熱）
 │   ├── batch_run.sh           # ★ 量產 runner（分塊 + 續傳 + log）
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
-│   ├── expand_style.py        # ★ 用風格骨架展開同風格曲目清單（CSV）
-│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py  # 相容 shim
+│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / make_cinemagraph.py  # 相容 shim（實作在 src/lofi）
 ├── tests/                     # python3 -m unittest discover -s tests -v
 ├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
@@ -139,8 +139,9 @@ lofi-studio/
 ├── publish/                   # 上片資訊（make_meta.py 產出：title/描述/章節/狀態）
 ├── logs/                      # batch runner 的 log（內接，不進版控）
 ├── output/                    # symlink → 外接碟
+│   ├── videos/                # 最終影片（舊佈局）
+│   ├── episodes/<name>/       # ★ 一集一包：video.mp4 + mix.wav + visual_loop.mp4
 │   ├── mixes/                 # 長片音訊
-│   ├── videos/                # 最終影片
 │   └── stems/                 # Demucs 輸出
 └── models/                    # ACE-Step 權重放置說明
 ```
@@ -156,6 +157,9 @@ lofi library query --tag style:rainy_lofi --status keep
 lofi meta --video output/videos/x.mp4 --style cozy_morning
 lofi publish --ready
 lofi generate --csv prompts/generated/x.csv --run-id b01
+lofi expand --style rainy_lofi --count 20 --seed 42
+lofi visual --count 3 --size 768x512
+lofi cinemagraph assets/visuals/scene.png output/visual_loop.mp4   # 需 numpy（.venv）
 ```
 
 （可選）安裝成指令：`pip install -e .`。未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接用 `scripts/*.py`。
@@ -446,8 +450,15 @@ python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.
 
 # 想更保守：限制執行緒、提高 nice
 THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png
+
+# 一集一包（推薦）：全輸出集中在 output/episodes/<名稱>/，好備份、好上片、好清理
+./scripts/make_long_lofi.sh --image assets/visuals/scene.png \
+    --minutes 60 --episode rainy-01 --style rainy_lofi
+# → output/episodes/rainy-01/{video.mp4, mix.wav, visual_loop.mp4}
+#   並產生 publish/rainy-01.json（識別名即 episode 名稱）
 ```
 
+- `--episode NAME` 會把中間檔與成品都收進 `output/episodes/NAME/`（只留 `video.mp4`、`mix.wav`、`visual_loop.mp4`）。
 - `--loop 20` 必須整除總長（600 / 20 = 30 次）。
 - 成功後自動刪中間檔（`--keep-temp` 可保留）；這次實測省下約 1GB。
 - 其他選項：`--tracks ...`、`--xfade 8`、`--cg-args "--steam 1.2 --carlight 0.5 ..."`、`--no-video-fade`（最省電）。
@@ -502,7 +513,8 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 ./scripts/cleanup_outputs.sh --archive /Volumes/WJ_SATA/lofi-studio/output/videos --apply
 ```
 
-- 會一併清中間殘留檔（`lofi_loop*`、`lofi_video_*`、`*_raw.wav`、`_loop_list.txt`；可重生）。
+- 會一併清中間殘留檔（`lofi_loop*`、`lofi_video_*`、`*_raw.wav`、`_loop_list.txt`，以及 episode 內的 `_loop_1080.mp4`/`_video_copy.mp4`/`_mix_raw.wav`；可重生）。
+- `output/episodes/<name>/` 整包視為一支成片：`--keep` / `--older-than` 以**資料夾為單位**保留或清除。
 - `make_long_lofi.sh` 開頭有**空間 preflight**：可用不足會直接中止（`SKIP_DISK_CHECK=1` 可略過）。
 - 省空間小技巧：`make_long_lofi.sh --vbitrate 5`（影片約砍半）、`batch_generate.py --clean-raw`（刪原始音檔）。
 

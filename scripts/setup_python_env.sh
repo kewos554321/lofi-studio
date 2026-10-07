@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 PY="${PYTHON:-python3.11}"
 
-command -v "$PY" >/dev/null 2>&1 || { echo "錯誤: 找不到 $PY，請先 brew install python@3.11" >&2; exit 1; }
+command -v "$PY" >/dev/null 2>&1 || { echo "錯誤: 找不到 ${PY}，請先 brew install python@3.11" >&2; exit 1; }
 
 if [ ! -d "$ROOT/.venv" ]; then
   echo "==> 建立 venv"

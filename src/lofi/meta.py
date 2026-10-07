@@ -251,6 +251,7 @@ def build_description(cfg, duration, chapters):
 def main():
     ap = argparse.ArgumentParser(description="產生 YouTube 上片資訊")
     ap.add_argument("--video", required=True, help="成片路徑（output/videos/xxx.mp4）")
+    ap.add_argument("--name", default="", help="上片資訊識別名（預設用影片檔名）")
     ap.add_argument("--style", default="", help="風格名（prompts/styles/<style>.json）")
     ap.add_argument("--tracks", nargs="*", default=[], help="混音用到的音軌（依序）")
     ap.add_argument("--xfade", type=float, default=8.0, help="crossfade 秒數（預設 8）")
@@ -262,7 +263,7 @@ def main():
     video = Path(args.video)
     if not video.exists():
         sys.exit(f"找不到影片 {video}")
-    stem = video.stem
+    stem = args.name or video.stem
     duration = ffprobe_duration(video)
 
     cfg = load_yt_config(args.style)

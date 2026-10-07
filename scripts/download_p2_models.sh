@@ -16,7 +16,7 @@ set -uo pipefail
 COMFY="${COMFYUI_DIR:-$HOME/ComfyUI}"
 
 if [ ! -d "$COMFY" ]; then
-  echo "錯誤: 找不到 ComfyUI 於 $COMFY（可用 COMFYUI_DIR 指定）" >&2
+  echo "錯誤: 找不到 ComfyUI 於 ${COMFY}（可用 COMFYUI_DIR 指定）" >&2
   exit 1
 fi
 
@@ -70,7 +70,7 @@ download_one() {
   if [ "$want" -gt 0 ]; then
     have=$(stat -f%z "$dest" 2>/dev/null || echo 0)
     if [ "$have" -ne "$want" ]; then
-      echo "  ⚠️  大小不符: 預期 $want，實際 $have（可重跑續傳）" >&2
+      echo "  ⚠️  大小不符: 預期 ${want}，實際 ${have}（可重跑續傳）" >&2
       return 1
     fi
   fi

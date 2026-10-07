@@ -5,8 +5,9 @@
 #
 # 會處理：
 #   1) 中間殘留檔（安全，可重生）：output/lofi_loop*.mp4、output/lofi_video_*.mp4、
-#      output/mixes/*_raw.wav、output/mixes/lofi_long_*.wav、output/_loop_list.txt
-#   2) 舊成片：output/videos/*.mp4（用 --keep / --older-than 決定留哪些）
+#      output/mixes/*_raw.wav、output/mixes/lofi_long_*.wav、output/_loop_list.txt，
+#      以及一集一包的中間檔 output/episodes/*/_loop_1080.mp4、_video_copy.mp4、_mix_raw.wav、_loop_list.txt
+#   2) 舊成片：output/videos/*.mp4 與 output/episodes/<name>/（整包視為一支）
 #   3) 可選：--stems 清 output/stems
 #
 # 用法:
@@ -46,35 +47,48 @@ done
 # ---------- 收集 1) 中間殘留檔 ----------
 LEFTOVERS=()
 while IFS= read -r -d '' f; do LEFTOVERS+=("$f"); done < <(
-  find -H output -maxdepth 2 -type f \
+  find -H output -maxdepth 3 -type f \
     \( -name 'lofi_loop*.mp4' -o -name 'lofi_video_*.mp4' \
-       -o -name '*_raw.wav' -o -name 'lofi_long_*.wav' -o -name '_loop_list.txt' \) \
+       -o -name '*_raw.wav' -o -name 'lofi_long_*.wav' -o -name '_loop_list.txt' \
+       -o -name '_loop_1080.mp4' -o -name '_video_copy.mp4' \) \
     -print0 2>/dev/null
 )
 
-# ---------- 收集 2) 舊成片 ----------
+# ---------- 收集 2) 舊成片（檔案 + 一集一包資料夾，統一依 mtime 排序）----------
+# 每筆輸出: <mtime>\t<F|D>\t<path>
+collect_units() {
+  if [ -d output/videos ]; then
+    find -H output/videos -maxdepth 1 -type f -name '*.mp4' -exec stat -f '%m %N' {} \; 2>/dev/null \
+      | awk '{m=$1; $1=""; sub(/^ /,""); print m"\tF\t"$0}'
+  fi
+  if [ -d output/episodes ]; then
+    find -H output/episodes -maxdepth 1 -mindepth 1 -type d -exec stat -f '%m %N' {} \; 2>/dev/null \
+      | awk '{m=$1; $1=""; sub(/^ /,""); print m"\tD\t"$0}'
+  fi
+}
+
+UNITS=()
+while IFS= read -r line; do [ -n "$line" ] && UNITS+=("$line"); done < <(
+  collect_units | sort -t "$(printf '\t')" -rn -k1
+)
+
 VIDEOS_SEL=()
-if [ -d output/videos ]; then
-  ALL=()
-  # 依 mtime 由新到舊排序（檔名無空白，安全）
-  while IFS= read -r f; do
-    [ -n "$f" ] && ALL+=("$f")
-  done < <(find -H output/videos -maxdepth 1 -type f -name '*.mp4' -exec stat -f '%m %N' {} \; 2>/dev/null \
-            | sort -rn | cut -d' ' -f2-)
-  NOW=$(date +%s)
-  for ((i=0; i<${#ALL[@]}; i++)); do
-    f="${ALL[$i]}"
-    # 保留最新 KEEP 支
-    if [ "$i" -lt "$KEEP" ]; then continue; fi
-    # 若指定天數，只刪夠舊的
-    if [ -n "$OLDER" ]; then
-      MT=$(stat -f %m "$f" 2>/dev/null || echo "$NOW")
-      AGE=$(( (NOW - MT) / 86400 ))
-      [ "$AGE" -lt "$OLDER" ] && continue
-    fi
-    VIDEOS_SEL+=("$f")
-  done
-fi
+EPISODES_SEL=()
+NOW=$(date +%s)
+for ((i=0; i<${#UNITS[@]}; i++)); do
+  IFS="$(printf '\t')" read -r MT TYPE PATH_ <<< "${UNITS[$i]}"
+  # 保留最新 KEEP 支
+  [ "$i" -lt "$KEEP" ] && continue
+  # 若指定天數，只刪夠舊的
+  if [ -n "$OLDER" ]; then
+    AGE=$(( (NOW - MT) / 86400 ))
+    [ "$AGE" -lt "$OLDER" ] && continue
+  fi
+  case "$TYPE" in
+    F) VIDEOS_SEL+=("$PATH_");;
+    D) EPISODES_SEL+=("$PATH_");;
+  esac
+done
 
 # ---------- 收集 3) stems ----------
 STEMS_SEL=()
@@ -85,9 +99,12 @@ if [ "$DO_STEMS" = 1 ] && [ -d output/stems ]; then
 fi
 
 TARGETS=()
-[ "${#LEFTOVERS[@]}" -gt 0 ] && TARGETS+=("${LEFTOVERS[@]}")
-[ "${#VIDEOS_SEL[@]}" -gt 0 ] && TARGETS+=("${VIDEOS_SEL[@]}")
-[ "${#STEMS_SEL[@]}" -gt 0 ] && TARGETS+=("${STEMS_SEL[@]}")
+FILES=()
+DIRS=()
+[ "${#LEFTOVERS[@]}" -gt 0 ] && { TARGETS+=("${LEFTOVERS[@]}"); FILES+=("${LEFTOVERS[@]}"); }
+[ "${#VIDEOS_SEL[@]}" -gt 0 ] && { TARGETS+=("${VIDEOS_SEL[@]}"); FILES+=("${VIDEOS_SEL[@]}"); }
+[ "${#STEMS_SEL[@]}" -gt 0 ] && { TARGETS+=("${STEMS_SEL[@]}"); FILES+=("${STEMS_SEL[@]}"); }
+[ "${#EPISODES_SEL[@]}" -gt 0 ] && { TARGETS+=("${EPISODES_SEL[@]}"); DIRS+=("${EPISODES_SEL[@]}"); }
 
 # ---------- 報告 ----------
 if [ "${#TARGETS[@]}" -eq 0 ]; then
@@ -109,6 +126,8 @@ echo "【中間殘留檔】${#LEFTOVERS[@]} 個"
 for f in "${LEFTOVERS[@]+"${LEFTOVERS[@]}"}"; do printf "  %-8s %s\n" "$(du -h "$f"|cut -f1)" "$f"; done
 echo "【舊成片】${#VIDEOS_SEL[@]} 個（保留最新 ${KEEP} 支${OLDER:+，且僅刪 ${OLDER} 天前}）"
 for f in "${VIDEOS_SEL[@]+"${VIDEOS_SEL[@]}"}"; do printf "  %-8s %s\n" "$(du -h "$f"|cut -f1)" "$f"; done
+echo "【整包 episode】${#EPISODES_SEL[@]} 包（同上保留規則）"
+for d in "${EPISODES_SEL[@]+"${EPISODES_SEL[@]}"}"; do printf "  %-8s %s/\n" "$(du -sh "$d"|cut -f1)" "$d"; done
 if [ "$DO_STEMS" = 1 ]; then
   echo "【stems】${#STEMS_SEL[@]} 個"
   for f in "${STEMS_SEL[@]+"${STEMS_SEL[@]}"}"; do printf "  %-8s %s\n" "$(du -h "$f"|cut -f1)" "$f"; done
@@ -118,11 +137,13 @@ if [ "$APPLY" = 1 ]; then
   echo
   if [ -n "$ARCHIVE" ]; then
     mkdir -p "$ARCHIVE"
-    for f in "${TARGETS[@]}"; do mv -f "$f" "$ARCHIVE/"; done
-    echo "✅ 已搬移 ${#TARGETS[@]} 個檔案到 $ARCHIVE"
+    for f in "${FILES[@]+"${FILES[@]}"}"; do mv -f "$f" "$ARCHIVE/"; done
+    for d in "${DIRS[@]+"${DIRS[@]}"}"; do mv -f "$d" "$ARCHIVE/"; done
+    echo "✅ 已搬移 ${#TARGETS[@]} 個項目到 $ARCHIVE"
   else
-    for f in "${TARGETS[@]}"; do rm -f "$f"; done
-    echo "✅ 已刪除 ${#TARGETS[@]} 個檔案"
+    for f in "${FILES[@]+"${FILES[@]}"}"; do rm -f "$f"; done
+    for d in "${DIRS[@]+"${DIRS[@]}"}"; do rm -rf "$d"; done
+    echo "✅ 已刪除 ${#TARGETS[@]} 個項目"
   fi
   echo "   內接可用空間: $(df -h /System/Volumes/Data | awk 'NR==2{print $4}')"
 else

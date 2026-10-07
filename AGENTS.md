@@ -19,7 +19,10 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   meta.py          # YouTube title/描述/章節/tags
   publish.py       # 上片佇列
   library.py       # SQLite 圖書館(catalog/library.db) + 自動標籤
-  cli.py           # 單一入口 `lofi <command>`
+  expand.py        # 風格骨架 -> 曲目清單 CSV
+  visual.py        # ComfyUI + SD1.5 生場景圖
+  cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
+  cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
 scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用
 scripts/*.sh       # ffmpeg/ComfyUI 重流程（build_long_mix / make_long_lofi / render_video …）
 prompts/styles/     # 音樂風格骨架（生成用）
@@ -27,7 +30,7 @@ prompts/youtube/    # 上片 metadata 範本（對應同名 style）
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（音檔 gitignore，sidecar 進版控）
 catalog/            # tracks.jsonl + index.csv（library.db 為衍生物，gitignore）
 publish/            # 上片資訊 + 狀態
-output/             # symlink → 外接碟（74xxxGB）；log 例外，放內接 logs/
+output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）
 tests/              # python3 -m unittest discover -s tests -v
 docs/RUNBOOK.md     # 操作手冊
 ```
@@ -40,6 +43,9 @@ lofi qc --all --index
 lofi library build && lofi library summary
 lofi meta --video output/videos/x.mp4 --style cozy_morning
 lofi publish --ready
+lofi expand --style rainy_lofi --count 20 --seed 42
+lofi visual --count 3 --size 768x512
+./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
 python3 -m unittest discover -s tests -v
 ```
@@ -59,7 +65,7 @@ python3 -m unittest discover -s tests -v
 - `output/` 是**外接碟 symlink**；USB/ExFAT 可能掉線 → 寫影片/清理前先 `./scripts/disk_report.sh`。
   生成音檔寫內接 `assets/tracks`，log 寫內接 `logs/`，掉線不受影響。
 - ComfyUI 在 `~/ComfyUI`，需執行中（`127.0.0.1:8188`）才能生成。
-- 系統 `python3` 無 numpy；`src/lofi` 的程式**只用標準庫**，勿引入需 numpy/librosa 的相依（除非另開 venv 並說明）。
+- 系統 `python3` 無 numpy；`src/lofi` 的程式**幾乎只用標準庫**（`cinemagraph.py` 例外，需 numpy，用 `.venv`），勿引入需 numpy/librosa 的相依（除非另開 venv 並說明）。
 
 ## 提交
 

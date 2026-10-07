@@ -242,10 +242,15 @@ python3 scripts/make_cinemagraph.py --help
 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png   # 沿用既有圖，完全不開 ComfyUI
 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png --vbitrate 5      # 檔案更小
 THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png # 更保守
+
+# 一集一包（推薦）：輸出集中在 output/episodes/<名稱>/，並產生 publish/<名稱>.json
+./scripts/make_long_lofi.sh --image assets/visuals/scene.png \
+    --minutes 60 --episode rainy-01 --style rainy_lofi
 ```
 
 流程：生圖(可選) → 20s 無縫 loop → 1080p 硬體升頻 → 6 首 crossfade(-14 LUFS) 裁到 N 分 → concat copy → 封裝。
 
+- `--episode NAME` → `output/episodes/NAME/{video.mp4, mix.wav, visual_loop.mp4}`（只留這三個；其餘中間檔自動清）。`upload_status.py` 會把每個 episode 資料夾視為一支成片。
 - `--loop` 必須整除總長（600/20=30、3600/20=180）。
 - 成功後自動刪中間檔（`--keep-temp` 可保留），一次約省 1GB。
 - 重步驟之間會 sleep 降溫；`--no-video-fade` 可再省一次重編碼。
@@ -262,6 +267,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 ```
 
 - 遷移與 ExFAT 注意事項詳見 `README.md` 的「容量管理與外接碟」。
+- `output/episodes/<name>/` 整包視為一支成片，`cleanup_outputs.sh --keep/--older-than` 以資料夾為單位處理；中間檔（`_loop_1080.mp4`、`_video_copy.mp4`、`_mix_raw.wav`）也會一併列入清理。
 - `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
 ---
