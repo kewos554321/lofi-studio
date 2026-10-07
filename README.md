@@ -1,11 +1,93 @@
 # lofi-studio
 
-本地 AI Lofi 製作工作流（Mac M4 / 16GB）。目標：用開源模型穩定產出 1 小時以上的 lofi 長片，並可延伸成 24/7 直播。
+本機（Mac M4 / 16GB）AI lofi 產線：**ComfyUI + ACE-Step 生音樂 → 品檢/目錄 → 拼長片 + 視覺 → 自動產生 YouTube 上片資訊**。目標是穩定產出 1 小時以上長片，並可延伸 24/7 直播。
 
-本專案把流程拆成兩層：
+**目前狀態**
 
-- **P1 自動化管線（已完成）**：音軌交叉淡入 → 長片正規化 → 視覺循環 → 合成影片 → Demucs 分軌。全部可用 CLI 跑。
-- **P2 生成（待安裝）**：ComfyUI + ACE-Step 產生音樂；AI 生圖做視覺。需要 GUI 與數 GB 下載。
+- ✅ 音樂目錄 / 自動品檢 / 回填（P0–P1）
+- ✅ 量產工具：唯一命名＋續傳、批次 runner、SQLite 圖書館＋自動標籤
+- ✅ 上片資訊（title/描述/章節/tags）與上片佇列
+- ✅ 程式重構為 `src/lofi` 套件 + `lofi` CLI（舊 `scripts/*.py` 仍可用）
+- ✅ 長片拼接、視覺循環、影片合成、容量管理
+- ⏳ 24/7 直播（OBS 手動設定）
+
+## 前置需求
+
+| 需要 | 說明 |
+|---|---|
+| ffmpeg / ffprobe | `brew install ffmpeg`（P1 全靠它） |
+| ComfyUI + ACE-Step 1.5 | 生音樂用；見下方「P2：生成音樂」 |
+| Python 3.9+ | 系統 `python3` 即可（套件只用標準庫）；Demucs 走 `.venv` |
+| 外接碟（建議） | `output/` 指到外接；見「容量管理與外接碟」 |
+
+安裝成 `lofi` 指令（可選）：`pip install -e .`
+未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接 `python3 scripts/<指令>.py`。
+
+## 使用流程（端到端）
+
+**Step 0 — 啟動 ComfyUI（生音樂 / 生圖才需要）**
+```bash
+./scripts/launch_comfyui.sh          # 瀏覽器開 http://127.0.0.1:8188
+```
+
+**Step 1 — 選風格、展開曲目清單**
+```bash
+python3 scripts/expand_style.py --style rainy_lofi --count 20 --seed 42
+#   → prompts/generated/rainy_lofi.csv
+```
+可用風格見 `prompts/styles/`（含參考頻道風格 `dusk_jazz` / `coastal_guitar` / `forest_piano`）。
+
+**Step 2 — 生成音樂**
+```bash
+# 少量／試水溫
+python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
+
+# 大量（例如 1000 首）：分批、自動續傳、散熱
+./scripts/batch_run.sh --csv prompts/generated/rainy_lofi.csv \
+    --chunk 50 --sleep 60 --run-id rl01 --clean-raw
+```
+- 檔名含批次碼（`rainy_lofi_01_rl01_00001.mp3`），不會覆蓋舊曲；**同 `--run-id` 重跑＝續傳**。
+- 每首自動寫 sidecar + `catalog/tracks.jsonl`，並跑自動品檢。
+
+**Step 3 — 品檢 + 建圖書館**
+```bash
+python3 scripts/auto_qc.py --all --index      # 響度/削波/靜音/時長
+python3 scripts/library.py build              # SQLite + 自動標籤
+python3 scripts/library.py summary            # 各風格淘汰率、旗標排行
+```
+
+**Step 4 — 挑 keeper 拼長片**
+```bash
+# 例：品檢 pass 且分數 ≥ 90 的標為 keeper
+python3 scripts/library.py set-status keep --verdict pass --min-score 90
+python3 scripts/library.py query --tag style:rainy_lofi --status keep
+
+# 拼成長片音訊（-14 LUFS 正規化）
+./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/rainy_lofi_*.mp3
+```
+
+**Step 5 — 做視覺並合成影片（最省電）**
+```bash
+# 生一張場景圖 → 30 分鐘影片（唯一動 GPU 的是生圖）
+./scripts/make_long_lofi.sh --generate --minutes 30 \
+    --tracks assets/tracks/rainy_lofi_*.mp3 --style rainy_lofi
+#   加 --style 會在渲染後自動產生上片資訊（Step 6）
+```
+
+**Step 6 — 產生上片資訊**
+```bash
+python3 scripts/make_meta.py --video output/videos/lofi_30min.mp4 \
+    --style rainy_lofi --tracks assets/tracks/rainy_lofi_*.mp3 --xfade 8
+#   → publish/lofi_30min.json + .md（title/描述/章節/tags，可直接複製到 YouTube）
+```
+
+**Step 7 — 上片佇列**
+```bash
+python3 scripts/upload_status.py --ready
+python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.be/xxxx
+```
+
+> 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。
 
 ---
 
@@ -79,7 +161,9 @@ lofi generate --csv prompts/generated/x.csv --run-id b01
 （可選）安裝成指令：`pip install -e .`。未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接用 `scripts/*.py`。
 ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
 
-## 快速開始
+## 示範管線（不需 ComfyUI，先測流程）
+
+先用內建的示範素材把 P1 管線跑一遍（生示範音檔 → 拼長片 → 視覺循環 → 合成影片），確認 ffmpeg 環境沒問題。
 
 ```bash
 cd ai-music/lofi-studio
@@ -110,6 +194,8 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 > 記得先 `chmod +x scripts/*.sh`。
 
 ## 腳本參數速查
+
+> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill`）。`scripts/*.sh` 仍為 bash。
 
 | 腳本 | 用法 |
 |---|---|
