@@ -4,6 +4,7 @@
 > 這份文件是把你提供的 SOP 整理、補齊缺漏後的版本。標記 **[待確認]** 的地方請以官方文件為準。
 
 > 程式結構：Python 邏輯在 `src/lofi/`（單一入口 `lofi <command>`）；`scripts/*.py` 為相容 shim；ffmpeg/ComfyUI 重流程仍為 `scripts/*.sh`。詳見 `AGENTS.md` 與 `README.md`。
+> 量產用的成品配置（錨定參數、影片長度／視覺／上片配方）見 [`RECIPES.md`](RECIPES.md)。
 
 ---
 

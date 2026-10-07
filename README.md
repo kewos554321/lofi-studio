@@ -87,7 +87,7 @@ python3 scripts/upload_status.py --ready
 python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.be/xxxx
 ```
 
-> 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。
+> 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，**可直接照抄的成品配置見 [`docs/RECIPES.md`](docs/RECIPES.md)**。
 
 ---
 
@@ -123,6 +123,7 @@ lofi-studio/
 │   ├── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py  # 相容 shim
 │   └── collect_comfy_outputs.sh # 把 ComfyUI 輸出收進 assets/tracks
 ├── tests/                     # python3 -m unittest discover -s tests -v
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
