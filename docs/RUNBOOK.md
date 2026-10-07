@@ -270,18 +270,20 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 - `output/episodes/<name>/` 整包視為一支成片，`cleanup_outputs.sh --keep/--older-than` 以資料夾為單位處理；中間檔（`_loop_1080.mp4`、`_video_copy.mp4`、`_mix_raw.wav`）也會一併列入清理。
 - `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
-### 6.6 三段式產線（一條龍 / 分段測試）
+### 6.6 五段式產線（一條龍 / 分段測試）
 
-把「音樂 → 圖片 → 影片」包成一支 orchestrator，`--stage` 控制要跑哪一段：
+把「音樂 → 圖片 → 影片 → 上傳 → 整理」包成一支 orchestrator，`--stage` 控制要跑哪一段：
 
 ```bash
-# 一條龍（三段全跑）
-./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 20
+# 一條龍（五段全跑）
+./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40
 
 # 分段單獨跑（測試/接續）
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20
 ./scripts/make_episode.sh --style rainy_lofi --stage image --images 3
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/rl01_00001_.png
+./scripts/make_episode.sh --style rainy_lofi --stage upload --episode rl01
+./scripts/make_episode.sh --style rainy_lofi --stage cleanup --episode rl01
 
 # 只印指令、不執行
 ./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
@@ -292,9 +294,22 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 | `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
 | `image` | `generate_visual`（ComfyUI + SD1.5） | `assets/visuals/<episode>*.png` |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
+| `upload` | `yt_upload`（YouTube Data API，預設 private） | `publish/<episode>.json` 寫回 youtube_url |
+| `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
 - 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/` 最新圖。
 - `--count 0`（預設）＝音樂段不生成、沿用既有曲目。
+- `all` 時可用 `--no-upload` / `--no-cleanup` 略過第 4/5 段；上傳可見性用 `--privacy private|unlisted|public`（預設 private）。
+
+#### 上傳段（第 4 段）一次性設定
+
+1. Google Cloud 專案 → 啟用 **YouTube Data API v3**。
+2. OAuth consent screen：External，把要上傳的帳號加進 Test users，scope 加 `.../auth/youtube.upload`。
+3. Credentials → OAuth client ID → **Desktop app** → 下載 JSON，放到 `.secrets/client_secret.json`（或設 `YT_CLIENT_SECRET`）。
+4. 首次 `--stage upload` 會開瀏覽器授權，token 快取在 `.secrets/yt_token.json`。
+5. 上傳後影片為 **private**；請到 Studio 手動公開/排程、勾 **AI 揭露**、上傳縮圖、加播放清單。
+
+> 依賴：`google-api-python-client` / `google-auth-oauthlib` / `google-auth-httplib2`（已列入 `requirements.txt`，裝在 `.venv`）。
 
 ---
 

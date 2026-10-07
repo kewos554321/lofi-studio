@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 #
-# make_episode.sh — 一集的自動化產線，分成三段：音樂 → 圖片 → 影片。
+# make_episode.sh — 一集的自動化產線，分成五段：音樂 → 圖片 → 影片 → 上傳 → 整理。
 #
-# 三段各自獨立、可單獨執行（方便測試）；--stage all（預設）則一條龍跑完。
-#   1) music  展開清單 -> 生成音樂 -> 品檢 -> 圖書館
-#   2) image  ComfyUI + SD1.5 生場景圖
-#   3) video  挑 keeper -> 混音 -> cinemagraph -> 合成影片 -> 上片資訊
+# 五段各自獨立、可單獨執行（方便測試）；--stage all（預設）則一條龍跑完。
+#   1) music   展開清單 -> 生成音樂 -> 品檢 -> 圖書館
+#   2) image   ComfyUI + SD1.5 生場景圖
+#   3) video   挑 keeper -> 混音 -> cinemagraph -> 合成影片 -> 上片資訊
+#   4) upload  上傳到 YouTube（上線前自動；需一次性憑證，見 README「自動上傳設定」）
+#   5) cleanup 封存到外接 archive/ 並清中間檔
 #
 # 用法:
-#   ./scripts/make_episode.sh --style rainy_lofi --minutes 30                 # 三段全跑
+#   ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40      # 五段全跑
 #   ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20     # 只跑音樂
 #   ./scripts/make_episode.sh --style rainy_lofi --stage image --images 3     # 只生圖
 #   ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 # 只合成影片
+#   ./scripts/make_episode.sh --style rainy_lofi --stage upload  --episode rl01
+#   ./scripts/make_episode.sh --style rainy_lofi --stage cleanup --episode rl01
 #   ./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run     # 預覽（不執行）
 #
 # 常用選項:
-#   --stage all|music|image|video  要跑哪一段（預設 all）
+#   --stage all|music|image|video|upload|cleanup   要跑哪一段（預設 all）
 #   --style NAME                   風格（見 prompts/styles/）
 #   --episode NAME                 影片輸出包名（預設 <style>-<MMDD-HHMM>）
 #   --minutes N                    影片長度（分，預設 30）
@@ -31,9 +35,13 @@
 #   --chunk N --sleep N            音樂批次大小 / 散熱秒數（預設 20 / 30）
 #   --xfade N --loop N --fps N --vbitrate N   傳給 make_long_lofi.sh
 #   --cg-args "..."                傳給 make_cinemagraph.py
+#   --privacy private|unlisted|public          上傳可見性（預設 private＝上線手動）
+#   --archive DIR                  封存目標（預設 output 同層的 archive/）
+#   --keep-visual                  封存時保留 visual_loop.mp4
+#   --no-upload / --no-cleanup     all 時略過第 4/5 段
 #   --dry-run                      只印指令，不執行
 #
-# 前置：ComfyUI 需執行中（music / image 階段）。
+# 前置：ComfyUI 需執行中（music / image 階段）；upload 需 Google 憑證（見 README）。
 #
 set -euo pipefail
 
@@ -59,6 +67,11 @@ LOOP=20
 FPS=30
 VBR=9
 CG_ARGS=""
+PRIVACY="private"
+ARCHIVE=""
+KEEP_VISUAL=0
+NO_UPLOAD=0
+NO_CLEANUP=0
 DRY=0
 TRACKS=()
 TRACKS_SET=0
@@ -85,8 +98,13 @@ while [ $# -gt 0 ]; do
     --fps)     FPS="$2"; shift 2;;
     --vbitrate) VBR="$2"; shift 2;;
     --cg-args) CG_ARGS="$2"; shift 2;;
+    --privacy) PRIVACY="$2"; shift 2;;
+    --archive) ARCHIVE="$2"; shift 2;;
+    --keep-visual) KEEP_VISUAL=1; shift;;
+    --no-upload) NO_UPLOAD=1; shift;;
+    --no-cleanup) NO_CLEANUP=1; shift;;
     --dry-run) DRY=1; shift;;
-    -h|--help) sed -n '2,43p' "$0"; exit 0;;
+    -h|--help) awk 'NR==1{next} /^[^#]/{exit} {print}' "$0"; exit 0;;
     *) echo "未知參數: $1（用 --help）" >&2; exit 1;;
   esac
 done
@@ -121,7 +139,7 @@ need_comfy() {
 # ---------- 第 1 段：音樂 ----------
 stage_music() {
   echo
-  echo "===== [1/3] 音樂 (music) ====="
+  echo "===== [1/5] 音樂 (music) ====="
   if [ "$COUNT" -le 0 ]; then
     echo "  --count 0：跳過生成，沿用既有曲目 assets/tracks/${STYLE}/"
     return 0
@@ -140,7 +158,7 @@ stage_music() {
 # ---------- 第 2 段：圖片 ----------
 stage_image() {
   echo
-  echo "===== [2/3] 圖片 (image) ====="
+  echo "===== [2/5] 圖片 (image) ====="
   if [ -n "$IMAGE" ]; then
     echo "  指定 --image ${IMAGE}：跳過生圖"
     return 0
@@ -156,7 +174,7 @@ stage_image() {
 # ---------- 第 3 段：影片 ----------
 stage_video() {
   echo
-  echo "===== [3/3] 影片 (video) ====="
+  echo "===== [3/5] 影片 (video) ====="
 
   # --- 選圖 ---
   local img="$IMAGE"
@@ -207,19 +225,51 @@ stage_video() {
       --fps "$FPS" --vbitrate "$VBR" $CG_ARGS
 }
 
+# ---------- 第 4 段：上傳 ----------
+stage_upload() {
+  echo
+  echo "===== [4/5] 上傳 (upload) ====="
+  [ -x "$PY" ] || PY="$(command -v python3)"
+  run "$PY" scripts/yt_upload.py --episode "$EPISODE" --privacy "$PRIVACY"
+}
+
+# ---------- 第 5 段：整理 ----------
+stage_cleanup() {
+  echo
+  echo "===== [5/5] 整理 (cleanup) ====="
+  local dargs=()
+  if [ -n "$ARCHIVE" ]; then dargs=(--dest "$ARCHIVE"); fi
+  if [ "$KEEP_VISUAL" = 1 ]; then dargs+=(--keep-visual); fi
+  run ./scripts/archive_episode.sh --episode "$EPISODE" "${dargs[@]+"${dargs[@]}"}"
+}
+
 echo "==> make_episode: style=${STYLE} episode=${EPISODE} stage=${STAGE}$([ "$DRY" = 1 ] && echo " (dry-run)")"
 
 case "$STAGE" in
-  all)   stage_music; stage_image; stage_video;;
-  music) stage_music;;
-  image) stage_image;;
-  video) stage_video;;
-  *) echo "未知 --stage: ${STAGE}（all|music|image|video）" >&2; exit 1;;
+  all)
+    stage_music; stage_image; stage_video
+    if [ "$NO_UPLOAD" = 0 ]; then stage_upload; else echo; echo "(略過上傳 --no-upload)"; fi
+    if [ "$NO_CLEANUP" = 0 ]; then stage_cleanup; else echo "(略過整理 --no-cleanup)"; fi
+    ;;
+  music)   stage_music;;
+  image)   stage_image;;
+  video)   stage_video;;
+  upload)  stage_upload;;
+  cleanup) stage_cleanup;;
+  *) echo "未知 --stage: ${STAGE}（all|music|image|video|upload|cleanup）" >&2; exit 1;;
 esac
 
 echo
 echo "✅ 完成（stage=${STAGE}, episode=${EPISODE}）"
-if [ "$STAGE" = "video" ] || [ "$STAGE" = "all" ]; then
-  echo "   影片:   output/episodes/${EPISODE}/video.mp4"
-  echo "   上片資訊: publish/${EPISODE}.json"
-fi
+case "$STAGE" in
+  video|all|upload)
+    echo "   影片:   output/episodes/${EPISODE}/video.mp4";;
+esac
+case "$STAGE" in
+  upload|all)
+    echo "   上片資訊: publish/${EPISODE}.json";;
+esac
+case "$STAGE" in
+  cleanup|all)
+    echo "   封存:   <archive>/${EPISODE}/";;
+esac

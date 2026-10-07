@@ -12,6 +12,7 @@
   lofi expand    [expand_style 參數]
   lofi visual    [generate_visual 參數]
   lofi cinemagraph [make_cinemagraph 參數]（需 numpy，用 .venv）
+  lofi upload    [yt_upload 參數]（需 Google 套件＋憑證，用 .venv）
 
 未安裝套件時也可用: PYTHONPATH=src python3 -m lofi.cli <command> ...
 """
@@ -30,6 +31,7 @@ MODULES = {
     "expand":      ("lofi.expand",      "展開風格曲目清單（CSV）"),
     "visual":      ("lofi.visual",      "用 ComfyUI 生場景圖"),
     "cinemagraph": ("lofi.cinemagraph", "靜圖 -> 無縫循環局部微動（需 numpy）"),
+    "upload":      ("lofi.upload",      "上傳成片到 YouTube（上線前自動；需 Google 套件/憑證）"),
 }
 
 

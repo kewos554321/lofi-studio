@@ -22,5 +22,8 @@ assets/visuals/*.jpg
 models/*
 !models/README.md
 
+# YouTube OAuth 憑證 / token（機密）
+.secrets/
+
 # macOS
 .DS_Store

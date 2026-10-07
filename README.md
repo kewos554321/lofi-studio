@@ -91,33 +91,50 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 
 ---
 
-## 三段式產線：音樂 → 圖片 → 影片
+## 五段式產線：音樂 → 圖片 → 影片 → 上傳 → 整理
 
-整條產線拆成**三段**，平常一條龍跑，也能**分段單獨執行**（測試/除錯）：
+整條產線拆成**五段**，平常一條龍跑，也能**分段單獨執行**（測試/除錯）：
 
 | 段 | 產物 | 底層工具 |
 |---|---|---|
 | 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar | `expand_style` → `batch_run` → `auto_qc` → `library` |
 | 2 圖片 | `assets/visuals/*.png` | `generate_visual`（ComfyUI + SD1.5） |
 | 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成） |
+| 4 上傳 | YouTube 影片（預設 private） | `yt_upload`（YouTube Data API；公開/排程之後手動） |
+| 5 整理 | 封存到外接 `archive/<episode>/` | `archive_episode.sh` |
 
 ```bash
-# 一條龍（三段全跑）：30 分鐘一集
-./scripts/make_episode.sh --style rainy_lofi --minutes 30 --count 20
+# 一條龍（五段全跑）：1 小時一集
+./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40
 
 # 分段單獨跑（測試用）——每段產物就是下一段的輸入，可任意從中段接續
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20   # 只生音樂
 ./scripts/make_episode.sh --style rainy_lofi --stage image --images 3   # 只生圖
-./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 \
-    --image assets/visuals/rl01_00001_.png \
-    --tracks assets/tracks/rainy_lofi/*/*.mp3                          # 只合成影片
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 # 只合成影片
+./scripts/make_episode.sh --style rainy_lofi --stage upload --episode rl01 # 只上傳
+./scripts/make_episode.sh --style rainy_lofi --stage cleanup --episode rl01 # 只封存整理
 
 # 先看會做什麼（不執行）
 ./scripts/make_episode.sh --style rainy_lofi --episode rl01 --dry-run
 ```
 
 - 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/` 最新一張。
-- 三段可獨立驗證：音樂段產 `assets/tracks`、圖片段產 `assets/visuals`、影片段產 `output/episodes`。
+- 上傳階段預設 `--privacy private`（＝上線前自動、公開手動）；`--no-upload` / `--no-cleanup` 可在 `all` 時略過第 4/5 段。
+- 整理階段把 `output/episodes/<episode>/` 搬到外接 `archive/<episode>/` 並刪中間檔（`--keep-visual` 可保留 `visual_loop.mp4`）。
+
+### 自動上傳設定（一次性）
+
+> 只有第 4 段（`upload`）需要設定；設定一次後 token 會快取，之後重複使用。
+
+1. 到 [Google Cloud Console](https://console.cloud.google.com/) 建一個專案（免費）。
+2. 「APIs & Services → Library」啟用 **YouTube Data API v3**。
+3. 「OAuth consent screen」選 **External**，把要上傳的 Google 帳號加進 **Test users**，scope 加 `.../auth/youtube.upload`。
+4. 「Credentials → Create credentials → OAuth client ID」，類型選 **Desktop app**，下載 JSON。
+5. 把 JSON 放到本專案 **`.secrets/client_secret.json`**（`.secrets/` 已 gitignore），或設環境變數 `YT_CLIENT_SECRET` 指向它。
+6. 執行 `./scripts/make_episode.sh --style <style> --stage upload --episode <名稱>`（或 `lofi upload`）。首次會開瀏覽器要你登入該帳號並同意，token 快取在 `.secrets/yt_token.json`。
+
+> ⚠️ 上傳時的 **AI 揭露（變造或合成內容）** 無法用 API 設定，請在 YouTube Studio 手動勾選（metadata 內已記 `ai_disclosure: true`）。
+> ℹ️ 每日 API 配額預設 10,000 單位，一次上傳約 1,600 單位 → 約 6 支/天；要更多需在 Console 申請提高配額。
 
 ---
 
@@ -137,7 +154,8 @@ lofi-studio/
 │   ├── library.py             # SQLite 圖書館 + 自動標籤
 │   ├── expand.py              # 用風格骨架展開同風格曲目清單（CSV）
 │   ├── visual.py              # 用 ComfyUI + SD1.5 生 lofi 場景圖
-│   └── cinemagraph.py         # 靜圖 -> 局部微動無縫循環（需 numpy）
+│   ├── cinemagraph.py         # 靜圖 -> 局部微動無縫循環（需 numpy）
+│   └── upload.py              # 上傳成片到 YouTube（需 Google 套件/憑證，用 .venv）
 ├── scripts/                   # bash 管線 + Python 相容 shim（呼叫 src/lofi）
 │   ├── check_env.sh           # 環境檢查
 │   ├── setup_python_env.sh    # 建立 .venv 並裝 demucs
@@ -146,12 +164,13 @@ lofi-studio/
 │   ├── make_visual_loop.sh    # 靜圖 -> 無縫循環動態影片（平移+顆粒+暗角）
 │   ├── render_video.sh        # ★ 視覺 + 音訊 -> 最終 mp4
 │   ├── make_long_lofi.sh      # ★ 低負載長片：短 loop + 複製（避免 CPU/GPU 過熱）
-│   ├── make_episode.sh        # ★ 三段產線 orchestrator（音樂→圖片→影片，可一條龍或分段）
+│   ├── make_episode.sh        # ★ 五段產線 orchestrator（音樂→圖片→影片→上傳→整理，可一條龍或分段）
+│   ├── archive_episode.sh     # 封存 episode 到外接 archive/ 並清中間檔
 │   ├── batch_run.sh           # ★ 量產 runner（分塊 + 續傳 + log）
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
-│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / make_cinemagraph.py  # 相容 shim（實作在 src/lofi）
+│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / make_cinemagraph.py / yt_upload.py  # 相容 shim（實作在 src/lofi）
 ├── tests/                     # python3 -m unittest discover -s tests -v
 ├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
@@ -230,7 +249,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 
 ## 腳本參數速查
 
-> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill`）。`scripts/*.sh` 仍為 bash。
+> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `cinemagraph` / `upload`）。`scripts/*.sh` 仍為 bash。
 
 | 腳本 | 用法 |
 |---|---|
@@ -240,7 +259,9 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--dry-run]` |
 | `render_video.sh` | `VISUAL_LOOP AUDIO OUTPUT.mp4 [FPS=30] [CRF=20]` |
 | `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--episode NAME] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼；`--episode` 一集一包） |
-| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--dry-run]`（三段產線：音樂→圖片→影片，可一條龍或分段測試） |
+| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video\|upload\|cleanup] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--privacy private] [--archive DIR] [--no-upload] [--no-cleanup] [--dry-run]`（五段產線：音樂→圖片→影片→上傳→整理，可一條龍或分段測試） |
+| `archive_episode.sh` | `--episode NAME [--dest DIR] [--keep-visual] [--dry-run]`（封存到外接 archive/ 並清中間檔） |
+| `yt_upload.py` | `--episode NAME [--privacy private\|unlisted\|public] [--video PATH] [--dry-run]`（上傳到 YouTube；需 Google 憑證，見「自動上傳設定」） |
 | `separate_stems.sh` | `INPUT [four\|vocals] [OUTDIR]` |
 | `download_p2_models.sh` | `[--ace\|--sd\|all]`（下載到 `~/ComfyUI/models`） |
 | `launch_comfyui.sh` | 啟動 ComfyUI（MPS + fallback） |

@@ -1,4 +1,8 @@
-# lofi-studio Python 依賴
-# 主要用於音軌分離；ACE-Step / ComfyUI 走自己的環境。
+# lofi-studio Python 依賴（安裝於 .venv）
+# 音軌分離 / cinemagraph
 demucs>=4.0.1
 numpy
+# YouTube 自動上傳（lofi upload / --stage upload）
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
