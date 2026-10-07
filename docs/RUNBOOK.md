@@ -3,6 +3,8 @@
 完整操作手冊。P1（自動化管線）已可執行；P2（AI 生成）需另外安裝並用 GUI 操作。
 > 這份文件是把你提供的 SOP 整理、補齊缺漏後的版本。標記 **[待確認]** 的地方請以官方文件為準。
 
+> 程式結構：Python 邏輯在 `src/lofi/`（單一入口 `lofi <command>`）；`scripts/*.py` 為相容 shim；ffmpeg/ComfyUI 重流程仍為 `scripts/*.sh`。詳見 `AGENTS.md` 與 `README.md`。
+
 ---
 
 ## 0. 前提與合規

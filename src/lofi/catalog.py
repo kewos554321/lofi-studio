@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """
-catalog_lib.py — 音樂目錄（catalog）共用工具。
+catalog.py — 音樂目錄（catalog）共用工具。
 
 設計：
   - sidecar：assets/tracks/<file>.json，記錄**單曲目前的完整狀態**（唯一真相）。
   - 事件流：catalog/tracks.jsonl，append-only，記錄每次生成 / 品檢 / 評分 / 標籤 / 使用。
   - 索引：catalog/index.csv，由 sidecar 掃描重建，方便用試算表看。
 
-會被 batch_generate.py、auto_qc.py、backfill_catalog.py 等共用。
+會被 generate / qc / backfill 等共用。
 """
 import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-TRACKS_DIR = ROOT / "assets" / "tracks"
-CATALOG_DIR = ROOT / "catalog"
+from lofi.paths import ROOT, TRACKS_DIR, CATALOG_DIR
+
 JSONL_PATH = CATALOG_DIR / "tracks.jsonl"
 INDEX_CSV = CATALOG_DIR / "index.csv"
 

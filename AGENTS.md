@@ -1,0 +1,66 @@
+# AGENTS.md — 給 AI coding agent 的專案說明
+
+本檔供 Claude Code / OpenCode 等 agent 快速上手。**先讀這裡再看程式。**
+
+## 專案是什麼
+
+本機（Mac M4 / 16GB）AI **lofi 音樂 → 長片影片**的產線，最終上傳 YouTube 頻道 **Drifted LoFi**。
+ComfyUI + ACE-Step 生音樂、SD1.5 生場景圖、ffmpeg 做視覺循環與合成。沒有伺服器、沒有雲端。
+
+## 架構（重點）
+
+```
+src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import ...`）
+  paths.py         # ROOT 解析（env LOFI_ROOT 或往上找 prompts/styles）
+  catalog.py       # 音樂目錄：sidecar assets/tracks/*.json + catalog/tracks.jsonl
+  qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
+  generate.py      # 批次生成（ComfyUI API）
+  backfill.py      # 回填既有音檔
+  meta.py          # YouTube title/描述/章節/tags
+  publish.py       # 上片佇列
+  library.py       # SQLite 圖書館(catalog/library.db) + 自動標籤
+  cli.py           # 單一入口 `lofi <command>`
+scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用
+scripts/*.sh       # ffmpeg/ComfyUI 重流程（build_long_mix / make_long_lofi / render_video …）
+prompts/styles/     # 音樂風格骨架（生成用）
+prompts/youtube/    # 上片 metadata 範本（對應同名 style）
+assets/tracks/      # 生成音檔 + 每首 sidecar（音檔 gitignore，sidecar 進版控）
+catalog/            # tracks.jsonl + index.csv（library.db 為衍生物，gitignore）
+publish/            # 上片資訊 + 狀態
+output/             # symlink → 外接碟（74xxxGB）；log 例外，放內接 logs/
+tests/              # python3 -m unittest discover -s tests -v
+docs/RUNBOOK.md     # 操作手冊
+```
+
+## 常用指令
+
+```bash
+lofi generate --csv prompts/generated/x.csv --run-id b01   # 或 python3 scripts/batch_generate.py …
+lofi qc --all --index
+lofi library build && lofi library summary
+lofi meta --video output/videos/x.mp4 --style cozy_morning
+lofi publish --ready
+./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
+python3 -m unittest discover -s tests -v
+```
+
+## 不變的約定（改動請遵守）
+
+- **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）。沒記錄等於沒做。
+- **唯一命名**：生成檔名含 `--run-id`，禁止讓不同批次產生同名檔（會被覆蓋）。
+- **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
+- **不進版控**：`assets/tracks/*.mp3|wav`、`output/`、`logs/`、`catalog/*.db`、`.venv`、models。
+- **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
+- **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
+- **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。
+
+## 環境注意
+
+- `output/` 是**外接碟 symlink**；USB/ExFAT 可能掉線 → 寫影片/清理前先 `./scripts/disk_report.sh`。
+  生成音檔寫內接 `assets/tracks`，log 寫內接 `logs/`，掉線不受影響。
+- ComfyUI 在 `~/ComfyUI`，需執行中（`127.0.0.1:8188`）才能生成。
+- 系統 `python3` 無 numpy；`src/lofi` 的程式**只用標準庫**，勿引入需 numpy/librosa 的相依（除非另開 venv 並說明）。
+
+## 提交
+
+小步提交，訊息用英文一行摘要 + 條列重點（參考 git log）。跑過 `tests/` 再提交。

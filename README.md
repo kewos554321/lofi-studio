@@ -13,7 +13,17 @@
 
 ```
 lofi-studio/
-├── scripts/
+├── src/lofi/                  # ★ Python 套件（主要邏輯，`from lofi import ...`）
+│   ├── cli.py                 # ★ 單一入口：lofi generate/qc/library/meta/publish/backfill
+│   ├── paths.py               # 路徑解析（ROOT）
+│   ├── catalog.py             # 音樂目錄（sidecar + JSONL）
+│   ├── qc.py                  # 自動品檢
+│   ├── generate.py            # 批次生成（ComfyUI）
+│   ├── backfill.py            # 回填既有音檔
+│   ├── meta.py                # YouTube 上片資訊
+│   ├── publish.py             # 上片佇列
+│   └── library.py             # SQLite 圖書館 + 自動標籤
+├── scripts/                   # bash 管線 + Python 相容 shim（呼叫 src/lofi）
 │   ├── check_env.sh           # 環境檢查
 │   ├── setup_python_env.sh    # 建立 .venv 並裝 demucs
 │   ├── make_demo_tracks.sh    # 產生測試用示範音檔/圖片
@@ -23,15 +33,16 @@ lofi-studio/
 │   ├── generate_visual.py     # 用 ComfyUI + SD1.5 生 lofi 場景圖（--ckpt 可換日系模型）
 │   ├── render_video.sh        # ★ 視覺 + 音訊 -> 最終 mp4
 │   ├── make_long_lofi.sh      # ★ 低負載長片：短 loop + 複製（避免 CPU/GPU 過熱）
+│   ├── batch_run.sh           # ★ 量產 runner（分塊 + 續傳 + log）
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
-│   ├── batch_generate.py      # ★ 用 API 批次生成多首（讀 CSV）
 │   ├── expand_style.py        # ★ 用風格骨架展開同風格曲目清單（CSV）
-│   ├── auto_qc.py             # ★ 自動品檢（響度/削波/靜音/時長）
-│   ├── make_meta.py           # ★ 產生 YouTube 上片資訊（title/描述/章節/tags）
-│   ├── upload_status.py       # ★ 上片佇列（哪些可上傳、已上傳）
+│   ├── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py  # 相容 shim
 │   └── collect_comfy_outputs.sh # 把 ComfyUI 輸出收進 assets/tracks
+├── tests/                     # python3 -m unittest discover -s tests -v
+├── AGENTS.md                  # 給 AI coding agent 的專案說明
+├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
 │   ├── prompt_library.csv     # 起始 prompt 庫（10 種氛圍）
 │   ├── styles/                # 風格骨架（固定 tag + 可變維度），如 rainy_lofi.json
@@ -44,12 +55,29 @@ lofi-studio/
 │   ├── tracks.jsonl           # 事件流：每次生成/品檢/… 一行
 │   └── index.csv              # 由側錄重建的查詢用索引
 ├── publish/                   # 上片資訊（make_meta.py 產出：title/描述/章節/狀態）
-├── output/
+├── logs/                      # batch runner 的 log（內接，不進版控）
+├── output/                    # symlink → 外接碟
 │   ├── mixes/                 # 長片音訊
 │   ├── videos/                # 最終影片
 │   └── stems/                 # Demucs 輸出
 └── models/                    # ACE-Step 權重放置說明
 ```
+
+## 架構與 CLI
+
+Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim**，兩者等價：
+
+```bash
+lofi qc --all --index              # 等同 python3 scripts/auto_qc.py --all --index
+lofi library build
+lofi library query --tag style:rainy_lofi --status keep
+lofi meta --video output/videos/x.mp4 --style cozy_morning
+lofi publish --ready
+lofi generate --csv prompts/generated/x.csv --run-id b01
+```
+
+（可選）安裝成指令：`pip install -e .`。未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接用 `scripts/*.py`。
+ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
 
 ## 快速開始
 
