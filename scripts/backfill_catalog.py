@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_lib as cat  # noqa: E402
 
 ROOT = cat.ROOT
-LOGS_DIR = ROOT / "output" / "logs"
+LOGS_DIRS = [ROOT / "logs", ROOT / "output" / "logs"]
 PROMPT_LIB = ROOT / "prompts" / "prompt_library.csv"
 
 # cozy_morning_16_00001.mp3 -> style="cozy_morning", id="16"
@@ -39,15 +39,16 @@ LOG_FILE_RE = re.compile(r"->\s*(\S+\.(?:mp3|wav|flac))")
 def scan_seeds_from_logs():
     """回傳 {檔名: seed}；同一檔名多筆時以最後出現者為準。"""
     seeds = {}
-    if not LOGS_DIR.exists():
-        return seeds
-    for log in sorted(LOGS_DIR.glob("*.log")):
-        text = log.read_text(encoding="utf-8", errors="ignore")
-        for m in LOG_BLOCK_RE.finditer(text):
-            seed = int(m.group(2))
-            fm = LOG_FILE_RE.search(m.group(3))
-            if fm:
-                seeds[Path(fm.group(1)).name] = seed
+    for logs_dir in LOGS_DIRS:
+        if not logs_dir.exists():
+            continue
+        for log in sorted(logs_dir.glob("*.log")):
+            text = log.read_text(encoding="utf-8", errors="ignore")
+            for m in LOG_BLOCK_RE.finditer(text):
+                seed = int(m.group(2))
+                fm = LOG_FILE_RE.search(m.group(3))
+                if fm:
+                    seeds[Path(fm.group(1)).name] = seed
     return seeds
 
 

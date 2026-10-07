@@ -94,7 +94,9 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `separate_stems.sh` | `INPUT [four\|vocals] [OUTDIR]` |
 | `download_p2_models.sh` | `[--ace\|--sd\|all]`（下載到 `~/ComfyUI/models`） |
 | `launch_comfyui.sh` | 啟動 ComfyUI（MPS + fallback） |
-| `batch_generate.py` | `[--csv PATH] [--limit N] [--duration 120] [--seed N] [--clean-raw] [--no-catalog] [--no-qc] [--dry-run]`（生成後自動寫入目錄 + 品檢） |
+| `batch_generate.py` | `[--csv PATH] [--limit N] [--offset N] [--run-id NAME] [--no-resume] [--duration 120] [--seed N] [--sleep S] [--clean-raw] [--no-catalog] [--no-qc] [--dry-run]`（生成後自動寫入目錄+品檢；檔名含 run-id、可續傳） |
+| `batch_run.sh` | `--csv PATH [--chunk N] [--sleep S] [--rest S] [--total N] [--run-id NAME] [--clean-raw] [--gen-args "..."]`（量產 runner：分塊+log+續傳） |
+| `library.py` | `build \| query [--tag T] [--style S] [--verdict V] [--min-score N] \| summary \| tag --auto \| set-status keep ...`（SQLite 圖書館+自動標籤） |
 | `expand_style.py` | `--style NAME [--count 20] [--seed N] [--out PATH] [--dry-run]` |
 | `collect_comfy_outputs.sh` | `[--move] [--rename]` |
 | `backfill_catalog.py` | `[--dry-run] [--force]`（把既有音檔補進目錄） |
@@ -218,6 +220,28 @@ python3 scripts/auto_qc.py --json > qc.json # 給程式用
 ```
 
 > 修改 `prompts/styles/*.json` 時記得把 `version` +1，否則舊曲的 `style_version` 會跟新 prompt 對不上，之後查不出「當時用的是哪版」。`status` 之後會用來篩出 keeper pool（`keep`）再拼接長片。
+
+## 大量生產（量產 1000 首）
+
+- **容量**：mp3 成品約 3.7MB/首 → 1000 首約 **3.7GB**（內接可）；Demucs stems 全做約 85GB（外接，且只對 keeper 做）。
+- **時間**：約 4–6 分鐘/首 → 1000 首約 **83 小時**（連跑），加散熱更久，務必分批。
+- **檔名唯一**：`batch_generate.py --run-id` 會把批次碼寫進檔名（`style_id_runid_seq.mp3`），跨批次不會覆蓋；**同一個 `--run-id` 重跑會自動續傳**、跳過已完成。
+
+```bash
+# 1) 展開 1000 首清單（可重現）
+python3 scripts/expand_style.py --style dusk_jazz --count 1000 --seed 42
+# 2) 分批量產（每批 50、每首散熱 60s、刪原始檔、可續傳）
+./scripts/batch_run.sh --csv prompts/generated/dusk_jazz.csv \
+    --chunk 50 --sleep 60 --run-id dusk01 --clean-raw
+# 3) 品檢 + 圖書館（自動標籤）
+python3 scripts/auto_qc.py --all --index
+python3 scripts/library.py build
+# 4) 挑 keeper（例：品檢 pass 且分數 ≥ 90）
+python3 scripts/library.py set-status keep --verdict pass --min-score 90
+python3 scripts/library.py query --tag style:dusk_jazz --status keep
+```
+
+> `batch_run.sh` 的 log 寫在**內接 `logs/`**（外接碟掉線也不會丟）；生成音檔在內接 `assets/tracks`。
 
 ## P2：生成視覺（SD1.5 場景圖 → 局部微動循環）
 

@@ -5,6 +5,10 @@ __pycache__/
 
 # 輸出（大檔，不進版控；output 已 symlink 到外接碟）
 /output
+/logs/
+
+# 衍生資料庫（由 sidecar 重建）
+catalog/*.db
 
 # 素材（AI 生成的大檔）
 assets/tracks/*.wav
