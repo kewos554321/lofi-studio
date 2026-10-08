@@ -208,6 +208,17 @@ AF="afade=t=in:d=2,afade=t=out:st=$((TOTAL-2)):d=2"
   -threads "$THREADS" -af "$AF" -t "$TOTAL" -c:a pcm_s24le "$MIX_FINAL"
 echo "    冷卻 5s…"; sleep 5
 
+# 安全檢查：混音短於影片長度 → 中止（避免產出後半無聲的影片）
+MIXDUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$MIX_FINAL" 2>/dev/null || echo 0)
+if [ "${ALLOW_SHORT_AUDIO:-0}" != "1" ] && [ -n "$MIXDUR" ]; then
+  SHORT=$(awk -v d="$MIXDUR" -v t="$TOTAL" 'BEGIN{print (d < t-3)?"1":"0"}')
+  if [ "$SHORT" = 1 ]; then
+    echo "錯誤: 混音只有 ${MIXDUR}s，短於影片 ${TOTAL}s（曲目不足）。已中止，避免產出後半無聲的影片。" >&2
+    echo "      請補足曲目後重跑（或用 ALLOW_SHORT_AUDIO=1 硬做）。" >&2
+    exit 1
+  fi
+fi
+
 # ---------- 階段 D：合成 10 分鐘母帶（複製，零重編碼）----------
 echo
 echo "==> [D] 複製 loop 成 ${MIN} 分鐘（concat + copy，秒級、不重編碼）"
