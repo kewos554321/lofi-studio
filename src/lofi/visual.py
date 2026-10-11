@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_visual.py — 用 ComfyUI + SD1.5 生成 lofi 場景圖。
+generate_visual.py — 用 ComfyUI 生 lofi 場景圖（SD1.5 或 SDXL 動漫模型皆可）。
 
 產出的圖片放到 assets/visuals/，再交給 make_visual_loop.sh 做無縫循環。
 
@@ -10,9 +10,13 @@ generate_visual.py — 用 ComfyUI + SD1.5 生成 lofi 場景圖。
   python3 scripts/generate_visual.py --prompt "your scene"    # 自訂 prompt
   python3 scripts/generate_visual.py --size 768x512
   python3 scripts/generate_visual.py --upscale RealESRGAN_x4plus_anime_6B.pth  # AI 放大（768->1536）
+  # SDXL 動漫模型（Illustrious / NoobAI）：原生高解析度 + clip skip 2
+  python3 scripts/generate_visual.py --ckpt Illustrious-XL-v2.0.safetensors \
+      --size 1216x832 --clip-skip 2 --steps 28 --cfg 5
   python3 scripts/generate_visual.py --dry-run
 
-前置：ComfyUI 需執行中，且 v1-5-pruned-emaonly-fp16.safetensors 已在 models/checkpoints。
+前置：ComfyUI 需執行中，且對應 checkpoint 已在 models/checkpoints。
+SD1.5 用 v1-5-pruned-emaonly-fp16.safetensors；SDXL 動漫用 Illustrious-XL-v2.0.safetensors。
 放大模型放在 ~/ComfyUI/models/upscale_models/（見 download_p2_models.sh）。
 """
 import argparse, json, random, shutil, sys, time, urllib.request, urllib.error
@@ -33,19 +37,26 @@ DEFAULT_NEG = ("lowres, blurry, bad anatomy, bad hands, extra digits, fewer digi
 
 
 def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=CKPT,
-                 upscale_model="", up_out=None):
+                 upscale_model="", up_out=None, clip_skip=0,
+                 sampler="dpmpp_2m", scheduler="karras"):
     g = {
         "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["4", 1]}},
-        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": ["4", 1]}},
         "5": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
-        "3": {"class_type": "KSampler", "inputs": {
-                  "model": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg,
-                  "sampler_name": "dpmpp_2m", "scheduler": "karras",
-                  "positive": ["6", 0], "negative": ["7", 0],
-                  "latent_image": ["5", 0], "denoise": 1.0}},
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
     }
+    # clip skip：SDXL 動漫模型（Illustrious/NoobAI）建議 2，晚於 CLIPTextEncode 之前切層
+    clip_src = ["4", 1]
+    if clip_skip and clip_skip > 1:
+        g["13"] = {"class_type": "CLIPSetLastLayer",
+                   "inputs": {"clip": ["4", 1], "stop_at_clip_layer": -clip_skip}}
+        clip_src = ["13", 0]
+    g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": clip_src}}
+    g["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": clip_src}}
+    g["3"] = {"class_type": "KSampler", "inputs": {
+                  "model": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg,
+                  "sampler_name": sampler, "scheduler": scheduler,
+                  "positive": ["6", 0], "negative": ["7", 0],
+                  "latent_image": ["5", 0], "denoise": 1.0}}
     src = ["8", 0]
     if upscale_model:
         ow, oh = up_out or (w * 2, h * 2)
@@ -83,6 +94,10 @@ def main():
     ap.add_argument("--upscale", default="",
                     help="放大模型檔名（放 ComfyUI/models/upscale_models/），空=不放大，例：RealESRGAN_x4plus_anime_6B.pth")
     ap.add_argument("--upscale-out", default="", help="放大後輸出尺寸 寬x高（預設生成尺寸×2）")
+    ap.add_argument("--clip-skip", type=int, default=0,
+                    help="CLIP 切層（SDXL 動漫模型建議 2；0=用 checkpoint 預設）")
+    ap.add_argument("--sampler", default="dpmpp_2m", help="取樣器（SDXL 動漫常用 euler_ancestral / dpmpp_2m）")
+    ap.add_argument("--scheduler", default="karras", help="排程器（karras / normal / simple）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -113,7 +128,8 @@ def main():
             continue
         r = api(args.url, "/prompt", {"prompt": build_prompt(
             args.prompt, args.negative, w, h, seed, args.steps, args.cfg, args.prefix, args.ckpt,
-            upscale_model=args.upscale, up_out=up_out),
+            upscale_model=args.upscale, up_out=up_out,
+            clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler),
             "client_id": "lofi-visual"})
         pid = r["prompt_id"]
         t0 = time.time()
