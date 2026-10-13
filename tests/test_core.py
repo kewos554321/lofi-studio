@@ -817,5 +817,42 @@ class TestParserFunctions(unittest.TestCase):
         self.assertIsNone(media.parse_duration("N/A"))
 
 
+class TestCLISmoke(unittest.TestCase):
+    """CLI 進入點接線：dispatch 與各子命令 argparse 都能建起來（不需 ComfyUI/ffmpeg）。"""
+
+    def _cli(self, argv):
+        import lofi.cli as cli
+        orig = sys.argv
+        sys.argv = ["lofi"] + argv
+        try:
+            cli.main()
+        finally:
+            sys.argv = orig
+
+    def test_no_args_prints_usage(self):
+        import io as pyio
+        import contextlib
+        buf = pyio.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self._cli([])
+        self.assertIn("commands:", buf.getvalue())
+
+    def test_unknown_command_exits(self):
+        with self.assertRaises(SystemExit):
+            self._cli(["definitely-not-a-command"])
+
+    def test_every_subcommand_help(self):
+        import io as pyio
+        import contextlib
+        from lofi import cli
+        buf = pyio.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for name in cli.MODULES:
+                if name == "cinemagraph":        # 需 numpy，系統 python 可能沒有
+                    continue
+                with self.assertRaises(SystemExit):
+                    self._cli([name, "--help"])
+
+
 if __name__ == "__main__":
     unittest.main()

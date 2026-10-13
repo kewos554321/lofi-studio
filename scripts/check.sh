@@ -41,6 +41,13 @@ print(f"  ✅ README 提到的 {len(used)} 個子命令都存在")
 PY
 then :; else echo "  ❌ README 指令檢查失敗"; fail=1; fi
 
+echo "==> CLI 乾跑（generate --dry-run，不需 ComfyUI/ffmpeg）"
+tmpcsv="$(mktemp)"
+printf 'id,style,mood,instruments,key,bpm,prompt,negative\n1,test,,,A minor,70,lofi rain,\n' > "$tmpcsv"
+./scripts/lofi generate --dry-run --csv "$tmpcsv" >/dev/null \
+  || { echo "  ❌ CLI 乾跑失敗"; fail=1; }
+rm -f "$tmpcsv"
+
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck: scripts/*.sh"
   shellcheck scripts/*.sh || { echo "  ❌ shellcheck 有問題"; fail=1; }

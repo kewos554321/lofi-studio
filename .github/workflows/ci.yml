@@ -20,3 +20,12 @@ jobs:
         run: python -m compileall -q src/lofi
       - name: unit tests
         run: python -m unittest discover -s tests -v
+      - name: CLI smoke (dry-run, no ComfyUI/ffmpeg)
+        env:
+          PYTHONPATH: src
+          PYTHONPYCACHEPREFIX: /tmp/lofi-pyc
+        run: |
+          python -m lofi.cli config > /dev/null
+          python -m lofi.cli visual --list > /dev/null
+          printf 'id,style,mood,instruments,key,bpm,prompt,negative\n1,test,,,A minor,70,lofi rain,\n' > /tmp/smoke.csv
+          python -m lofi.cli generate --dry-run --csv /tmp/smoke.csv
