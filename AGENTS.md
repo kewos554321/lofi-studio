@@ -11,7 +11,7 @@
 | `AGENTS.md`（本檔） | agent 速查 | 架構、不變的約定、踩過的坑 |
 | `docs/RECIPES.md` | 配方 | 量產用的錨定參數／成品配置 |
 | `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
-| `docs/NAMING.md` | 規則 | 視覺檔名/資料夾命名 |
+| `docs/NAMING.md` | 規則 | 檔名/資料夾命名（音樂 + 視覺）與通用原則 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
