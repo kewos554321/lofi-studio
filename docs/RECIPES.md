@@ -139,6 +139,23 @@ python3 scratch/_tmp_make_mask.py --base assets/visuals/ds03/<圖>.png \
 
 ---
 
+## 3.2 模型分工（SDXL vs Z-Image GGUF）
+
+| 要什麼 | 用哪顆 | 實測結果 |
+|---|---|---|
+| 場景豐富、風格多變（咖啡店、代針筆、季節） | **Z-Image Turbo GGUF**（自然語言 prompt、8 步、cfg 1.0、約 225 秒） | 咖啡店的吧台／磨豆機／黑板菜單／吊燈／玻璃罐都到位；**代針筆線條真的畫得出來**（SDXL 只會給水彩） |
+| 用參考圖鎖住固定角色（IPAdapter）／之後掛 SDXL LoRA | **DreamShaperXL**（`--ref`） | 角色像，但場景詞容易被吃掉、白襪與白胸分不開（機制見 §3.1） |
+
+**反例（別做）**：拿 Z-Image 生好的場景，再用 SDXL inpaint 把角色換成 IP 主角 →
+遮罩外逐像素保留（機制沒錯），但**重畫的角色品質低於 Z-Image 原圖**，實測出現灰斑與破圖
+（`sc14` 兩張都被判破圖）＝模型之間的美感對撞。
+
+**正確做法**：要 Z-Image 的畫質就直接用 Z-Image 畫角色——它的 prompt 忠實度本身就能畫出
+「純黑＋大金眼＋四腳白襪」（`sc12`／`sc13` 都做到了，而這正是 SDXL 單靠 prompt 做不到的事）。
+角色「身分」一致性要另外靠 **Z-Image 自己的 LoRA**，而不是跨模型硬換。
+
+---
+
 ## 4. 上片資訊配方
 
 - **標題**：`[詩意短句] | [曲風描述]`（範本在 `prompts/youtube/<style>.json` 的 `title_pool` / `descriptor_pool`）
