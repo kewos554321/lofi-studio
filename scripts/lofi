@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#
+# lofi — 統一 CLI 入口的 wrapper（不需全域 pip install）。
+#
+# 用專案 .venv 的 python（沒有就用系統 python3）呼叫 `python -m lofi.cli`，
+# 因此 shell 產線與人都可以用同一種寫法：`./scripts/lofi <command> ...`。
+#
+# 用法:
+#   ./scripts/lofi qc --all --index
+#   ./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01
+#   ./scripts/lofi config --sh
+#   ./scripts/lofi --help
+#
+# 若已 `pip install -e .`，直接 `lofi <command>` 亦可（等價）。
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3)"
+
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" -m lofi.cli "$@"

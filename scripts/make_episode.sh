@@ -52,6 +52,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 預設模型檔名取自集中設定（config.py → lofi config）；--ckpt / --upscale 仍可覆寫
+eval "$("$ROOT/scripts/lofi" config --sh)"
+
 STAGE="all"
 STYLE=""
 EPISODE=""
@@ -61,11 +64,11 @@ RUN_ID=""
 LIMIT=16
 IMAGES=1
 IMAGE=""
-UPSCALE="RealESRGAN_x4plus_anime_6B.pth"
+UPSCALE="${LOFI_UPSCALE_MODEL:-}"
 UPSCALE_OUT=""
 NO_UPSCALE=0
 SIZE="768x512"
-CKPT="DreamShaperXL-v1.0-Alpha2.safetensors"
+CKPT="${LOFI_IMAGE_CKPT:-}"
 SEED=""
 CHUNK=20
 SLEEP=30
@@ -168,10 +171,10 @@ stage_music() {
   local csv="prompts/generated/${STYLE}.csv"
   local sargs=()
   if [ -n "$SEED" ]; then sargs=(--seed "$SEED"); fi
-  run "$PY" scripts/expand_style.py --style "$STYLE" --count "$COUNT" "${sargs[@]+"${sargs[@]}"}" --out "$csv"
+  run ./scripts/lofi expand --style "$STYLE" --count "$COUNT" "${sargs[@]+"${sargs[@]}"}" --out "$csv"
   run ./scripts/batch_run.sh --csv "$csv" --chunk "$CHUNK" --sleep "$SLEEP" --run-id "$RUN_ID" --clean-raw
-  run "$PY" scripts/auto_qc.py --all --index
-  run "$PY" scripts/library.py build
+  run ./scripts/lofi qc --all --index
+  run ./scripts/lofi library build
   echo "  → 音樂階段完成（run-id=${RUN_ID}）"
 }
 
@@ -196,7 +199,7 @@ stage_image() {
       echo "  （未安裝放大模型 ${UPSCALE}；跳過。可跑 ./scripts/download_p2_models.sh --upscale）"
     fi
   fi
-  run "$PY" scripts/generate_visual.py --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
+  run ./scripts/lofi visual --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
       --prefix "$EPISODE" --run-id "$RUN_ID" "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
   echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json）"
 }
@@ -228,10 +231,10 @@ stage_video() {
   elif [ "$DRY" = 0 ]; then
     local t
     while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
-      "$PY" scripts/library.py query --style "$STYLE" --status keep --limit "$LIMIT" --paths 2>/dev/null || true)
+      ./scripts/lofi library query --style "$STYLE" --status keep --limit "$LIMIT" --paths 2>/dev/null || true)
     if [ "${#tracks[@]}" -eq 0 ]; then
       while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
-        "$PY" scripts/library.py query --style "$STYLE" --limit "$LIMIT" --paths 2>/dev/null || true)
+        ./scripts/lofi library query --style "$STYLE" --limit "$LIMIT" --paths 2>/dev/null || true)
     fi
   fi
   if [ "$TRACKS_SET" = 1 ] || [ "$DRY" = 0 ]; then
@@ -260,7 +263,7 @@ stage_upload() {
   echo
   echo "===== [4/5] 上傳 (upload) ====="
   [ -x "$PY" ] || PY="$(command -v python3)"
-  run "$PY" scripts/yt_upload.py --episode "$EPISODE" --privacy "$PRIVACY"
+  run ./scripts/lofi upload --episode "$EPISODE" --privacy "$PRIVACY"
 }
 
 # ---------- 第 5 段：整理 ----------

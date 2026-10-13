@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # batch_run.sh
-# 量產 runner：把一張 CSV 切成多批餵給 batch_generate.py，自動記錄進度與 log。
-# 依賴 batch_generate.py 的 --run-id 續傳能力：中斷後用同一個 --run-id 重跑即可接續。
+# 量產 runner：把一張 CSV 切成多批餵給 `lofi generate`，自動記錄進度與 log。
+# 依賴 `lofi generate` 的 --run-id 續傳能力：中斷後用同一個 --run-id 重跑即可接續。
 #
 # 用法:
 #   ./scripts/batch_run.sh --csv prompts/generated/dusk_jazz.csv
@@ -95,7 +95,7 @@ while [ "$off" -lt "$TOTAL" ]; do
   echo
   echo "==> 第 ${batch} 批：offset=${off} limit=${lim}（進度 ${off}/${TOTAL}）"
   # shellcheck disable=SC2086
-  python3 scripts/batch_generate.py --csv "$CSV" --offset "$off" --limit "$lim" \
+  ./scripts/lofi generate --csv "$CSV" --offset "$off" --limit "$lim" \
       --run-id "$RUN_ID" --sleep "$SLEEP" $CLEAN_FLAG $DRY_FLAG $GEN_ARGS 2>&1 | tee -a "$LOG"
   off=$((off + lim))
   echo "   進度：${off}/${TOTAL}" | tee -a "$LOG"
@@ -111,4 +111,4 @@ done
 
 echo
 echo "✅ 全部跑完（${TOTAL} 首）。log: $LOG"
-echo "   品檢/標籤： python3 scripts/auto_qc.py --all --index && python3 scripts/library.py build"
+echo "   品檢/標籤： ./scripts/lofi qc --all --index && ./scripts/lofi library build"

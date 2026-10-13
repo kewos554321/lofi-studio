@@ -40,6 +40,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 預設 checkpoint 取自集中設定（config.py → lofi config）
+eval "$("$ROOT/scripts/lofi" config --sh)"
+
 MIN=10
 LOOP=20
 FPS=30
@@ -48,7 +51,7 @@ KEEP=0
 VBR=9
 IMAGE=""
 GENERATE=0
-CKPT="DreamShaperXL-v1.0-Alpha2.safetensors"
+CKPT="${LOFI_IMAGE_CKPT:-}"
 RUN_ID=""
 PREFIX="lofi10scene"
 SIZE="768x512"
@@ -128,8 +131,6 @@ else
 fi
 
 # 用 nice 包裝（nice -n 0 也合法，故陣列永遠非空，避免 bash3.2 + set -u 的空陣列問題）
-PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
 NICEP=(nice -n "$NICE")
 
 command -v ffmpeg >/dev/null || { echo "錯誤: 找不到 ffmpeg" >&2; exit 1; }
@@ -180,7 +181,7 @@ elif [ "$GENERATE" = 1 ]; then
   curl -s --max-time 5 http://127.0.0.1:8188/system_stats >/dev/null \
     || { echo "錯誤: ComfyUI 未啟動（127.0.0.1:8188）" >&2; exit 1; }
   echo "    生成新圖（唯一 GPU 步驟，約 40s）…"
-  GENOUT="$("$PY" scripts/generate_visual.py --count 1 --size "$SIZE" \
+  GENOUT="$(./scripts/lofi visual --count 1 --size "$SIZE" \
             --ckpt "$CKPT" --prefix "$PREFIX" --run-id "$RUN_ID" \
             --prompt "$PROMPT" --negative "$NEG")"
   echo "$GENOUT" | sed 's/^/    /'
@@ -196,7 +197,7 @@ echo "    冷卻 10s…"; sleep 10
 echo
 echo "==> [B] 產生 ${LOOP}s 無縫 loop @ ${FPS}fps"
 # shellcheck disable=SC2086
-"${NICEP[@]}" "$PY" scripts/make_cinemagraph.py "$IMAGE" "$CINE_LOOP" \
+"${NICEP[@]}" ./scripts/lofi cinemagraph "$IMAGE" "$CINE_LOOP" \
   --duration "$LOOP" --fps "$FPS" $CG_ARGS
 
 echo "    升到 1080p / 16:9（硬體編碼）…"
@@ -276,7 +277,7 @@ if [ "$META" = 1 ] && [ -n "$STYLE" ]; then
   echo "==> 產生上片資訊（style=${STYLE}）…"
   NAME_ARG=()
   [ -n "$EPISODE" ] && NAME_ARG=(--name "$EPISODE")
-  "${NICEP[@]}" "$PY" scripts/make_meta.py --video "$OUT" --style "$STYLE" "${NAME_ARG[@]}" \
+  "${NICEP[@]}" ./scripts/lofi meta --video "$OUT" --style "$STYLE" "${NAME_ARG[@]}" \
       --xfade "$XF" --tracks "${TRACKS[@]}" || echo "   （上片資訊產生失敗，可稍後手動跑 make_meta.py）"
   echo
 fi
