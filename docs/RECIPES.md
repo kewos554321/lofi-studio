@@ -83,6 +83,43 @@
 
 ---
 
+## 3.1 角色鎖定與修圖（吉祥物 Moni）
+
+主角＝黑貓 Moni（純黑＋四腳白襪＋大金眼）。設計單一來源是 `prompts/character/moni.json`，
+參考圖＝ `ref04_01_gold-socks.png`（複本放 `~/ComfyUI/input/mascot_blackcat_ref.png`）。
+
+**IPAdapter `--weight` 是「參考圖 vs prompt 誰說話大聲」的旋鈕**（不是相似度）：
+
+| 場合 | 值 | 實測結果 |
+|---|---|---|
+| 生新圖、要角色像 | `0.60` | 角色像、場景還能自由。代價＝偶爾長白胸 |
+| 生新圖、特徵更硬 | `0.65–0.75` | 0.65 開始掉白襪；0.75 連構圖與筆觸都被拉進來（風格變硬） |
+| inpaint **修掉多餘的白** | `0.30–0.40` | 0.6 時參考圖贏（白留著）、0.35 時 prompt 贏（白消失） |
+
+> 機制：注入的是**整張參考圖的統計特徵**，不是「只取黑貓」。參考圖唯一的白色（白襪）在高權重時
+> 會被擴散到胸口 → 白胸不是隨機，是參考圖的白色元素被放大。
+> 原則：**要「像參考圖」→ 高；要「照 prompt 改掉某個特徵」→ 低。**
+
+**修圖流程（遮罩 → 預覽校正 → inpaint）**
+
+```bash
+# 1) 由矩形規格產生遮罩（黑底、白＝要重畫）；--preview 疊半透明紅用來校正框位
+python3 scratch/_tmp_make_mask.py --base assets/visuals/ds03/<圖>.png \
+  --rect x1,y1,x2,y2 --rect x1,y1,x2,y2 --grow 4 --preview
+# 2) 只重畫遮罩區；低權重＝讓 prompt 壓過參考圖，把漂掉的特徵改回設計
+./scripts/lofi visual --init-image <圖>.png --mask <圖>-mask.png \
+  --ref mascot_blackcat_ref.png --weight 0.35 --run-id fix03 --slug fix-xxx
+```
+
+- **框位要收在貓輪廓內**：矩形跨到背景時，重繪會把毛畫進背景（貓看起來變胖）。
+- **眼睛是禁區**：框到眼睛會把它們整片重畫掉。
+- **白襪要保留**：框位別蓋到腳掌，prompt 留著 `(clearly white paws:1.3)`。
+- 命名：修圖產物用 `fix-` 字首、對照合成用 `cmp-`（見 `docs/NAMING.md`）。
+- **同一個 run 別混不同參數**：manifest 的 `config` 是 run 級、後寫會蓋掉前值；真的混用時，
+  把每張的真實值記在逐檔 `images[].weight`（並用 `status: chosen|superseded` 標出選定版本）。
+
+---
+
 ## 4. 上片資訊配方
 
 - **標題**：`[詩意短句] | [曲風描述]`（範本在 `prompts/youtube/<style>.json` 的 `title_pool` / `descriptor_pool`）
