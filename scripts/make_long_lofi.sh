@@ -19,7 +19,8 @@
 #   --fps 30
 #   --image PATH         沿用既有圖
 #   --generate           用 ComfyUI 生一張新圖（單張，生完即停）
-#   --ckpt NAME          checkpoint，預設 meinamix_meinaV11.safetensors
+#   --ckpt NAME          checkpoint，預設 DreamShaperXL-v1.0-Alpha2.safetensors
+#   --run-id ID          圖片批次碼；輸出到 assets/visuals/<ID>/（預設 = episode；都沒給則自動編號）
 #   --prompt "..."       生圖 prompt（預設：靠窗書桌的動漫女生，無雨）
 #   --negative "..."     負向 prompt（預設允許 1girl）
 #   --size 768x512       生圖尺寸
@@ -47,7 +48,8 @@ KEEP=0
 VBR=9
 IMAGE=""
 GENERATE=0
-CKPT="meinamix_meinaV11.safetensors"
+CKPT="DreamShaperXL-v1.0-Alpha2.safetensors"
+RUN_ID=""
 PREFIX="lofi10scene"
 SIZE="768x512"
 PROMPT="1girl, solo, anime girl sitting at a cozy desk by the window at night, warm desk lamp, coffee mug, books, potted plant, long hair, looking at viewer, lo-fi anime illustration, soft warm lighting, detailed background, muted colors, nostalgic, masterpiece, best quality"
@@ -78,6 +80,7 @@ while [ $# -gt 0 ]; do
     --image)   IMAGE="$2"; shift 2;;
     --generate) GENERATE=1; shift;;
     --ckpt)    CKPT="$2"; shift 2;;
+    --run-id)  RUN_ID="$2"; shift 2;;
     --prefix)  PREFIX="$2"; shift 2;;
     --prompt)  PROMPT="$2"; shift 2;;
     --negative) NEG="$2"; shift 2;;
@@ -97,6 +100,9 @@ while [ $# -gt 0 ]; do
 done
 
 TOTAL=$((MIN * 60))
+
+# 圖片批次碼：預設跟 --episode 同名；兩者都沒有時，由 generate_visual.py 自動編號（<kind><NN>）
+[ -z "$RUN_ID" ] && [ -n "$EPISODE" ] && RUN_ID="$EPISODE"
 
 # ---------- 輸出佈局 ----------
 # --episode NAME：一集一包，全部放 output/episodes/<NAME>/（好備份、好上片、好清理）
@@ -175,7 +181,8 @@ elif [ "$GENERATE" = 1 ]; then
     || { echo "錯誤: ComfyUI 未啟動（127.0.0.1:8188）" >&2; exit 1; }
   echo "    生成新圖（唯一 GPU 步驟，約 40s）…"
   GENOUT="$("$PY" scripts/generate_visual.py --count 1 --size "$SIZE" \
-            --ckpt "$CKPT" --prefix "$PREFIX" --prompt "$PROMPT" --negative "$NEG")"
+            --ckpt "$CKPT" --prefix "$PREFIX" --run-id "$RUN_ID" \
+            --prompt "$PROMPT" --negative "$NEG")"
   echo "$GENOUT" | sed 's/^/    /'
   IMAGE="$(printf '%s\n' "$GENOUT" | grep -o 'assets/visuals/[^ ]*\.png' | tail -1 || true)"
   [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "錯誤: 無法取得生成圖路徑" >&2; exit 1; }

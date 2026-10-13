@@ -5,7 +5,7 @@
 ## 專案是什麼
 
 本機（Mac M4 / 16GB）AI **lofi 音樂 → 長片影片**的產線，最終上傳 YouTube 頻道 **Drifted LoFi**。
-ComfyUI + ACE-Step 生音樂、SD1.5 生場景圖、ffmpeg 做視覺循環與合成。沒有伺服器、沒有雲端。
+ComfyUI + ACE-Step 生音樂、SDXL 生場景圖、ffmpeg 做視覺循環與合成。沒有伺服器、沒有雲端。
 
 ## 架構（重點）
 
@@ -20,7 +20,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   publish.py       # 上片佇列
   library.py       # SQLite 圖書館(catalog/library.db) + 自動標籤
   expand.py        # 風格骨架 -> 曲目清單 CSV
-  visual.py        # ComfyUI + SD1.5 生場景圖
+  visual.py        # ComfyUI + SDXL 生場景圖
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
@@ -28,8 +28,9 @@ scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可�
 scripts/*.sh       # ffmpeg/ComfyUI 重流程（make_episode 五段產線 / build_long_mix / make_long_lofi / archive_episode …）
 prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
-assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（音檔 gitignore，sidecar 進版控）
-catalog/            # tracks.jsonl + index.csv（library.db 為衍生物，gitignore）
+assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整個 assets/ 不進版控，紀錄看 catalog/tracks.jsonl）
+assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifest.json（一 run 一份：config 共用 + images 逐檔 prompt/seed；不進版控）
+catalog/            # tracks.jsonl + index.csv（＝進版控的紀錄流；library.db 為衍生物，gitignore）
 publish/            # 上片資訊 + 狀態
 output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）
 tests/              # python3 -m unittest discover -s tests -v
@@ -55,20 +56,35 @@ python3 -m unittest discover -s tests -v
 
 ## 不變的約定（改動請遵守）
 
-- **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）。沒記錄等於沒做。
-- **唯一命名**：生成檔名含 `--run-id`，禁止讓不同批次產生同名檔（會被覆蓋）。
+- **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）；圖片寫在該批 `assets/visuals/<kind><NN>/manifest.json`。沒記錄等於沒做。**紀錄是本機檔、不進版控**——git 只收 `catalog/*.jsonl`（音樂的事件流）。
+  manifest 是「**一個 run 一份**」：該批固定的模型/尺寸/steps/cfg/negative… 放 `config`（所有圖共用，只寫一次），逐檔會變的 `prompt`/`seed` 列在 `images`。同一個 run 再跑只會**併寫**（新檔 append、舊檔就地更新），不會蓋掉既有紀錄；改某張的 prompt 就改 `images` 裡那一筆。寫入用 `visual.update_manifest()`，不要自己開檔覆寫。
+- **執行資訊要清楚**：任何生成前先用 `visual.print_run_header()` 印出工具、run-id、**哪個模型在跑**、參數與輸出路徑（逐張輸出也帶著模型短標籤），別讓 log 只剩下看不懂的進度行。
+- **唯一命名**：生成檔名／目錄含 run 代號（音樂 `assets/tracks/<style>/<run>/`；圖片 `assets/visuals/<run-id>/`），禁止讓不同批次產生同名檔（會被覆蓋）。
+  圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/VISUAL_NAMING.md`。
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
-- **不進版控**：`assets/**/*.mp3|wav|flac`、`output/`、`logs/`、`catalog/*.db`、`.venv`、models。
+- **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
 - **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
 - **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。
 
 ## 環境注意
 
+- **盡量不安裝新東西**：優先用系統內建或已裝好的工具（例：長時任務用內建 `screen`，不要為此裝 tmux）。真的必要才裝，並在 commit/說明裡寫明為什麼。
 - `output/` 是**外接碟 symlink**；USB/ExFAT 可能掉線 → 寫影片/清理前先 `./scripts/disk_report.sh`。
   生成音檔寫內接 `assets/tracks`，log 寫內接 `logs/`，掉線不受影響。
 - ComfyUI 在 `~/ComfyUI`，需執行中（`127.0.0.1:8188`）才能生成。
 - 系統 `python3` 無 numpy；`src/lofi` 的程式**幾乎只用標準庫**（`cinemagraph.py` 例外，需 numpy，用 `.venv`），勿引入需 numpy/librosa 的相依（除非另開 venv 並說明）。
+
+### ComfyUI 操作要點（踩過的坑）
+
+- **啟動一定要用 venv 的 python**：`cd ~/ComfyUI && nohup ./venv/bin/python main.py --force-fp16 > comfyui.log 2>&1 &`
+  用系統 `python3` 會因為缺 `filelock` 等套件直接掛掉。注意 `ps aux` 顯示的 python 路徑是 venv 解析後的**真實路徑**，別被騙以為是系統 python。
+- 重啟前先確認佇列是空的：`curl -s 127.0.0.1:8188/queue`（避免中斷正在跑的工作）。
+- 新增模型／custom node 後**必須重啟** ComfyUI 才會生效。
+- **GGUF 量化在 Mac MPS 上遠快於 int8**：Z-Image Turbo 同一張圖，int8 要 **920 秒**、GGUF（Q5_K_M）只要 **221 秒**（快 4 倍）。
+  原因是 int8 沒有 Metal 加速路徑，會退回超慢的模擬運算。**在 Mac 上優先用 GGUF。**
+- GGUF 用法：裝 `ComfyUI-GGUF`（在 `custom_nodes/`）＋ `gguf` pip 套件到 venv → 用 `UnetLoaderGGUF` / `CLIPLoaderGGUF` 節點。
+- **z-image 目前用 GGUF 版**：`unet/z-image-turbo-Q5_K_M.gguf` + `text_encoders/Qwen3-4B-Q8_0.gguf` + `vae/ae.safetensors`，CLIP type 選 `lumina2`。
 
 ## 資源限制（RAM / 磁碟，每次都要先想）
 

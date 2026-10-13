@@ -5,6 +5,7 @@
 **目前狀態**
 
 - ✅ 音樂目錄 / 自動品檢 / 回填（P0–P1）
+- ✅ 圖片品檢（黑圖/純色/灰圖/壞檔，`lofi visual-qc`）
 - ✅ 量產工具：唯一命名＋續傳、批次 runner、SQLite 圖書館＋自動標籤
 - ✅ 上片資訊（title/描述/章節/tags）與上片佇列
 - ✅ 程式重構為 `src/lofi` 套件 + `lofi` CLI（舊 `scripts/*.py` 仍可用）
@@ -98,7 +99,7 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 | 段 | 產物 | 底層工具 |
 |---|---|---|
 | 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar | `expand_style` → `batch_run` → `auto_qc` → `library` |
-| 2 圖片 | `assets/visuals/*.png` | `generate_visual`（ComfyUI + SD1.5） |
+| 2 圖片 | `assets/visuals/<kind><NN>/*.png` + manifest | `generate_visual`（ComfyUI + SDXL） |
 | 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成） |
 | 4 上傳 | YouTube 影片（預設 private） | `yt_upload`（YouTube Data API；公開/排程之後手動） |
 | 5 整理 | 封存到外接 `archive/<episode>/` | `archive_episode.sh` |
@@ -121,7 +122,7 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 ./scripts/make_episode.sh --style rainy_lofi --smoke
 ```
 
-- 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/` 最新一張。
+- 影片階段會自動從 `library` 挑 `keep` 曲目（`--limit`、`--tracks` 可覆寫）；未指定 `--image` 就挑 `assets/visuals/<run-id>/` 最新一張。
 - 生圖預設會做 **AI 放大**（`RealESRGAN_x4plus_anime_6B`，768×512→1536×1024），讓 1080p 更銳利；`--no-upscale` 可關。模型安裝：`./scripts/download_p2_models.sh --upscale`（17MB）。
 - 上傳階段預設 `--privacy private`（＝上線前自動、公開手動）；`--no-upload` / `--no-cleanup` 可在 `all` 時略過第 4/5 段。
 - 整理階段把 `output/episodes/<episode>/` 搬到外接 `archive/<episode>/` 並刪中間檔（`--keep-visual` 可保留 `visual_loop.mp4`）。
@@ -159,7 +160,8 @@ lofi-studio/
 │   ├── publish.py             # 上片佇列
 │   ├── library.py             # SQLite 圖書館 + 自動標籤
 │   ├── expand.py              # 用風格骨架展開同風格曲目清單（CSV）
-│   ├── visual.py              # 用 ComfyUI + SD1.5 生 lofi 場景圖
+│   ├── visual.py              # 用 ComfyUI + SDXL 生 lofi 場景圖
+│   ├── visual_qc.py           # 場景圖自動品檢（黑圖/純色/灰圖/壞檔）
 │   ├── cinemagraph.py         # 靜圖 -> 局部微動無縫循環（需 numpy）
 │   └── upload.py              # 上傳成片到 YouTube（需 Google 套件/憑證，用 .venv）
 ├── scripts/                   # bash 管線 + Python 相容 shim（呼叫 src/lofi）
@@ -176,7 +178,7 @@ lofi-studio/
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
-│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / make_cinemagraph.py / yt_upload.py  # 相容 shim（實作在 src/lofi）
+│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / visual_qc.py / make_cinemagraph.py / yt_upload.py  # 相容 shim（實作在 src/lofi）
 ├── tests/                     # python3 -m unittest discover -s tests -v
 ├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
@@ -186,11 +188,12 @@ lofi-studio/
 │   ├── styles/                # 風格骨架（固定 tag + 可變維度），如 rainy_lofi.json
 │   ├── youtube/               # 上片 metadata 範本（title/描述/tags），對應同名 style
 │   └── generated/             # expand_style.py 產出的曲目清單
-├── assets/
+├── assets/                    # ★ 整個不進版控（素材；紀錄見 catalog/）
 │   ├── tracks/<style>/<run>/  # 生成的曲子（分層）；每首附 .json 側錄（來源/品檢/標籤）
-│   └── visuals/               # AI 生成的場景圖放這裡
+│   └── visuals/<kind><NN>/    # AI 生成的場景圖（一批一夾）；manifest.json 逐檔記 prompt/seed
 ├── catalog/                   # 音樂目錄（P0/P1）
 │   ├── tracks.jsonl           # 事件流：每次生成/品檢/… 一行
+│   ├── visuals.jsonl          # 事件流：每次圖片品檢一行（append-only）
 │   └── index.csv              # 由側錄重建的查詢用索引
 ├── publish/                   # 上片資訊（make_meta.py 產出：title/描述/章節/狀態）
 ├── logs/                      # batch runner 的 log（內接，不進版控）
@@ -215,7 +218,8 @@ lofi publish --ready
 lofi generate --csv prompts/generated/x.csv --run-id b01
 lofi expand --style rainy_lofi --count 20 --seed 42
 lofi visual --count 3 --size 768x512
-lofi cinemagraph assets/visuals/scene.png output/visual_loop.mp4   # 需 numpy（.venv）
+lofi visual-qc --all --force       # 圖片品檢（黑圖/純色/灰圖/壞檔）
+lofi cinemagraph assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4   # 需 numpy（.venv）
 ```
 
 （可選）安裝成指令：`pip install -e .`。未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接用 `scripts/*.py`。
@@ -238,11 +242,11 @@ cd ai-music/lofi-studio
 ./scripts/build_long_mix.sh output/mixes/demo_mix.wav 2 assets/tracks/misc/demo/demo_a.wav assets/tracks/misc/demo/demo_b.wav assets/tracks/misc/demo/demo_c.wav
 
 # 3) 做視覺循環（15 秒）
-./scripts/make_visual_loop.sh assets/visuals/demo_visual.png output/visual_loop.mp4 15 30
+./scripts/make_visual_loop.sh assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 15 30
 
 # 3b)（更推薦）局部微動無縫循環：只有窗雨/葉片/燈光在動
 #     換圖記得用 --window / --plant / --lamp 調分區（比例座標）
-python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual_loop.mp4
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
 
 # 4) 合成影片
 ./scripts/render_video.sh output/visual_loop.mp4 output/mixes/demo_mix.wav output/videos/demo_lofi.mp4
@@ -255,7 +259,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 
 ## 腳本參數速查
 
-> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `cinemagraph` / `upload`）。`scripts/*.sh` 仍為 bash。
+> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload`）。`scripts/*.sh` 仍為 bash。
 
 | 腳本 | 用法 |
 |---|---|
@@ -277,12 +281,13 @@ python3 scripts/make_cinemagraph.py assets/visuals/demo_visual.png output/visual
 | `expand_style.py` | `--style NAME [--count 20] [--seed N] [--out PATH] [--dry-run]` |
 | `backfill_catalog.py` | `[--dry-run] [--force]`（把既有音檔補進目錄） |
 | `auto_qc.py` | `[FILE...] [--all] [--force] [--dedupe] [--index] [--json] [--set KEY=VAL]`（自動品檢） |
+| `visual_qc.py` | `[FILE...] [--all] [--force] [--no-write] [--expect WxH] [--json] [--set KEY=VAL]`（場景圖品檢：黑圖/純色/灰圖/壞檔） |
 | `make_meta.py` | `--video PATH --style NAME [--tracks ...] [--xfade N] [--tracklist JSON] [--title T] [--print]`（產生上片資訊） |
 | `upload_status.py` | `[--ready] [--json] [--min-duration S] [--mark-uploaded STEM] [--mark-scheduled STEM] [--url URL]`（上片佇列） |
 | `disk_report.sh` | （無參數）內接/外接容量、各目錄大小、可清理殘留一覽 |
 | `cleanup_outputs.sh` | `[--keep N] [--older-than DAYS] [--archive DIR] [--stems] [--apply]`（**預設只預覽**） |
 
-## P2：生成音樂（ACE-Step 1.5）與視覺（SD1.5）
+## P2：生成音樂（ACE-Step 1.5）與視覺（SDXL）
 
 ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定：
 
@@ -392,6 +397,28 @@ python3 scripts/auto_qc.py --json > qc.json # 給程式用
 > ACE-Step 輸出普遍偏燙（真峰值常 > 0 dB），所以只列 warn、不加重扣分；mix 階段用 `-14 LUFS / -1 dBTP` 正規化會處理掉。只有 `fail` 會自動標 `reject`，`warn` 仍進人工複審。
 > 概略 BPM（`bpm_est`）純參考，免依賴估測不準，**不列入判定**。近似重複比對需 chromaprint/librosa，目前只做 sha1 完全相同偵測。
 
+### 圖片品檢（visual-qc）
+
+AI 生圖常見兩種「破圖」：**整張爛掉**（VAE fp16 溢位 → NaN 黑圖／灰圖／純色）與**內容崩壞**（人臉融化、多手多腳）。這支只抓前者——後者需要 CLIP/人臉偵測等模型，成本高，先用統計法把整張爛掉的擋掉（CP 值最高）。
+
+```bash
+lofi visual-qc                       # 掃描 assets/visuals 尚未品檢的
+lofi visual-qc --all --force         # 全部重算
+lofi visual-qc --expect 1536x1024    # 一併比對尺寸
+lofi visual-qc --json > vqc.json     # 給程式用
+```
+
+判定（`--set key=value` 可調閾值；用 ffmpeg `signalstats`/`entropy`，**純標準庫**）：
+
+| 等級 | 條件 |
+|---|---|
+| ❌ fail | 解不開（殘檔／截斷）、解碼中途報錯、全黑（YMAX ≤ 20）、全白（YMIN ≥ 230）、純色無結構（entropy < 0.05）、完全無彩度（SATMAX < 2） |
+| ⚠️ warn | 尺寸不符、近灰（SATAVG < 4）、對比過低、每像素位元組過小（殘檔） |
+| ✅ pass | 以上皆無 |
+
+> signalstats 走 yuv 有限範圍：**純黑 = 16、純白 = 235**（不是 0/255），所以閾值也是這個尺度。
+> 結果寫回圖片旁的側錄 `<image>.png.json` 的 `visual_qc` 欄位，並 append 一筆到 `catalog/visuals.jsonl`（與 `tracks.jsonl` 分開）。
+
 ### 側錄長相（節錄）
 
 ```json
@@ -431,36 +458,41 @@ python3 scripts/library.py query --tag style:dusk_jazz --status keep
 
 > `batch_run.sh` 的 log 寫在**內接 `logs/`**（外接碟掉線也不會丟）；生成音檔在內接 `assets/tracks`。
 
-## P2：生成視覺（SD1.5 場景圖 → 局部微動循環）
+## P2：生成視覺（SDXL 場景圖 → 局部微動循環）
 
 音樂之外，視覺同樣用 ComfyUI 生靜圖，再交給 `make_cinemagraph.py` 做**無縫循環的局部微動**（Cinemagraph：90% 靜止、只有極小局部在動）。這是在 Mac M4 / 16GB 上最輕量、最可控的做法（不需 AnimateDiff / SVD）。
 
 ### 1. 生場景圖（預設：靠窗書桌的動漫女生）
 ```bash
-# 預設用 SD1.5；prompt/負向詞已內建 1girl（不會再被 people/face 擋掉）
+# 預設用 SDXL（DreamShaperXL）；prompt/負向詞已內建 1girl（不會再被 people/face 擋掉）
 python3 scripts/generate_visual.py --count 3 --size 768x512
+# 一批一夾＋命名規則：資料夾 <kind><NN>、檔名 <run-id>_<NN>_<slug>.png（規則見 docs/VISUAL_NAMING.md）
+python3 scripts/generate_visual.py --run-id sc07 --slug window --count 3 --size 768x512
+# → assets/visuals/sc07/sc07_01_window.png、sc07_02_window.png…
+# manifest.json 一個 run 一份（config 共用 + images 逐檔 prompt/seed）；執行前會先印出「哪顆模型在跑」
 
-# 日系動漫風 checkpoint（本流程已下載 MeinaMix）
-python3 scripts/generate_visual.py --ckpt meinamix_meinaV11.safetensors --count 3 --size 768x512
+# 換其他 SDXL 基底（動漫 tag 系記得加 --clip-skip 2）
+python3 scripts/generate_visual.py --ckpt sd_xl_base_1.0.safetensors --count 3 --size 768x512
 
 # 想純風景（不要人物）
-python3 scripts/generate_visual.py --ckpt meinamix_meinaV11.safetensors --count 3 --size 768x512 \
+python3 scripts/generate_visual.py --count 3 --size 768x512 \
   --prompt "scenery, no humans, indoors, cozy study room at night, warm desk lamp, open book, \
 potted plant, lo-fi anime illustration, soft warm lighting, muted colors, masterpiece, best quality" \
   --negative "lowres, bad hands, text, watermark, people, 1girl, face"
 ```
-> 建議模型：**MeinaMix v11**（本流程已下載）、AnythingV5、Counterfeit — 都是 SD1.5 架構，M4 16GB 完全跑得動（實測約 40 秒／張）。
+> 建議模型：預設 **DreamShaperXL-v1.0-Alpha2**（SDXL，半寫實插畫）；動漫 tag 風可用 NoobAI-XL、WAI-Illustrious。
+> ⚠️ SDXL 模型約 6.5GB，載入佔 RAM；生圖約 2.5 分鐘／張，生成期間勿同時跑音樂生成（見 AGENTS.md「資源限制」）。
 
 ### 2. 做局部微動循環
 ```bash
 # 先驗證頭尾無縫（必做）
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png --check-loop
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png --check-loop
 
 # 預設輸出：只有「顆粒 + 靜態調色（暗角/對比/飽和）」，畫面其餘完全靜止
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
 
 # 要局部微動，再逐一開啟，並把分區指到圖上正確位置（例：檯燈 + 盆栽）
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4 \
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 \
   --glow 0.5 --lamp 0.42,0.27,0.22 --sway 0.012 --plant 0.18,0.10,0.32,0.34
 ```
 
@@ -502,16 +534,16 @@ python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.
 ./scripts/make_long_lofi.sh --generate --minutes 10
 
 # 沿用既有圖（完全不開 ComfyUI，最不熱）
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png
 
 # 檔案更小：lofi 用 4~5 Mbps 就很夠（預設 9）
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png --vbitrate 5
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --vbitrate 5
 
 # 想更保守：限制執行緒、提高 nice
-THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png
+THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png
 
 # 一集一包（推薦）：全輸出集中在 output/episodes/<名稱>/，好備份、好上片、好清理
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png \
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png \
     --minutes 60 --episode rainy-01 --style rainy_lofi
 # → output/episodes/rainy-01/{video.mp4, mix.wav, visual_loop.mp4}
 #   並產生 publish/rainy-01.json（識別名即 episode 名稱）
@@ -591,7 +623,7 @@ python3 scripts/make_meta.py --video output/videos/lofi_30min_cozy.mp4 \
     --style cozy_morning --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
 # 或渲染時就自動產生
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png --minutes 30 \
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --minutes 30 \
     --tracks assets/tracks/cozy_morning/*/*.mp3 --style cozy_morning
 ```
 
@@ -640,7 +672,7 @@ python3 scripts/batch_generate.py --csv prompts/generated/dusk_jazz.csv --clean-
 
 第一次建議先做 30 分鐘試水溫。
 
-> 低負載做法：`./scripts/make_long_lofi.sh --image assets/visuals/scene.png --minutes 60`（3600 / 20 = 180 次，`--loop 20` 可整除），全程幾乎不重編碼。
+> 低負載做法：`./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --minutes 60`（3600 / 20 = 180 次，`--loop 20` 可整除），全程幾乎不重編碼。
 
 ## 合規重點（發布前）
 

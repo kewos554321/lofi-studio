@@ -4,7 +4,7 @@
 #
 # 五段各自獨立、可單獨執行（方便測試）；--stage all（預設）則一條龍跑完。
 #   1) music   展開清單 -> 生成音樂 -> 品檢 -> 圖書館
-#   2) image   ComfyUI + SD1.5 生場景圖
+#   2) image   ComfyUI + SDXL 生場景圖
 #   3) video   挑 keeper -> 混音 -> cinemagraph -> 合成影片 -> 上片資訊
 #   4) upload  上傳到 YouTube（上線前自動；需一次性憑證，見 README「自動上傳設定」）
 #   5) cleanup 封存到外接 archive/ 並清中間檔
@@ -24,7 +24,7 @@
 #   --episode NAME                 影片輸出包名（預設 <style>-<MMDD-HHMM>）
 #   --minutes N                    影片長度（分，預設 30）
 #   --count N                      音樂階段生成曲數（預設 0 = 不生成、只用既有）
-#   --run-id ID                    音樂批次碼（預設 = episode）
+#   --run-id ID                    批次碼（音樂＋圖片；預設 = episode）；圖片輸出到 assets/visuals/<ID>/
 #   --limit N                      影片用幾首（預設 16；從 library keeper 挑）
 #   --tracks A B C ...             影片指定曲目（給了就跳過 library 挑選）
 #   --images N                     圖片階段生幾張（預設 1）
@@ -33,7 +33,7 @@
 #   --upscale-out WxH              放大後尺寸（預設生成尺寸×2）
 #   --no-upscale                   關閉生圖放大
 #   --size WxH                     生圖尺寸（預設 768x512）
-#   --ckpt NAME                    生圖 checkpoint（預設 meinamix_meinaV11.safetensors）
+#   --ckpt NAME                    生圖 checkpoint（預設 DreamShaperXL-v1.0-Alpha2.safetensors）
 #   --seed N                       固定亂數種子（音樂/圖片共用）
 #   --chunk N --sleep N            音樂批次大小 / 散熱秒數（預設 20 / 30）
 #   --xfade N --loop N --fps N --vbitrate N   傳給 make_long_lofi.sh
@@ -65,7 +65,7 @@ UPSCALE="RealESRGAN_x4plus_anime_6B.pth"
 UPSCALE_OUT=""
 NO_UPSCALE=0
 SIZE="768x512"
-CKPT="meinamix_meinaV11.safetensors"
+CKPT="DreamShaperXL-v1.0-Alpha2.safetensors"
 SEED=""
 CHUNK=20
 SLEEP=30
@@ -197,8 +197,8 @@ stage_image() {
     fi
   fi
   run "$PY" scripts/generate_visual.py --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
-      --prefix "$EPISODE" "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
-  echo "  → 圖片階段完成（assets/visuals/${EPISODE}*.png）"
+      --prefix "$EPISODE" --run-id "$RUN_ID" "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
+  echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json）"
 }
 
 # ---------- 第 3 段：影片 ----------
@@ -209,8 +209,8 @@ stage_video() {
   # --- 選圖 ---
   local img="$IMAGE"
   if [ -z "$img" ] && [ "$DRY" = 0 ]; then
-    img="$(ls -t "assets/visuals/${EPISODE}"*.png 2>/dev/null | head -1 || true)"
-    if [ -z "$img" ]; then img="$(ls -t assets/visuals/*.png 2>/dev/null | head -1 || true)"; fi
+    img="$(ls -t "assets/visuals/${RUN_ID}"/*.png 2>/dev/null | head -1 || true)"
+    if [ -z "$img" ]; then img="$(ls -t assets/visuals/*/*.png assets/visuals/*.png 2>/dev/null | head -1 || true)"; fi
   fi
   if [ "$DRY" = 1 ]; then
     echo "  圖片: ${img:-（自動挑 assets/visuals/ 最新，或 ${EPISODE}*.png）}"

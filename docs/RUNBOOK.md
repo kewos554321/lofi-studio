@@ -157,25 +157,66 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 視覺分兩步：**AI 生靜圖** → **程序化做局部微動循環**。這是「原創性」的來源。
 > 為什麼不用 AnimateDiff / SVD？Cinemagraph 需求是「90% 靜止、只有極小局部在動」，這需要逐像素座標控制；在 M4 16GB 上 AI 影片模型又慢又易爆記憶體，且無法只鎖定「窗上的雨、檯燈的光暈」。程序化做法秒級完成、零額外下載、逐像素精準。
 
-### 6.1 生場景圖（SD1.5 / 日系模型）
+### 6.1 生場景圖（SDXL）
 
 **預設 prompt 已改成「靠窗書桌的動漫女生」**（含 `1girl, solo`，負向詞不再擋人物）：
 
 ```bash
-python3 scripts/generate_visual.py --count 3 --size 768x512          # 預設 SD1.5
+python3 scripts/generate_visual.py --count 3 --size 768x512      # 預設 DreamShaperXL（SDXL）
 ```
 
-想更接近 lofi 動漫風，換 SD1.5 架構的日系 checkpoint（`--ckpt`）：
+> **一批一夾＋命名規則**：輸出到 `assets/visuals/<run-id>/`，夾內寫一份 `manifest.json`。
+>
+> ```
+> 資料夾： <kind><NN>                      ref=主角定裝參考 / ds=LoRA 訓練集 / sc=場景風格測試
+> 檔名　： <run-id>_<NN>[_<slug>].<ext>     ref04_01_gold-socks.png、ds02_07_walk-side-fireplace.png
+> ```
+>
+> - `--run-id` 沒給就自動編號（`ref05` 之後給 `ref06`），不必自己記數。
+> - `--slug` 給短標籤（小寫英數），一眼看出內容；`--count 3` 會依序編號。
+> - 衍生檔的 slug 用保留字首：`anim-`（動畫）、`cmp-`（對照合成）、`mask-`（遮罩）、`fix-`（後處理）。
+> - 完整規則與舊→新對照表：`docs/VISUAL_NAMING.md`。
+
+`manifest.json` 是「**一個 run 一份**」，分兩塊：
+
+- **`config`**：這一 run 固定、所有圖共用的設定（`ckpt`/`size`/`steps`/`cfg`/`sampler`/`negative`…），只寫一次。
+- **`images`**：逐檔清單，每筆 `{file, seed, prompt}`。prompt 放這裡才能「一張一張對應」。
+
+```jsonc
+{
+  "manifest_version": 2, "run_id": "cat01", "tool": "lofi.visual",
+  "created_at": "…", "updated_at": "…",
+  "config": { "ckpt": "DreamShaperXL-v1.0-Alpha2.safetensors", "size": "832x1216",
+              "steps": 28, "cfg": 6.5, "sampler": "dpmpp_2m", "negative": "…" },
+  "images": [ { "file": "cat01_lofi_scene_00001_.png", "seed": 12345, "prompt": "a cat on a windowsill…" } ]
+}
+```
+
+好處：同一個 `--run-id` 再跑，只會**併寫**（新檔 append、舊檔就地更新），不會蓋掉舊紀錄；要改某一張的 prompt，就改 `images` 裡那一筆。舊的扁平格式 manifest 讀進來會自動升級成這個結構。
+
+每次生成前會先印一段執行資訊，開頭就寫明**跑的是哪顆模型**：
+
+```
+────────────────────────────────────────────────────────────────
+▶ lofi.visual（ComfyUI + SDXL）    run-id=sc07    共 3 張
+  模型：DreamShaperXL-v1.0-Alpha2
+  輸出：assets/visuals/sc07
+  尺寸：832x1216   步數：28   CFG：6.5   取樣器：dpmpp_2m
+────────────────────────────────────────────────────────────────
+[1/3] DreamShaperXL-v1.0-Alpha2 832x1216 seed=123456
+    ✅ 152s -> sc07_01_window.png
+```
+
+> 舊 run 有圖卻沒有 manifest（紀錄遺失）時可從圖檔內嵌的 workflow 反推補回：`backfill_manifest()`（見 `scripts/_tmp_backfill_manifests.py`）。
+
+換其他 SDXL 基底（`--ckpt`；模型須已放進 `~/ComfyUI/models/checkpoints/`）：
 
 ```bash
-# 下載（本流程實測可用，2.1GB）
-curl -L -o ~/ComfyUI/models/checkpoints/meinamix_meinaV11.safetensors \
-  https://huggingface.co/Xiero/Meinamix/resolve/main/meinamix_meinaV11.safetensors
-
-python3 scripts/generate_visual.py --ckpt meinamix_meinaV11.safetensors \
-  --count 3 --size 768x512
+python3 scripts/generate_visual.py --ckpt sd_xl_base_1.0.safetensors --count 3
+# 動漫 tag 系（NoobAI-XL / WAI-Illustrious）記得加 --clip-skip 2
 ```
-> 建議模型：**MeinaMix v11**、AnythingV5、Counterfeit。皆為 SD1.5 架構，M4 16GB 可跑（實測約 40 秒／張）。
+> 建議模型：預設 **DreamShaperXL-v1.0-Alpha2**（SDXL，半寫實插畫）；動漫 tag 風可用 NoobAI-XL、WAI-Illustrious。
+> ⚠️ SDXL 模型約 6.5GB，載入佔 RAM；生圖約 2.5 分鐘／張，生成期間勿同時跑音樂生成（見 AGENTS.md「資源限制」）。
 > 要**純風景**（不要人）：`--prompt "scenery, no humans, indoors, ..."`。原本負向詞含 `people, face, hands` 會讓人出不來，已移除；`1girl, solo, ...` 就會有女生。
 
 **建議加 AI 放大**（768×512 直接升到 1080p 會軟糊）：
@@ -187,17 +228,29 @@ python3 scripts/generate_visual.py --count 3 --size 768x512 \
 ```
 > `make_episode.sh` 裝了模型後會**自動放大**（`--no-upscale` 可關）；`make_long_lofi.sh` 升頻已改用 lanczos。
 
+**生完先品檢**（擋掉整張爛掉的圖，例如 VAE fp16 溢位造成的黑圖／灰圖）：
+
+```bash
+lofi visual-qc --expect 1536x1024    # 掃 assets/visuals，順便比對尺寸
+lofi visual-qc --json > vqc.json     # 只看結果不寫檔：--no-write
+```
+
+> 用 ffmpeg `signalstats`/`entropy`（純標準庫）判定：fail = 解不開／全黑／全白／純色／無彩度；
+> warn = 尺寸不符／近灰／對比過低。結果寫進圖片旁側錄 `<image>.png.json` 的 `visual_qc`，並 append 到
+> `catalog/visuals.jsonl`。**只抓「整張爛掉」**；人臉融化、多手多腳這類內容崩壞需模型，暫不處理。
+> 反覆出現黑圖時，改 ComfyUI 啟動參數把 VAE 走 fp32（`main.py --force-fp16 --fp32-vae`）通常就解了。
+
 ### 6.2 做局部微動循環（Cinemagraph）
 
 ```bash
 # 先用 --check-loop 驗證頭尾無縫（必做）
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png --check-loop
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png --check-loop
 
 # 預設輸出＝只有顆粒＋靜態調色（其餘完全靜止）
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
 
 # 要局部微動再逐一開啟（分區要對準圖上位置）
-python3 scripts/make_cinemagraph.py assets/visuals/scene.png output/visual_loop.mp4 \
+python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 \
   --glow 0.5 --lamp 0.42,0.27,0.22 --sway 0.012 --plant 0.18,0.10,0.32,0.34
 
 # 先看有哪些效果參數
@@ -248,12 +301,12 @@ python3 scripts/make_cinemagraph.py --help
 
 ```bash
 ./scripts/make_long_lofi.sh --generate --minutes 10            # 生圖 + 10 分鐘（只有生圖動 GPU）
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png   # 沿用既有圖，完全不開 ComfyUI
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png --vbitrate 5      # 檔案更小
-THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png # 更保守
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png   # 沿用既有圖，完全不開 ComfyUI
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --vbitrate 5      # 檔案更小
+THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png # 更保守
 
 # 一集一包（推薦）：輸出集中在 output/episodes/<名稱>/，並產生 publish/<名稱>.json
-./scripts/make_long_lofi.sh --image assets/visuals/scene.png \
+./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png \
     --minutes 60 --episode rainy-01 --style rainy_lofi
 ```
 
@@ -290,7 +343,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 # 分段單獨跑（測試/接續）
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20
 ./scripts/make_episode.sh --style rainy_lofi --stage image --images 3
-./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/rl01_00001_.png
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/sc07/sc07_01_window.png
 ./scripts/make_episode.sh --style rainy_lofi --stage upload --episode rl01
 ./scripts/make_episode.sh --style rainy_lofi --stage cleanup --episode rl01
 
@@ -304,12 +357,12 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/scene.png #
 | 段 | 指令本體 | 產物 |
 |---|---|---|
 | `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
-| `image` | `generate_visual`（ComfyUI + SD1.5） | `assets/visuals/<episode>*.png` |
+| `image` | `generate_visual`（ComfyUI + SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json） |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
 | `upload` | `yt_upload`（YouTube Data API，預設 private） | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
-- 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/` 最新圖。
+- 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
 - `--count 0`（預設）＝音樂段不生成、沿用既有曲目。
 - `all` 時可用 `--no-upload` / `--no-cleanup` 略過第 4/5 段；上傳可見性用 `--privacy private|unlisted|public`（預設 private）。
 

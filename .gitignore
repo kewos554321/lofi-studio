@@ -10,13 +10,10 @@ __pycache__/
 # 衍生資料庫（由 sidecar 重建）
 catalog/*.db
 
-# 素材（AI 生成的大檔）；分層 <style>/<run_id>/ 故用 **
-assets/**/*.wav
-assets/**/*.mp3
-assets/**/*.flac
-assets/demo/*
-assets/visuals/*.png
-assets/visuals/*.jpg
+# 素材（AI 生成的大檔）：整個 assets/ 不進版控
+# 可追溯的紀錄不放這裡——音樂在 catalog/tracks.jsonl（append-only 事件流，含 prompt/seed/params/QC），
+# 圖片在 assets/visuals/<kind><NN>/manifest.json（本機檔）。git 只收 catalog/ 與程式。
+/assets/
 
 # 模型權重
 models/*
