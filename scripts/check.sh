@@ -13,6 +13,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# macOS 系統 python 會把 bytecode 快取在 ~/Library/Caches/com.apple.python（不是 __pycache__），
+# 若殘留舊版可能讓測試跑到過期程式碼。改用獨立快取目錄，確保一定從原始碼編譯。
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$(mktemp -d)}"
+
 fail=0
 
 echo "==> compile: src/lofi"
