@@ -34,7 +34,8 @@ from pathlib import Path
 
 from lofi import comfy
 from lofi import io
-from lofi.config import COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT
+from lofi import media
+from lofi.config import COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, MIN_FREE_GB
 from lofi.lock import gpu_lock
 from lofi.paths import VISUALS_DIR
 
@@ -626,6 +627,7 @@ def main():
 
     if not args.dry_run:
         comfy.require_online(args.url)
+        media.require_free(VIS_DIR, MIN_FREE_GB, "內接碟 assets/visuals")
 
     # 一批一夾：assets/visuals/<kind><NN>/；未給 run-id 就自動編號（ref05 之後給 ref06）
     run_id = sanitize_run_id(args.run_id) or next_run_id(args.kind)

@@ -1,10 +1,11 @@
-"""ffmpeg / ffprobe 小工具（共用；以前 qc.py 與 meta.py 各寫一份 ffprobe_duration）。
+"""ffmpeg / ffprobe 小工具 + 磁碟空間檢查（共用；純標準庫，系統 python3 即可）。
 
-純標準庫，系統 python3 即可。
+以前 qc.py 與 meta.py 各寫一份 ffprobe_duration；磁碟檢查只散在 shell 腳本裡。
 """
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def have(binary):
@@ -35,3 +36,25 @@ def ffprobe_duration(path):
         return float(out)
     except ValueError:
         return None
+
+
+# ----------------------------- 磁碟空間 -----------------------------
+
+def free_gb(path):
+    """回傳 path 所在檔案系統的可用 GB（path 不存在就往最近的祖先找）。"""
+    p = Path(path)
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    return shutil.disk_usage(p).free / 1e9
+
+
+def require_free(path, min_gb, label=""):
+    """可用空間不足（< min_gb）就中止，避免生成到一半寫爆碟（見 AGENTS.md 資源限制）。"""
+    free = free_gb(path)
+    if free < min_gb:
+        sys.exit(
+            f"磁碟空間不足（{label or path}）：可用 {free:.1f}GB < 需要 {min_gb}GB。\n"
+            f"  清理中間檔：./scripts/cleanup_outputs.sh --apply\n"
+            f"  確認磁碟：./scripts/disk_report.sh\n"
+            f"  （可用 LOFI_MIN_FREE_GB 調整門檻）")
+    return free

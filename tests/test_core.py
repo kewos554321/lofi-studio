@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import catalog, io, library, meta, qc, visual, visual_qc  # noqa: E402
+from lofi import catalog, io, library, media, meta, qc, visual, visual_qc  # noqa: E402
 
 
 def _png_with_prompt(path, workflow):
@@ -509,6 +509,23 @@ class TestIO(unittest.TestCase):
             catalog.sidecar_path(audio).write_text("{ bad", encoding="utf-8")
             self.assertIsNone(catalog.load_sidecar(audio))
             self.assertEqual(len(list(Path(d).glob("*.corrupt-*"))), 1)
+
+
+class TestDiskFree(unittest.TestCase):
+    """磁碟空間 preflight（Python 端，原本只有 shell 有）。"""
+
+    def test_free_gb_positive(self):
+        self.assertGreater(media.free_gb("."), 0)
+
+    def test_free_gb_nonexistent_falls_back_to_ancestor(self):
+        self.assertGreater(media.free_gb("/no/such/path/here/deep"), 0)
+
+    def test_require_free_passes_when_room(self):
+        media.require_free(".", 0.0001, "test")   # 不應中止
+
+    def test_require_free_exits_when_full(self):
+        with self.assertRaises(SystemExit):
+            media.require_free(".", 10 ** 9, "test")   # 要求 10 億 GB
 
 
 if __name__ == "__main__":

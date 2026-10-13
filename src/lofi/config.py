@@ -38,6 +38,10 @@ MUSIC_VAE = _env("LOFI_MUSIC_VAE", "ace_1.5_vae.safetensors")
 IMAGE_CKPT = _env("LOFI_IMAGE_CKPT", "DreamShaperXL-v1.0-Alpha2.safetensors")
 UPSCALE_MODEL = _env("LOFI_UPSCALE_MODEL", "RealESRGAN_x4plus_anime_6B.pth")
 
+# ── 資源保護 ─────────────────────────────────────────────────────────
+# 生成前要求內接碟至少這麼多可用 GB（見 AGENTS.md 資源限制）
+MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
+
 
 def as_dict():
     """以「可讀名稱 -> 值」列出目前設定（給 `lofi config` 用）。"""
@@ -50,6 +54,7 @@ def as_dict():
         "music_vae": MUSIC_VAE,
         "image_ckpt": IMAGE_CKPT,
         "upscale_model": UPSCALE_MODEL,
+        "min_free_gb": MIN_FREE_GB,
     }
 
 

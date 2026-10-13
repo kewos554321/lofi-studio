@@ -24,9 +24,10 @@ from pathlib import Path
 
 from lofi import catalog as cat      # 音樂目錄（sidecar + JSONL）
 from lofi import comfy               # ComfyUI API 小客戶端
+from lofi import media               # ffmpeg 工具 + 磁碟空間檢查
 from lofi import qc                  # 生成後自動品檢（可用 --no-qc 關閉）
-from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MUSIC_CLIP1, MUSIC_CLIP2,
-                         MUSIC_UNET, MUSIC_VAE)
+from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MIN_FREE_GB, MUSIC_CLIP1,
+                         MUSIC_CLIP2, MUSIC_UNET, MUSIC_VAE)
 from lofi.lock import gpu_lock
 from lofi.paths import PROMPT_LIB, TRACKS_DIR
 
@@ -155,6 +156,7 @@ def main():
     if not args.dry_run:
         ver = comfy.require_online(args.url)
         print(f"ComfyUI {ver} @ {args.url}")
+        media.require_free(TRACKS_DIR, MIN_FREE_GB, "內接碟 assets/tracks")
 
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     ok = 0
