@@ -28,7 +28,7 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
 預設 checkpoint：DreamShaperXL-v1.0-Alpha2.safetensors（SDXL，半寫實插畫；見 models/README.md）。
 放大模型放在 ~/ComfyUI/models/upscale_models/（見 download_p2_models.sh）。
 """
-import argparse, json, random, re, shutil, sys, time, urllib.request, urllib.error
+import argparse, json, random, re, shutil, sys, time, unicodedata, urllib.request, urllib.error
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +53,7 @@ def sanitize_run_id(s):
 #       slug 短標籤（小寫英數，一眼看出內容）；衍生檔 slug 用保留字首
 #       anim-（動畫）/ cmp-（對照合成）/ mask-（遮罩）/ fix-（後處理）。
 VIS_KINDS = ("ref", "ds", "sc")          # ref=主角定裝參考 ds=訓練集 sc=場景風格測試
+VIS_KIND_LABELS = {"ref": "定裝參考", "ds": "訓練集", "sc": "場景測試"}
 
 
 def parse_run_id(run_id):
@@ -176,18 +177,22 @@ def load_manifest(out_dir):
     return upgrade_manifest(raw)
 
 
-def update_manifest(out_dir, run_id="", tool="", caller="", config=None, images=None):
+def update_manifest(out_dir, run_id="", tool="", caller="", config=None, images=None,
+                    created_at=""):
     """併寫 manifest：一個 run 一份，重跑不會蓋掉舊紀錄。
 
     - config：該批固定、所有圖共用的設定（模型/尺寸/steps/cfg/negative…）只存一次
     - images：逐檔清單 [{file, seed, prompt}]；同一 run 再跑會依 file 新增或就地更新
     - caller：誰呼叫的（腳本名），方便回頭查出這筆是哪支程式寫的
-    空字串不會蓋掉既有值；created_at 保留、updated_at 更新。回傳併寫後的 manifest。
+    - created_at：補寫時用（回填舊 run 要沿用原始時間，不能用「現在」）
+    空字串不會蓋掉既有值；created_at 一旦有了就不動、updated_at 更新。回傳併寫後的 manifest。
     """
     out_dir = Path(out_dir)
     m = load_manifest(out_dir)
     now = _now_iso()
     m["manifest_version"] = MANIFEST_VERSION
+    if created_at and not m.get("created_at"):
+        m["created_at"] = created_at
     m.setdefault("created_at", now)
     m["updated_at"] = now
     if run_id:
@@ -334,9 +339,13 @@ def backfill_manifest(out_dir, tool=""):
     """掃資料夾裡的圖，從內嵌 workflow 反推 config/prompt 補寫 manifest（救舊 run）。
 
     回傳補到的張數。已有 manifest 的圖會就地併寫（不覆蓋既有值）。
+    created_at 用**最早的圖檔時間**，不要寫成「現在」——不然看不出這批是哪時候跑的。
     """
     out_dir = Path(out_dir)
     files = sorted(out_dir.glob("*.png"))
+    oldest = min((f.stat().st_mtime for f in files), default=0)
+    created = (datetime.fromtimestamp(oldest).astimezone().isoformat(timespec="seconds")
+               if oldest else "")
     n = 0
     for f in files:
         wf = read_png_workflow(f)
@@ -347,7 +356,7 @@ def backfill_manifest(out_dir, tool=""):
             continue
         entry["file"] = f.name
         update_manifest(out_dir, run_id=out_dir.name, tool=tool or guess_tool(wf),
-                        caller="backfill", config=cfg, images=[entry])
+                        caller="backfill", created_at=created, config=cfg, images=[entry])
         n += 1
     return n
 
@@ -485,6 +494,87 @@ def api(url, path, payload=None, timeout=30):
         return json.load(r)
 
 
+# ── 批次總表：一眼看出哪批是什麼、什麼時候跑的（時間不塞進檔名）──────────
+def _disp_width(s):
+    """字串顯示寬度（中文算 2 格），用來對齊表格。"""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in str(s))
+
+
+def _pad(s, width, right=False):
+    gap = " " * max(0, width - _disp_width(s))
+    return gap + str(s) if right else str(s) + gap
+
+
+def age_text(iso, now=None):
+    """把時間講成人話：3 天前 / 5 小時前。"""
+    try:
+        t = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return ""
+    now = now or datetime.now(t.tzinfo)
+    s = (now - t).total_seconds()
+    if s < 0:
+        return ""
+    if s < 3600:
+        return f"{int(s // 60)} 分前"
+    if s < 86400:
+        return f"{int(s // 3600)} 小時前"
+    return f"{int(s // 86400)} 天前"
+
+
+def run_rows(vis_dir=None):
+    """掃 assets/visuals 每一批，回傳表格用的資料。
+
+    時間優先用 manifest 的 created_at；沒有（更早的 run）就用資料夾 mtime。
+    """
+    d = Path(vis_dir) if vis_dir else VIS_DIR
+    rows = []
+    for p in (sorted(d.iterdir()) if d.is_dir() else []):
+        if not p.is_dir():
+            continue
+        m = load_manifest(p)
+        created = m.get("created_at") or datetime.fromtimestamp(
+            p.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+        cfg = m.get("config") or {}
+        rows.append({
+            "run_id": p.name,
+            "kind": parse_run_id(p.name)[0],
+            "created_at": created,
+            "updated_at": m.get("updated_at", ""),
+            "model": cfg.get("ckpt") or cfg.get("unet") or "-",
+            "tool": m.get("tool", "-"),
+            "images": len(list(p.glob("*.png"))),
+            "logged": len(m.get("images", [])),
+            "renamed_from": m.get("renamed_from", ""),
+        })
+    return rows
+
+
+def print_runs(vis_dir=None, sort="id"):
+    """批次總表：用途／建立時間／多久前／模型／張數（看得出哪批是上週跑的、該不該清）。
+
+    sort="id" 照批次代號排（好查某一批）；sort="time" 最新的排前面（好清舊的）。
+    """
+    rows = run_rows(vis_dir)
+    if not rows:
+        print(f"（{vis_dir or VIS_DIR} 底下還沒有任何批次）")
+        return
+    rows.sort(key=lambda r: r["created_at"] if sort == "time" else r["run_id"],
+              reverse=(sort == "time"))
+    print(_pad("run-id", 8) + _pad("用途", 12) + _pad("建立時間", 19)
+          + _pad("多久前", 10) + _pad("模型", 24) + _pad("張數", 5, right=True))
+    print("─" * 78)
+    for r in rows:
+        print(_pad(r["run_id"], 8)
+              + _pad(VIS_KIND_LABELS.get(r["kind"], r["kind"] or "-"), 12)
+              + _pad(r["created_at"][:16].replace("T", " "), 19)
+              + _pad(age_text(r["created_at"]), 10)
+              + _pad(r["model"][:22], 24)
+              + _pad(r["images"], 5, right=True))
+    print(f"\n共 {len(rows)} 批、{sum(r['images'] for r in rows)} 張圖"
+          "（時間取自 manifest.created_at；沒有就用資料夾 mtime）")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:8188")
@@ -515,8 +605,16 @@ def main():
                     help="img2img 起點圖（檔名需在 ComfyUI/input/），搭配 --denoise < 1；此時 --size 會被忽略")
     ap.add_argument("--denoise", type=float, default=1.0,
                     help="重繪強度：1.0=完全重畫；0.5~0.7=大改；0.3~0.45=小幅改動保留構圖")
+    ap.add_argument("--list", action="store_true",
+                    help="列出 assets/visuals 各批（用途/建立時間/多久前/模型/張數）後結束，不需要 ComfyUI")
+    ap.add_argument("--sort", default="id", choices=("id", "time"),
+                    help="搭配 --list：id=照批次代號排（預設）；time=最新的排前面（好清舊的）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    if args.list:
+        print_runs(sort=args.sort)
+        return
 
     try:
         w, h = (int(x) for x in args.size.lower().split("x"))

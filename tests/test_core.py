@@ -1,11 +1,31 @@
 """核心純函式測試。執行： python3 -m unittest discover -s tests -v"""
+import json
+import struct
 import sys
 import unittest
+import zlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lofi import library, meta, visual, visual_qc  # noqa: E402
+
+
+def _png_with_prompt(path, workflow):
+    """造一張只有 tEXt(prompt=…) 的最小 PNG（1x1），用來測 read_png_workflow / backfill。"""
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    raw = b"\x00\xff\xff\xff"                       # filter 0 + 1px RGB
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+           + chunk(b"tEXt", b"prompt\x00" + json.dumps(workflow).encode())
+           + chunk(b"IDAT", zlib.compress(raw))
+           + chunk(b"IEND", b""))
+    Path(path).write_bytes(png)
+    return Path(path)
 
 
 class TestMetaFormat(unittest.TestCase):
@@ -171,6 +191,78 @@ class TestVisualNaming(unittest.TestCase):
 
     def test_kinds_are_documented(self):
         self.assertEqual(visual.VIS_KINDS, ("ref", "ds", "sc"))
+        self.assertEqual(visual.VIS_KIND_LABELS["ref"], "定裝參考")
+
+    def test_age_text(self):
+        now = datetime.now(timezone.utc)
+        self.assertEqual(visual.age_text((now - timedelta(minutes=5)).isoformat(), now), "5 分前")
+        self.assertEqual(visual.age_text((now - timedelta(hours=3)).isoformat(), now), "3 小時前")
+        self.assertEqual(visual.age_text((now - timedelta(days=2)).isoformat(), now), "2 天前")
+        self.assertEqual(visual.age_text(""), "")
+        self.assertEqual(visual.age_text("不是時間"), "")
+
+    def test_pad_counts_cjk_as_two_cells(self):
+        """表格要對齊：中文算兩格。"""
+        self.assertEqual(visual._disp_width("定裝參考"), 8)
+        self.assertEqual(visual._disp_width("ref01"), 5)
+        self.assertEqual(visual._disp_width(visual._pad("定裝參考", 12)), 12)
+        self.assertEqual(visual._disp_width(visual._pad("訓練集", 12)), 12)
+        self.assertEqual(visual._pad("7", 5, right=True), "    7")
+
+    def test_run_rows_reads_manifest(self):
+        """總表要讀得到用途／時間／模型／張數。"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            vd = Path(d)
+            r = vd / "ref01"
+            r.mkdir()
+            (r / "ref01_01_x.png").write_bytes(b"")
+            visual.update_manifest(r, run_id="ref01", tool="z-image-turbo-gguf",
+                                   config={"unet": "z.gguf"},
+                                   images=[{"file": "ref01_01_x.png", "seed": 1}])
+            rows = visual.run_rows(vd)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["run_id"], "ref01")
+            self.assertEqual(rows[0]["kind"], "ref")
+            self.assertEqual(rows[0]["model"], "z.gguf")
+            self.assertEqual(rows[0]["images"], 1)
+            self.assertTrue(rows[0]["created_at"])
+
+    def test_backfill_uses_file_time_not_now(self):
+        """回填的 created_at 要用圖檔時間，不能寫成『現在』（不然看不出是哪時候跑的）。"""
+        import os
+        import tempfile
+        import time
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "ref09"                 # run-id 取自資料夾名
+            p.mkdir()
+            wf = {
+                "4": {"class_type": "CheckpointLoaderSimple",
+                      "inputs": {"ckpt_name": "A.safetensors"}},
+                "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "a cat"}},
+                "3": {"class_type": "KSampler",
+                      "inputs": {"seed": 7, "steps": 8, "cfg": 2.0, "sampler_name": "euler",
+                                 "scheduler": "simple", "positive": ["6", 0]}},
+            }
+            img = _png_with_prompt(p / "ref09_01_cat.png", wf)
+            old = time.time() - 7 * 86400
+            os.utime(img, (old, old))
+            self.assertEqual(visual.backfill_manifest(p), 1)
+            m = visual.load_manifest(p)
+            self.assertEqual((m["run_id"], m["tool"]), ("ref09", "lofi.visual"))
+            self.assertEqual(m["config"]["ckpt"], "A.safetensors")
+            self.assertEqual(m["images"][0]["seed"], 7)
+            self.assertEqual(m["images"][0]["prompt"], "a cat")
+            self.assertEqual(m["created_at"][:10],
+                             datetime.fromtimestamp(old).astimezone().strftime("%Y-%m-%d"))
+
+    def test_read_png_workflow_bad_input(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "not.png"
+            f.write_bytes(b"hello")
+            self.assertIsNone(visual.read_png_workflow(f))
+            self.assertIsNone(visual.read_png_workflow(Path(d) / "missing.png"))
 
 
 class TestVisualRunDir(unittest.TestCase):
