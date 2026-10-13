@@ -34,7 +34,7 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 
 **Step 1 — 選風格、展開曲目清單**
 ```bash
-python3 scripts/expand_style.py --style rainy_lofi --count 20 --seed 42
+./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
 #   → prompts/generated/rainy_lofi.csv
 ```
 可用風格見 `prompts/styles/`（含參考頻道風格 `dusk_jazz` / `coastal_guitar` / `forest_piano`）。
@@ -42,7 +42,7 @@ python3 scripts/expand_style.py --style rainy_lofi --count 20 --seed 42
 **Step 2 — 生成音樂**
 ```bash
 # 少量／試水溫
-python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
+./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
 
 # 大量（例如 1000 首）：分批、自動續傳、散熱
 ./scripts/batch_run.sh --csv prompts/generated/rainy_lofi.csv \
@@ -53,16 +53,16 @@ python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit
 
 **Step 3 — 品檢 + 建圖書館**
 ```bash
-python3 scripts/auto_qc.py --all --index      # 響度/削波/靜音/時長
-python3 scripts/library.py build              # SQLite + 自動標籤
-python3 scripts/library.py summary            # 各風格淘汰率、旗標排行
+./scripts/lofi qc --all --index      # 響度/削波/靜音/時長
+./scripts/lofi library build              # SQLite + 自動標籤
+./scripts/lofi library summary            # 各風格淘汰率、旗標排行
 ```
 
 **Step 4 — 挑 keeper 拼長片**
 ```bash
 # 例：品檢 pass 且分數 ≥ 90 的標為 keeper
-python3 scripts/library.py set-status keep --verdict pass --min-score 90
-python3 scripts/library.py query --tag style:rainy_lofi --status keep
+./scripts/lofi library set-status keep --verdict pass --min-score 90
+./scripts/lofi library query --tag style:rainy_lofi --status keep
 
 # 拼成長片音訊（-14 LUFS 正規化）
 ./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/rainy_lofi/*/*.mp3
@@ -78,15 +78,15 @@ python3 scripts/library.py query --tag style:rainy_lofi --status keep
 
 **Step 6 — 產生上片資訊**
 ```bash
-python3 scripts/make_meta.py --video output/videos/lofi_30min.mp4 \
+./scripts/lofi meta --video output/videos/lofi_30min.mp4 \
     --style rainy_lofi --tracks assets/tracks/rainy_lofi/*/*.mp3 --xfade 8
 #   → publish/lofi_30min.json + .md（title/描述/章節/tags，可直接複製到 YouTube）
 ```
 
 **Step 7 — 上片佇列**
 ```bash
-python3 scripts/upload_status.py --ready
-python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.be/xxxx
+./scripts/lofi publish --ready
+./scripts/lofi publish --mark-uploaded lofi_30min --url https://youtu.be/xxxx
 ```
 
 > 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，**可直接照抄的成品配置見 [`docs/RECIPES.md`](docs/RECIPES.md)**。
@@ -138,8 +138,8 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 4. 「Credentials → Create credentials → OAuth client ID」，類型選 **Desktop app**，下載 JSON。
 5. 把 JSON 放到本專案 **`.secrets/client_secret.json`**（`.secrets/` 已 gitignore），或設環境變數 `YT_CLIENT_SECRET` 指向它。
 6. 執行 `./scripts/make_episode.sh --style <style> --stage upload --episode <名稱>`（或 `lofi upload`）。首次會開瀏覽器要你登入該帳號並同意，token 快取在 `.secrets/yt_token.json`。
-   - 想先單獨完成授權（不必先有影片）：`.venv/bin/python scripts/yt_upload.py --auth-only`
-   - 想先驗證憑證/權限（不留任何影片）：`.venv/bin/python scripts/yt_upload.py --check`
+   - 想先單獨完成授權（不必先有影片）：`./scripts/lofi upload --auth-only`
+   - 想先驗證憑證/權限（不留任何影片）：`./scripts/lofi upload --check`
 
 > ⚠️ 上傳時的 **AI 揭露（變造或合成內容）** 無法用 API 設定，請在 YouTube Studio 手動勾選（metadata 內已記 `ai_disclosure: true`）。
 > ℹ️ 每日 API 配額預設 10,000 單位，一次上傳約 1,600 單位 → 約 6 支/天；要更多需在 Console 申請提高配額。
@@ -151,8 +151,13 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min --url https://youtu.
 ```
 lofi-studio/
 ├── src/lofi/                  # ★ Python 套件（主要邏輯，`from lofi import ...`）
-│   ├── cli.py                 # ★ 單一入口：lofi generate/qc/library/meta/publish/backfill
-│   ├── paths.py               # 路徑解析（ROOT）
+│   ├── cli.py                 # ★ 單一入口：lofi generate/qc/library/meta/publish/backfill…
+│   ├── paths.py               # 所有目錄的唯一來源（ROOT）
+│   ├── config.py              # 集中設定：模型檔名／ComfyUI 位址（LOFI_* 可覆寫）
+│   ├── media.py               # ffmpeg/ffprobe 小工具 + 磁碟空間檢查
+│   ├── comfy.py               # ComfyUI API 小客戶端（api/submit/wait_done）
+│   ├── lock.py                # 生成互斥鎖（避免音樂/圖片同時跑爆 RAM）
+│   ├── io.py                  # 原子寫入 + JSONL 檔案鎖 + 壞檔隔離
 │   ├── catalog.py             # 音樂目錄（sidecar + JSONL）
 │   ├── qc.py                  # 自動品檢
 │   ├── generate.py            # 批次生成（ComfyUI）
@@ -166,6 +171,8 @@ lofi-studio/
 │   ├── cinemagraph.py         # 靜圖 -> 局部微動無縫循環（需 numpy）
 │   └── upload.py              # 上傳成片到 YouTube（需 Google 套件/憑證，用 .venv）
 ├── scripts/                   # bash 管線 + Python 相容 shim（呼叫 src/lofi）
+│   ├── lofi                   # ★ 統一 CLI wrapper（免安裝；= python -m lofi.cli）
+│   ├── check.sh               # 提交前自檢（compile + unittest + CLI 乾跑）
 │   ├── check_env.sh           # 環境檢查
 │   ├── setup_python_env.sh    # 建立 .venv 並裝 demucs
 │   ├── make_demo_tracks.sh    # 產生測試用示範音檔/圖片
@@ -179,31 +186,33 @@ lofi-studio/
 │   ├── separate_stems.sh      # Demucs 分軌 / 去人聲
 │   ├── download_p2_models.sh  # 下載 ACE-Step 1.5 + SD1.5 模型
 │   ├── launch_comfyui.sh      # 用 MPS 啟動 ComfyUI
-│   └── auto_qc.py / batch_generate.py / make_meta.py / upload_status.py / library.py / backfill_catalog.py / migrate_tracks_layout.py / expand_style.py / generate_visual.py / visual_qc.py / make_cinemagraph.py / yt_upload.py  # 相容 shim（實作在 src/lofi）
+│   └── auto_qc.py / batch_generate.py / make_meta.py / …  # 相容 shim（實作在 src/lofi，新流程請用 scripts/lofi）
+├── scratch/                   # 實驗／一次性腳本（不進版控）
 ├── tests/                     # python3 -m unittest discover -s tests -v
-├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（成品配置範本）
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、VISUAL_NAMING.md（命名規則）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
 │   ├── prompt_library.csv     # 起始 prompt 庫（10 種氛圍）
 │   ├── styles/                # 風格骨架（固定 tag + 可變維度），如 rainy_lofi.json
 │   ├── youtube/               # 上片 metadata 範本（title/描述/tags），對應同名 style
-│   └── generated/             # expand_style.py 產出的曲目清單
+│   └── generated/             # lofi expand 產出的曲目清單
 ├── assets/                    # ★ 整個不進版控（素材；紀錄見 catalog/）
 │   ├── tracks/<style>/<run>/  # 生成的曲子（分層）；每首附 .json 側錄（來源/品檢/標籤）
 │   └── visuals/<kind><NN>/    # AI 生成的場景圖（一批一夾）；manifest.json 逐檔記 prompt/seed
 ├── catalog/                   # 音樂目錄（P0/P1）
-│   ├── tracks.jsonl           # 事件流：每次生成/品檢/… 一行
-│   ├── visuals.jsonl          # 事件流：每次圖片品檢一行（append-only）
-│   └── index.csv              # 由側錄重建的查詢用索引
-├── publish/                   # 上片資訊（make_meta.py 產出：title/描述/章節/狀態）
-├── logs/                      # batch runner 的 log（內接，不進版控）
+│   ├── tracks.jsonl           # ★ 唯一進版控的紀錄：精簡事件流（每次生成/品檢/… 一行）
+│   ├── visuals.jsonl          # 圖片品檢事件流（本機檔；跑過 visual-qc 才會有）
+│   ├── index.csv              # 由側錄重建的查詢索引（衍生物，不進版控）
+│   └── library.db             # SQLite 圖書館（衍生物，不進版控）
+├── publish/                   # 上片資訊（lofi meta 產出：title/描述/章節/狀態）
+├── logs/                      # 產品線 log + 生成互斥鎖（內接，不進版控）
 ├── output/                    # symlink → 外接碟
 │   ├── videos/                # 最終影片（舊佈局）
 │   ├── episodes/<name>/       # ★ 一集一包：video.mp4 + mix.wav + visual_loop.mp4
 │   ├── mixes/                 # 長片音訊
 │   └── stems/                 # Demucs 輸出
-└── models/                    # ACE-Step 權重放置說明
+└── models/                    # 模型放置說明（權重實際在 ~/ComfyUI/models）
 ```
 
 ## 架構與 CLI
@@ -221,7 +230,7 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi visual --count 3 --size 768x512
 ./scripts/lofi visual --list                         # 批次總表（用途/時間/模型/張數）
 ./scripts/lofi visual-qc --all --force               # 圖片品檢（黑圖/純色/灰圖/壞檔）
-./scripts/lofi cinemagraph assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4   # 需 numpy（.venv）
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4   # 需 numpy（.venv）
 ./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
 ```
 
@@ -252,11 +261,11 @@ cd ai-music/lofi-studio
 ./scripts/build_long_mix.sh output/mixes/demo_mix.wav 2 assets/tracks/misc/demo/demo_a.wav assets/tracks/misc/demo/demo_b.wav assets/tracks/misc/demo/demo_c.wav
 
 # 3) 做視覺循環（15 秒）
-./scripts/make_visual_loop.sh assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 15 30
+./scripts/make_visual_loop.sh assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4 15 30
 
 # 3b)（更推薦）局部微動無縫循環：只有窗雨/葉片/燈光在動
 #     換圖記得用 --window / --plant / --lamp 調分區（比例座標）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4
 
 # 4) 合成影片
 ./scripts/render_video.sh output/visual_loop.mp4 output/mixes/demo_mix.wav output/videos/demo_lofi.mp4
@@ -293,8 +302,12 @@ python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png outpu
 ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定：
 
 ```bash
-# 1) 下載模型（ACE-Step 1.5 分檔版 + SD1.5，約 12GB，可續傳）
+# 1) 下載音樂模型（ACE-Step 1.5 分檔版；--sd 另含 SD1.5，約 12GB，可續傳）
 ./scripts/download_p2_models.sh
+
+#    生圖預設用的是 SDXL（DreamShaperXL，約 6.5GB）。此腳本「不含」SDXL；
+#    請自行放到 ~/ComfyUI/models/checkpoints/（或設 LOFI_IMAGE_CKPT 指到別的 checkpoint）。
+#    放大模型：./scripts/download_p2_models.sh --upscale
 
 # 2) 啟動 ComfyUI
 ./scripts/launch_comfyui.sh
@@ -323,9 +336,9 @@ ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定�
 
 ```bash
 # ComfyUI 需保持執行中
-python3 scripts/batch_generate.py --limit 3        # 先生 3 首試水溫（約 15 分鐘）
-python3 scripts/batch_generate.py                  # CSV 全部 10 首（約 50 分鐘）
-python3 scripts/batch_generate.py --seed 12345     # 固定 seed 可重現
+./scripts/lofi generate --limit 3        # 先生 3 首試水溫（約 15 分鐘）
+./scripts/lofi generate                  # CSV 全部 10 首（約 50 分鐘）
+./scripts/lofi generate --seed 12345     # 固定 seed 可重現
 ```
 
 每首在 M4 / 16GB 上約 **4–5 分鐘**，生成後自動複製到 `assets/tracks/`。
@@ -340,11 +353,11 @@ YouTube 的長 lofi 電台多半是「**少數幾首同風格曲子 + 重新排�
 
 ```bash
 # 1) 展開 20 首同風格清單（可重現）
-python3 scripts/expand_style.py --style rainy_lofi --count 20 --seed 42
+./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
 #    → prompts/generated/rainy_lofi.csv
 
 # 2) 批次生成（建議 120 秒安全區）
-python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit 20 --clean-raw
+./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 20 --clean-raw
 
 # 3) 換個順序就變成長片（見下方「給 1 小時長片」）
 ```
@@ -367,24 +380,24 @@ python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit
 - 最穩健：用圖書館查路徑
   ```bash
   ./scripts/build_long_mix.sh output/mixes/mix.wav 8 \
-      $(python3 scripts/library.py query --style rainy_lofi --status keep --limit 30 --paths)
+      $(./scripts/lofi library query --style rainy_lofi --status keep --limit 30 --paths)
   ```
-- 舊版扁平結構遷移：`python3 scripts/migrate_tracks_layout.py`（預設 dry-run；`--apply` 才執行，會寫 manifest，`--revert` 可還原）。
+- 舊版扁平結構遷移：`./scripts/lofi migrate`（預設 dry-run；`--apply` 才執行，會寫 manifest，`--revert` 可還原）。
 
 ### 回填既有曲子
 
 ```bash
-python3 scripts/backfill_catalog.py --dry-run   # 先看會補什麼
-python3 scripts/backfill_catalog.py             # 補進目錄（會從 output/logs 撈回 seed）
+./scripts/lofi backfill --dry-run   # 先看會補什麼
+./scripts/lofi backfill             # 補進目錄（會從 output/logs 撈回 seed）
 ```
 
 ### 自動品檢
 
 ```bash
-python3 scripts/auto_qc.py                  # 只檢查尚未品檢的
-python3 scripts/auto_qc.py --all --force    # 全部重算
-python3 scripts/auto_qc.py --dedupe --index # 找完全相同內容 + 重建 index.csv
-python3 scripts/auto_qc.py --json > qc.json # 給程式用
+./scripts/lofi qc                  # 只檢查尚未品檢的
+./scripts/lofi qc --all --force    # 全部重算
+./scripts/lofi qc --dedupe --index # 找完全相同內容 + 重建 index.csv
+./scripts/lofi qc --json > qc.json # 給程式用
 ```
 
 判定（`--set key=value` 可調閾值）：
@@ -445,16 +458,16 @@ lofi visual-qc --json > vqc.json     # 給程式用
 
 ```bash
 # 1) 展開 1000 首清單（可重現）
-python3 scripts/expand_style.py --style dusk_jazz --count 1000 --seed 42
+./scripts/lofi expand --style dusk_jazz --count 1000 --seed 42
 # 2) 分批量產（每批 50、每首散熱 60s、刪原始檔、可續傳）
 ./scripts/batch_run.sh --csv prompts/generated/dusk_jazz.csv \
     --chunk 50 --sleep 60 --run-id dusk01 --clean-raw
 # 3) 品檢 + 圖書館（自動標籤）
-python3 scripts/auto_qc.py --all --index
-python3 scripts/library.py build
+./scripts/lofi qc --all --index
+./scripts/lofi library build
 # 4) 挑 keeper（例：品檢 pass 且分數 ≥ 90）
-python3 scripts/library.py set-status keep --verdict pass --min-score 90
-python3 scripts/library.py query --tag style:dusk_jazz --status keep
+./scripts/lofi library set-status keep --verdict pass --min-score 90
+./scripts/lofi library query --tag style:dusk_jazz --status keep
 ```
 
 > `batch_run.sh` 的 log 寫在**內接 `logs/`**（外接碟掉線也不會丟）；生成音檔在內接 `assets/tracks`。
@@ -466,17 +479,17 @@ python3 scripts/library.py query --tag style:dusk_jazz --status keep
 ### 1. 生場景圖（預設：靠窗書桌的動漫女生）
 ```bash
 # 預設用 SDXL（DreamShaperXL）；prompt/負向詞已內建 1girl（不會再被 people/face 擋掉）
-python3 scripts/generate_visual.py --count 3 --size 768x512
+./scripts/lofi visual --count 3 --size 768x512
 # 一批一夾＋命名規則：資料夾 <kind><NN>、檔名 <run-id>_<NN>_<slug>.png（規則見 docs/VISUAL_NAMING.md）
-python3 scripts/generate_visual.py --run-id sc07 --slug window --count 3 --size 768x512
-# → assets/visuals/sc07/sc07_01_window.png、sc07_02_window.png…
+./scripts/lofi visual --run-id sc07 --slug window --count 3 --size 768x512
+# → assets/visuals/sc07/sc07_01_window.png、sc07_02_window.png…（此例的 run-id＝sc07）
 # manifest.json 一個 run 一份（config 共用 + images 逐檔 prompt/seed）；執行前會先印出「哪顆模型在跑」
 
 # 換其他 SDXL 基底（動漫 tag 系記得加 --clip-skip 2）
-python3 scripts/generate_visual.py --ckpt sd_xl_base_1.0.safetensors --count 3 --size 768x512
+./scripts/lofi visual --ckpt sd_xl_base_1.0.safetensors --count 3 --size 768x512
 
 # 想純風景（不要人物）
-python3 scripts/generate_visual.py --count 3 --size 768x512 \
+./scripts/lofi visual --count 3 --size 768x512 \
   --prompt "scenery, no humans, indoors, cozy study room at night, warm desk lamp, open book, \
 potted plant, lo-fi anime illustration, soft warm lighting, muted colors, masterpiece, best quality" \
   --negative "lowres, bad hands, text, watermark, people, 1girl, face"
@@ -487,13 +500,13 @@ potted plant, lo-fi anime illustration, soft warm lighting, muted colors, master
 ### 2. 做局部微動循環
 ```bash
 # 先驗證頭尾無縫（必做）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png --check-loop
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png --check-loop
 
 # 預設輸出：只有「顆粒 + 靜態調色（暗角/對比/飽和）」，畫面其餘完全靜止
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4
 
 # 要局部微動，再逐一開啟，並把分區指到圖上正確位置（例：檯燈 + 盆栽）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 \
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4 \
   --glow 0.5 --lamp 0.42,0.27,0.22 --sway 0.012 --plant 0.18,0.10,0.32,0.34
 ```
 
@@ -535,16 +548,16 @@ python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png outpu
 ./scripts/make_long_lofi.sh --generate --minutes 10
 
 # 沿用既有圖（完全不開 ComfyUI，最不熱）
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png
 
 # 檔案更小：lofi 用 4~5 Mbps 就很夠（預設 9）
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --vbitrate 5
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png --vbitrate 5
 
 # 想更保守：限制執行緒、提高 nice
-THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png
+THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png
 
 # 一集一包（推薦）：全輸出集中在 output/episodes/<名稱>/，好備份、好上片、好清理
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png \
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png \
     --minutes 60 --episode rainy-01 --style rainy_lofi
 # → output/episodes/rainy-01/{video.mp4, mix.wav, visual_loop.mp4}
 #   並產生 publish/rainy-01.json（識別名即 episode 名稱）
@@ -558,13 +571,13 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_0
 
 ## 容量管理與外接碟
 
-專案本身不大（音樂素材 115MB、圖片 1.7MB、文字 <1MB），真正吃容量的是**成片**與**模型**：
+專案本身不大（音樂 ~448MB、圖片 ~68MB、文字 <1MB），真正吃容量的是**成片**與**模型**：
 
 | 項目 | 大小 | 成長 |
 |---|---|---|
 | `output/videos` | 1.6GB（每分鐘 ≈ 37MB、每 30min ≈ 1.1GB、每小時 ≈ 2.2GB） | ★★★ 一直長 |
-| `~/ComfyUI/models` | 13GB | 固定 |
-| `~/ComfyUI/venv` / 專案 `.venv` | 1.8GB / 787MB | 固定 |
+| `~/ComfyUI/models` | 37GB | 固定 |
+| `~/ComfyUI/venv` / 專案 `.venv` | 1.8GB / 928MB | 固定 |
 
 策略：**素材與程式留內接，成片輸出指到外接。** 現況可跑 `./scripts/disk_report.sh` 查看。
 
@@ -586,7 +599,7 @@ rm -rf output && ln -s /Volumes/WJ_SATA/lofi-studio/output output
 
 > `assets/`（音樂／圖片）**不需搬**——它很小且常被讀取，留內接最快。
 
-（可選）把 ComfyUI 模型也移出以釋放 13GB（**先關閉 ComfyUI**）：
+（可選）把 ComfyUI 模型也移出以釋放數十 GB（**先關閉 ComfyUI**）：
 
 ```bash
 mkdir -p /Volumes/WJ_SATA/lofi-studio/models
@@ -620,20 +633,20 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 
 ```bash
 # 產生上片資訊（章節由軌道清單推算）
-python3 scripts/make_meta.py --video output/videos/lofi_30min_cozy.mp4 \
+./scripts/lofi meta --video output/videos/lofi_30min_cozy.mp4 \
     --style cozy_morning --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
 # 或渲染時就自動產生
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --minutes 30 \
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png --minutes 30 \
     --tracks assets/tracks/cozy_morning/*/*.mp3 --style cozy_morning
 ```
 
 ### 哪些是今天可以上傳的？
 
 ```bash
-python3 scripts/upload_status.py           # 佇列總覽
-python3 scripts/upload_status.py --ready    # 只看可上傳
-python3 scripts/upload_status.py --mark-uploaded lofi_30min_cozy --url https://youtu.be/xxxx
+./scripts/lofi publish           # 佇列總覽
+./scripts/lofi publish --ready    # 只看可上傳
+./scripts/lofi publish --mark-uploaded lofi_30min_cozy --url https://youtu.be/xxxx
 ```
 
 判定：有 `publish/<影片>.json`、狀態 `pending`、長度 ≥ 300s（`--min-duration` 可調）＝可上傳。狀態分 `pending / scheduled / uploaded`，記錄在每個 json 並彙整到 `publish/index.csv`。
@@ -657,8 +670,8 @@ python3 scripts/upload_status.py --mark-uploaded lofi_30min_cozy --url https://y
 用法與既有風格完全相同：
 
 ```bash
-python3 scripts/expand_style.py --style dusk_jazz --count 20 --seed 42
-python3 scripts/batch_generate.py --csv prompts/generated/dusk_jazz.csv --clean-raw
+./scripts/lofi expand --style dusk_jazz --count 20 --seed 42
+./scripts/lofi generate --csv prompts/generated/dusk_jazz.csv --clean-raw
 ```
 
 ## 給 1 小時長片
@@ -673,7 +686,7 @@ python3 scripts/batch_generate.py --csv prompts/generated/dusk_jazz.csv --clean-
 
 第一次建議先做 30 分鐘試水溫。
 
-> 低負載做法：`./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --minutes 60`（3600 / 20 = 180 次，`--loop 20` 可整除），全程幾乎不重編碼。
+> 低負載做法：`./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png --minutes 60`（3600 / 20 = 180 次，`--loop 20` 可整除），全程幾乎不重編碼。
 
 ## 合規重點（發布前）
 

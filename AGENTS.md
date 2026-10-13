@@ -50,7 +50,7 @@ prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整個 assets/ 不進版控，紀錄看 catalog/tracks.jsonl）
 assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifest.json（一 run 一份：config 共用 + images 逐檔 prompt/seed；不進版控）
-catalog/            # tracks.jsonl + index.csv（＝進版控的紀錄流；library.db 為衍生物，gitignore）
+catalog/            # tracks.jsonl + visuals.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
 output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）
 tests/              # python3 -m unittest discover -s tests -v
@@ -111,7 +111,7 @@ python3 -m unittest discover -s tests -v
 - **GGUF 量化在 Mac MPS 上遠快於 int8**：Z-Image Turbo 同一張圖，int8 要 **920 秒**、GGUF（Q5_K_M）只要 **221 秒**（快 4 倍）。
   原因是 int8 沒有 Metal 加速路徑，會退回超慢的模擬運算。**在 Mac 上優先用 GGUF。**
 - GGUF 用法：裝 `ComfyUI-GGUF`（在 `custom_nodes/`）＋ `gguf` pip 套件到 venv → 用 `UnetLoaderGGUF` / `CLIPLoaderGGUF` 節點。
-- **z-image 目前用 GGUF 版**：`unet/z-image-turbo-Q5_K_M.gguf` + `text_encoders/Qwen3-4B-Q8_0.gguf` + `vae/ae.safetensors`，CLIP type 選 `lumina2`。
+- **（實驗註記，非預設）z-image GGUF**：`unet/z-image-turbo-Q5_K_M.gguf` + `text_encoders/Qwen3-4B-Q8_0.gguf` + `vae/ae.safetensors`，CLIP type 選 `lumina2`。產線**預設圖片模型仍是 SDXL `DreamShaperXL-v1.0-Alpha2`**（見 `config.py`）；這組只在個別視覺實驗用過。
 
 ## 資源限制（RAM / 磁碟，每次都要先想）
 
@@ -128,7 +128,7 @@ python3 -m unittest discover -s tests -v
 - 爆掉的徵兆：ComfyUI 卡死、job 被系統砍、整台變慢開始狂 swap。寧可小批多跑，不要一次梭哈。
 
 ### 磁碟（內部碟 228GB）
-- 模型放內部碟 `~/ComfyUI/models`，目前約 25GB（含 ACE-Step 音訊模型）；**單一 SDXL checkpoint 就 6.5GB**。
+- 模型放內部碟 `~/ComfyUI/models`，目前約 37GB（含 ACE-Step 音訊與 SDXL）；**單一 SDXL checkpoint 就 6.5GB**。
 - 內部碟可用空間**建議維持 >20GB**（macOS 與 swap 需要），逼近就清。
 - 大檔（成片、mix、模型）能放外接（`output/` 已在 `WJ_SATA`）就別放內部。
 - **外接 `WJ_SATA` 是 USB/ExFAT、實測讀取僅 ~86MB/s，不適合放模型**：內部 NVMe 是 ~2.3GB/s，載入 SDXL（6.5GB）內部約 3 秒、外接要 ~80 秒。推理本身吃 RAM 不吃碟，但**載入會重複付**（16GB 下 ACE-Step 9GB 與 SDXL 6.5GB 互斥，切換就會重載）。

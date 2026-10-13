@@ -38,7 +38,7 @@
 | 輸出 | MP3 V0 |
 
 ```bash
-python3 scripts/batch_generate.py --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
+./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
 ```
 
 ---
@@ -111,21 +111,21 @@ EP="${STYLE}-$(date +%m%d-%H%M)"   # episode 名稱（一集一包）
 MIN=30          # 影片長度（分）；30→16 軌、60→32 軌
 
 # 1) 展開清單（先多生一些，之後挑 keeper）
-python3 scripts/expand_style.py --style "$STYLE" --count 40 --seed 42
+./scripts/lofi expand --style "$STYLE" --count 40 --seed 42
 
 # 2) 生成（可續傳：中斷後用同一個 --run-id 重跑）
 ./scripts/batch_run.sh --csv "prompts/generated/$STYLE.csv" \
     --chunk 20 --sleep 60 --run-id "$RUN" --clean-raw
 
 # 3) 品檢 + 建圖書館
-python3 scripts/auto_qc.py --all --index
-python3 scripts/library.py build
-python3 scripts/library.py summary
+./scripts/lofi qc --all --index
+./scripts/lofi library build
+./scripts/lofi library summary
 
 # 4) 挑 keeper（沒有滿意的就用全部）
-python3 scripts/library.py set-status keep --verdict pass --min-score 90
-TRACKS=$(python3 scripts/library.py query --style "$STYLE" --status keep --limit 32 --paths)
-[ -z "$TRACKS" ] && TRACKS=$(python3 scripts/library.py query --style "$STYLE" --limit 32 --paths)
+./scripts/lofi library set-status keep --verdict pass --min-score 90
+TRACKS=$(./scripts/lofi library query --style "$STYLE" --status keep --limit 32 --paths)
+[ -z "$TRACKS" ] && TRACKS=$(./scripts/lofi library query --style "$STYLE" --limit 32 --paths)
 
 # 5) 生圖 + 合成影片（--style 會自動產生上片資訊；--episode 一集一包）
 ./scripts/make_long_lofi.sh --generate --minutes "$MIN" --vbitrate 9 \
@@ -133,8 +133,8 @@ TRACKS=$(python3 scripts/library.py query --style "$STYLE" --status keep --limit
 # → output/episodes/$EP/{video.mp4, mix.wav, visual_loop.mp4}、publish/$EP.json
 
 # 6) 上片佇列
-python3 scripts/upload_status.py --ready
-# python3 scripts/upload_status.py --mark-uploaded "$EP" --url https://youtu.be/xxxx
+./scripts/lofi publish --ready
+# ./scripts/lofi publish --mark-uploaded "$EP" --url https://youtu.be/xxxx
 ```
 
 > 若已經有喜歡的場景圖，把 `--generate` 換成 `--image assets/visuals/<圖>.png`（完全不開 ComfyUI，最省電）。
@@ -160,12 +160,12 @@ python3 scripts/upload_status.py --ready
 **單一風格快速出片：**
 ```bash
 STYLE=dusk_jazz
-python3 scripts/expand_style.py --style "$STYLE" --count 40 --seed 42
+./scripts/lofi expand --style "$STYLE" --count 40 --seed 42
 ./scripts/batch_run.sh --csv "prompts/generated/$STYLE.csv" --chunk 20 --sleep 60 --run-id "$STYLE-01" --clean-raw
-python3 scripts/auto_qc.py --all --index && python3 scripts/library.py build
+./scripts/lofi qc --all --index && ./scripts/lofi library build
 ./scripts/make_long_lofi.sh --generate --minutes 30 --style "$STYLE" \
     --episode "$STYLE-$(date +%m%d)" \
-    --tracks $(python3 scripts/library.py query --style "$STYLE" --limit 16 --paths)
+    --tracks $(./scripts/lofi library query --style "$STYLE" --limit 16 --paths)
 ```
 
 ---

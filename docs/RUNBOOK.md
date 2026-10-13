@@ -103,8 +103,8 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 目的是讓每一首都能回溯到「當時送出的完整 prompt 與參數」，這樣品質差的才好回頭檢討改 prompt。
 
 - `batch_generate.py` 成功後會自動寫側錄（`assets/tracks/<檔>.json`）+ 事件流（`catalog/tracks.jsonl`）+ 跑自動品檢。
-- 既有舊曲用 `python3 scripts/backfill_catalog.py` 補（會從 `output/logs/*.log` 撈回 seed）。
-- 自動品檢：`python3 scripts/auto_qc.py --all --index`。`fail`（無聲／截斷／嚴重削波）會自動標 `reject`；`warn` 進人工複審。
+- 既有舊曲用 `./scripts/lofi backfill` 補（會從 `output/logs/*.log` 撈回 seed）。
+- 自動品檢：`./scripts/lofi qc --all --index`。`fail`（無聲／截斷／嚴重削波）會自動標 `reject`；`warn` 進人工複審。
 - 詳細判定與側錄格式見 `README.md` 的「音樂目錄與品管」一節。
 
 > 之後（P2/P3，尚未實作）會在此基礎上做：試聽評分工具、`prompt_report.py` 把壞 prompt 的維度統計出來、標籤與由標籤重組歌單。
@@ -163,7 +163,7 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 **預設 prompt 已改成「靠窗書桌的動漫女生」**（含 `1girl, solo`，負向詞不再擋人物）：
 
 ```bash
-python3 scripts/generate_visual.py --count 3 --size 768x512      # 預設 DreamShaperXL（SDXL）
+./scripts/lofi visual --count 3 --size 768x512      # 預設 DreamShaperXL（SDXL）
 ```
 
 > **一批一夾＋命名規則**：輸出到 `assets/visuals/<run-id>/`，夾內寫一份 `manifest.json`。
@@ -208,12 +208,12 @@ python3 scripts/generate_visual.py --count 3 --size 768x512      # 預設 DreamS
     ✅ 152s -> sc07_01_window.png
 ```
 
-> 舊 run 有圖卻沒有 manifest（紀錄遺失）時可從圖檔內嵌的 workflow 反推補回：`backfill_manifest()`（見 `scripts/_tmp_backfill_manifests.py`）。
+> 舊 run 有圖卻沒有 manifest（紀錄遺失）時可從圖檔內嵌的 workflow 反推補回：`visual.backfill_manifest()`（CLI 無對應指令，需自行呼叫；一次性回填腳本已移至 `scratch/`）。
 
 換其他 SDXL 基底（`--ckpt`；模型須已放進 `~/ComfyUI/models/checkpoints/`）：
 
 ```bash
-python3 scripts/generate_visual.py --ckpt sd_xl_base_1.0.safetensors --count 3
+./scripts/lofi visual --ckpt sd_xl_base_1.0.safetensors --count 3
 # 動漫 tag 系（NoobAI-XL / WAI-Illustrious）記得加 --clip-skip 2
 ```
 > 建議模型：預設 **DreamShaperXL-v1.0-Alpha2**（SDXL，半寫實插畫）；動漫 tag 風可用 NoobAI-XL、WAI-Illustrious。
@@ -224,7 +224,7 @@ python3 scripts/generate_visual.py --ckpt sd_xl_base_1.0.safetensors --count 3
 
 ```bash
 ./scripts/download_p2_models.sh --upscale   # 一次性：Real-ESRGAN anime 6B（17MB）
-python3 scripts/generate_visual.py --count 3 --size 768x512 \
+./scripts/lofi visual --count 3 --size 768x512 \
   --upscale RealESRGAN_x4plus_anime_6B.pth  # 768×512 -> 1536×1024
 ```
 > `make_episode.sh` 裝了模型後會**自動放大**（`--no-upscale` 可關）；`make_long_lofi.sh` 升頻已改用 lanczos。
@@ -245,17 +245,17 @@ lofi visual-qc --json > vqc.json     # 只看結果不寫檔：--no-write
 
 ```bash
 # 先用 --check-loop 驗證頭尾無縫（必做）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png --check-loop
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png --check-loop
 
 # 預設輸出＝只有顆粒＋靜態調色（其餘完全靜止）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4
 
 # 要局部微動再逐一開啟（分區要對準圖上位置）
-python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4 \
+./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4 \
   --glow 0.5 --lamp 0.42,0.27,0.22 --sway 0.012 --plant 0.18,0.10,0.32,0.34
 
 # 先看有哪些效果參數
-python3 scripts/make_cinemagraph.py --help
+./scripts/lofi cinemagraph --help
 ```
 
 效果模組與分區（比例 0~1，換圖只調這裡）：
@@ -302,12 +302,12 @@ python3 scripts/make_cinemagraph.py --help
 
 ```bash
 ./scripts/make_long_lofi.sh --generate --minutes 10            # 生圖 + 10 分鐘（只有生圖動 GPU）
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png   # 沿用既有圖，完全不開 ComfyUI
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png --vbitrate 5      # 檔案更小
-THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png # 更保守
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png   # 沿用既有圖，完全不開 ComfyUI
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png --vbitrate 5      # 檔案更小
+THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png # 更保守
 
 # 一集一包（推薦）：輸出集中在 output/episodes/<名稱>/，並產生 publish/<名稱>.json
-./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_01_window.png \
+./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_03_rain.png \
     --minutes 60 --episode rainy-01 --style rainy_lofi
 ```
 
@@ -344,7 +344,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_0
 # 分段單獨跑（測試/接續）
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20
 ./scripts/make_episode.sh --style rainy_lofi --stage image --images 3
-./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/sc07/sc07_01_window.png
+./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01 --image assets/visuals/sc01/sc01_03_rain.png
 ./scripts/make_episode.sh --style rainy_lofi --stage upload --episode rl01
 ./scripts/make_episode.sh --style rainy_lofi --stage cleanup --episode rl01
 
@@ -372,7 +372,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_0
 1. Google Cloud 專案 → 啟用 **YouTube Data API v3**。
 2. OAuth consent screen：External，把要上傳的帳號加進 Test users，scope 加 `.../auth/youtube.upload`。
 3. Credentials → OAuth client ID → **Desktop app** → 下載 JSON，放到 `.secrets/client_secret.json`（或設 `YT_CLIENT_SECRET`）。
-4. 首次 `--stage upload` 會開瀏覽器授權，token 快取在 `.secrets/yt_token.json`（可先單獨跑 `.venv/bin/python scripts/yt_upload.py --auth-only`）。
+4. 首次 `--stage upload` 會開瀏覽器授權，token 快取在 `.secrets/yt_token.json`（可先單獨跑 `./scripts/lofi upload --auth-only`）。
 5. 上傳後影片為 **private**；請到 Studio 手動公開/排程、勾 **AI 揭露**、上傳縮圖、加播放清單。
 
 > 依賴：`google-api-python-client` / `google-auth-oauthlib` / `google-auth-httplib2`（已列入 `requirements.txt`，裝在 `.venv`）。
@@ -403,11 +403,11 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc07/sc07_0
 
 ```bash
 # 產生 title / 描述（含章節）/ tags → publish/<影片>.json + .md
-python3 scripts/make_meta.py --video output/videos/xxx.mp4 --style cozy_morning \
+./scripts/lofi meta --video output/videos/xxx.mp4 --style cozy_morning \
     --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
-python3 scripts/upload_status.py --ready     # 今天可上傳的
-python3 scripts/upload_status.py --mark-uploaded xxx --url https://youtu.be/...
+./scripts/lofi publish --ready     # 今天可上傳的
+./scripts/lofi publish --mark-uploaded xxx --url https://youtu.be/...
 ```
 
 - metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）。

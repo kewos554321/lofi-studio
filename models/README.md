@@ -12,10 +12,24 @@ ComfyUI 安裝在 `~/ComfyUI`，模型實際放在 `~/ComfyUI/models/`。
 | `qwen_0.6b_ace15.safetensors` | `~/ComfyUI/models/text_encoders/` | 1.19 GB |
 | `qwen_1.7b_ace15.safetensors` | `~/ComfyUI/models/text_encoders/` | 3.71 GB |
 | `ace_1.5_vae.safetensors` | `~/ComfyUI/models/vae/` | 0.34 GB |
-| `v1-5-pruned-emaonly-fp16.safetensors`（SD1.5） | `~/ComfyUI/models/checkpoints/` | 2.13 GB |
+| `v1-5-pruned-emaonly-fp16.safetensors`（SD1.5，相容備用、非預設） | `~/ComfyUI/models/checkpoints/` | 2.13 GB |
 | **合計** | | **≈ 12.2 GB** |
 
-一鍵下載（可續傳）：`./scripts/download_p2_models.sh`
+一鍵下載（可續傳）：`./scripts/download_p2_models.sh`（音樂模型 + SD1.5；**不含 SDXL，見下節**）
+
+## 生圖模型（SDXL，產線預設）
+
+產線**預設**的圖片模型是 SDXL（`src/lofi/config.py` 的 `IMAGE_CKPT`）：
+
+| 用途 | 檔案 | 位置 | 大小 |
+|---|---|---|---|
+| 場景圖（預設） | `DreamShaperXL-v1.0-Alpha2.safetensors` | `~/ComfyUI/models/checkpoints/` | 6.5 GB |
+| 場景圖（替代） | `sd_xl_base_1.0.safetensors` | `~/ComfyUI/models/checkpoints/` | 6.5 GB |
+| 放大（選用） | `RealESRGAN_x4plus_anime_6B.pth` | `~/ComfyUI/models/upscale_models/` | 17 MB |
+
+> ⚠️ `download_p2_models.sh` **只下載 ACE-Step 與 SD1.5，不含 SDXL**；SDXL checkpoint 需自行取得後放到上表位置（或用 `LOFI_IMAGE_CKPT` 指向別的）。放大模型可 `./scripts/download_p2_models.sh --upscale`。
+> 每個 SDXL checkpoint 6.5GB，載入吃 RAM；內部碟放得下但要注意**數量**（見 AGENTS.md 資源限制）。
+> 🧪（實驗，非預設）z-image turbo GGUF：`unet/*.gguf` + `text_encoders/Qwen3-4B-Q8_0.gguf` + `vae/ae.safetensors`，CLIP type `lumina2`；Mac MPS 上比 int8 快數倍。
 
 ## ⚠️ 兩個 text encoder 都是必要的
 
@@ -52,4 +66,6 @@ ComfyUI 原始碼對兩者都呼叫 `get_full_path_or_raise`，**少一個會載
 - **ACE-Step 1.5**：MIT（可商用）。
 - **ACE-Step v1 3.5B**：Apache-2.0（可商用）。
 - **SD1.5**：CreativeML Open RAIL-M（可商用，有使用限制條款）。
+- **DreamShaperXL / SDXL base**：CreativeML Open RAIL++-M（可商用，有使用限制條款；以模型頁標示為準）。
+- **Real-ESRGAN（放大）**：BSD-3-Clause（可商用）。
 - 使用前仍請以官方頁面標示為準，並保留來源紀錄。
