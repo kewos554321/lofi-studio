@@ -478,7 +478,8 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
                  mask_image="", grow_mask=8, grow_mask_by=6, mask_channel="red",
                  ref_image="", ipa_weight=0.6, ipa_weight_type="linear",
                  ipa_preset="PLUS (high strength)", ipa_embeds_scaling="K+V",
-                 ipa_start=0.0, ipa_end=1.0):
+                 ipa_start=0.0, ipa_end=1.0,
+                 lora="", lora_weight=1.0):
     g = {
         "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
@@ -505,19 +506,26 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
         g["5"] = {"class_type": "EmptyLatentImage",
                   "inputs": {"width": w, "height": h, "batch_size": 1}}
         latent_src = ["5", 0]
+    # LoRA：接在 checkpoint 之後、IPAdapter 之前；model 與 clip 都要一起換掉
+    base_model, base_clip = ["4", 0], ["4", 1]
+    if lora:
+        g["22"] = {"class_type": "LoraLoader", "inputs": {
+                       "lora_name": lora, "strength_model": lora_weight,
+                       "strength_clip": lora_weight, "model": base_model, "clip": base_clip}}
+        base_model, base_clip = ["22", 0], ["22", 1]
     # clip skip：動漫 tag 系模型（NoobAI/Illustrious）建議 2；SDXL base／DreamShaper 一般用 0
-    clip_src = ["4", 1]
+    clip_src = base_clip
     if clip_skip and clip_skip > 1:
         g["13"] = {"class_type": "CLIPSetLastLayer",
-                   "inputs": {"clip": ["4", 1], "stop_at_clip_layer": -clip_skip}}
+                   "inputs": {"clip": base_clip, "stop_at_clip_layer": -clip_skip}}
         clip_src = ["13", 0]
     g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": clip_src}}
     g["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": clip_src}}
     # 參考圖（IPAdapter）：注入角色/風格特徵，用來鎖住固定角色（權重是主控旋鈕）
-    model_src = ["4", 0]
+    model_src = base_model
     if ref_image:
         g["16"] = {"class_type": "IPAdapterUnifiedLoader",
-                   "inputs": {"model": ["4", 0], "preset": ipa_preset}}
+                   "inputs": {"model": base_model, "preset": ipa_preset}}
         g["17"] = {"class_type": "LoadImage", "inputs": {"image": ref_image}}
         g["18"] = {"class_type": "IPAdapterAdvanced",
                    "inputs": {"model": ["16", 0], "ipadapter": ["16", 1], "image": ["17", 0],
@@ -645,6 +653,10 @@ def main():
     ap.add_argument("--run-id", default="",
                     help="批次代號＝資料夾名，建議 <kind><NN>（例 ds02）；未給則自動 <kind><NN>")
     ap.add_argument("--ckpt", default=IMAGE_CKPT, help="checkpoint 檔名（放在 ComfyUI/models/checkpoints）")
+    ap.add_argument("--lora", default="",
+                    help="LoRA 檔名（放 ComfyUI/models/loras/），例：moni.safetensors（先用 `lofi character export` 訓練）")
+    ap.add_argument("--lora-weight", type=float, default=1.0, dest="lora_weight",
+                    help="LoRA 權重（角色 LoRA 常用 0.7–0.9；預設 1.0）")
     ap.add_argument("--upscale", default="",
                     help="放大模型檔名（放 ComfyUI/models/upscale_models/），空=不放大，例：RealESRGAN_x4plus_anime_6B.pth")
     ap.add_argument("--upscale-out", default="", help="放大後輸出尺寸 寬x高（預設生成尺寸×2）")
@@ -697,6 +709,8 @@ def main():
     # 商用合規守門：檢查 checkpoint／放大模型／IPAdapter 模型授權（未知授權預設 fail-closed）
     if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
         names = [args.ckpt] + ([args.upscale] if args.upscale else [])
+        if args.lora:
+            names.append(args.lora)
         if args.ref:
             names += list(IPADAPTER_MODELS)
         blocked, findings = check_commercial(names, allow_unknown=args.allow_unknown_license)
@@ -769,6 +783,8 @@ def main():
             "mask": args.mask, "grow_mask": args.grow_mask,
             "grow_mask_by": args.grow_mask_by, "mask_channel": args.mask_channel,
         })
+    if args.lora:     # LoRA 設定（回頭才看得出這批套了哪個 LoRA、多重）
+        config.update({"lora": args.lora, "lora_weight": args.lora_weight})
     tool = "sdxl-ipadapter" if args.ref else "lofi.visual"   # 與 guess_tool() 反推的一致
     modes = []
     if args.ref:
@@ -801,7 +817,8 @@ def main():
                     grow_mask_by=args.grow_mask_by, mask_channel=args.mask_channel,
                     ref_image=args.ref, ipa_weight=args.weight, ipa_weight_type=args.weight_type,
                     ipa_preset=args.preset, ipa_embeds_scaling=args.embeds_scaling,
-                    ipa_start=args.start, ipa_end=args.end),
+                    ipa_start=args.start, ipa_end=args.end,
+                    lora=args.lora, lora_weight=args.lora_weight),
                     client_id="lofi-visual")
             except Exception as e:
                 print(f"    ❌ 提交失敗：{e}"); break
