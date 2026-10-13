@@ -52,6 +52,21 @@ IPADAPTER_MODELS = ("ip-adapter-plus_sdxl_vit-h.safetensors",
 MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
 
 
+# ── 發行（release / 上架包）─────────────────────────────────────────────
+# 串流上架用的 artist 名義：**刻意與 YouTube 頻道名（Drifted LoFi）分開**，
+# 走「廠牌家族」路線（頻道 = Drifted LoFi／音樂 = Moni's Journey），見 docs/DISTRIBUTION.md §6-2。
+# 定案依據（2026-10 實查）：單字名（Sumi/Hoshi/Ember/Nori/Kage/Marlow/Bramble…）在
+# Apple Music 與 MusicBrainz **全部撞名**；`Moni's Journey` 兩邊零撞名，
+# 且把主角（黑貓的旅程）寫進品牌。可用 handle：`monisjourney.bandcamp.com`、`@monis-journey`、`monisjourney.com`。
+# ⚠️ 一律用**直引號** `'`（U+0027），不要用彎引號 `’`——部分發行商會視為不同藝人。
+RELEASE_ARTIST = _env("LOFI_RELEASE_ARTIST", "Moni's Journey")
+RELEASE_LABEL = _env("LOFI_RELEASE_LABEL", "")
+RELEASE_GENRE = _env("LOFI_RELEASE_GENRE", "Lo-fi")
+# 母帶響度目標：Spotify 建議 -14 LUFS；true peak 留 1 dB 餘裕。
+MASTER_LUFS = float(_env("LOFI_MASTER_LUFS", "-14"))
+MASTER_TP = float(_env("LOFI_MASTER_TP", "-1"))
+
+
 # ── 模型授權登錄（商用合規）────────────────────────────────────────────
 # 換模型前先查這裡；commercial: True=可商用 / False=禁止商用 / None=未知。
 # source 為官方頁面（授權以該頁最新標示為準）。詳見 docs/LICENSING.md。
@@ -172,6 +187,9 @@ def as_dict():
         "image_ckpt": IMAGE_CKPT,
         "upscale_model": UPSCALE_MODEL,
         "min_free_gb": MIN_FREE_GB,
+        "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
+        "release_label": RELEASE_LABEL or "（無）",
+        "master_target": f"{MASTER_LUFS:g} LUFS / {MASTER_TP:g} dBTP",
     }
 
 

@@ -679,6 +679,8 @@ def main():
                     help="同時寫同名 .txt（內容＝prompt）；LoRA 訓練集用")
     ap.add_argument("--timeout", type=float, default=900.0,
                     help="單張等待上限秒數（預設 900；ComfyUI 卡死就中止）")
+    ap.add_argument("--clean-raw", action="store_true",
+                    help="複製到 assets/visuals 後刪除 ComfyUI 原始輸出（省硬碟）")
     ap.add_argument("--allow-unknown-license", action="store_true",
                     help="允許使用授權未登錄的模型（商用前請先確認，見 docs/LICENSING.md）")
     ap.add_argument("--list", action="store_true",
@@ -809,7 +811,14 @@ def main():
                                 caller=Path(sys.argv[0]).name, config=config,
                                 images=[{"file": dst_name, "seed": seed, "prompt": args.prompt}])
                 done += 1
-                print(f"    ✅ {time.time()-t0:.0f}s -> {dst_name}")
+                note = ""
+                if args.clean_raw:          # 複製＋記錄都成功後才刪原檔（省 ComfyUI/output）
+                    try:
+                        src.unlink()
+                        note = "（已刪除 ComfyUI 原始檔）"
+                    except OSError as e:
+                        note = f"（⚠️  刪除原始檔失敗：{e}）"
+                print(f"    ✅ {time.time()-t0:.0f}s -> {dst_name}{note}")
     print(f"\n完成：{done} 張 -> {out_dir}（manifest.json 已更新）")
 
 

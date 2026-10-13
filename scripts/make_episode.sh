@@ -200,8 +200,9 @@ stage_image() {
     fi
   fi
   run ./scripts/lofi visual --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
-      --prefix "$EPISODE" --run-id "$RUN_ID" "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
-  echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json）"
+      --prefix "$EPISODE" --run-id "$RUN_ID" --clean-raw \
+      "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
+  echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json；ComfyUI 原檔已刪）"
 }
 
 # ---------- 第 3 段：影片 ----------

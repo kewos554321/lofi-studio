@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from lofi import io
-from lofi.paths import ROOT, TRACKS_DIR, CATALOG_DIR
+from lofi.paths import ROOT, TRACKS_DIR, CATALOG_DIR, MASTERS_DIR
 
 JSONL_PATH = CATALOG_DIR / "tracks.jsonl"
 INDEX_CSV = CATALOG_DIR / "index.csv"
@@ -61,12 +61,27 @@ def iter_audio_files():
             yield p
 
 
-def track_subdir(style, run_id):
-    """回傳某風格/批次的存放子目錄：assets/tracks/<style>/<run_id>/。"""
+def subdir(root, style, run_id):
+    """在 root 下組出 <style>/<run_id>/（風格與 run 都做檔名清洗）。"""
     def clean(v, default):
         v = (v or "").strip().replace(" ", "_").replace("/", "_")
         return v or default
-    return TRACKS_DIR / clean(style, "misc") / clean(run_id, "legacy")
+    return Path(root) / clean(style, "misc") / clean(run_id, "legacy")
+
+
+def track_subdir(style, run_id):
+    """回傳某風格/批次的存放子目錄：assets/tracks/<style>/<run_id>/。"""
+    return subdir(TRACKS_DIR, style, run_id)
+
+
+def masters_subdir(style, run_id):
+    """回傳某風格/批次的**無損母帶**子目錄：output/masters/<style>/<run_id>/（外接碟）。
+
+    為什麼分兩層：FLAC 母帶是同長度 mp3 的 ~8 倍大（48kHz 立體 ≈30MB/首），
+    全放內接碟（228GB）會吃爆；內接只留工作用的 mp3，母帶放外接。
+    見 docs/DISTRIBUTION.md §6-3。
+    """
+    return subdir(MASTERS_DIR, style, run_id)
 
 
 def read_jsonl():

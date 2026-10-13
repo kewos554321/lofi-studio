@@ -33,6 +33,7 @@ LOGS_DIR = ROOT / "logs"
 PROMPTS_DIR = ROOT / "prompts"
 STYLE_DIR = PROMPTS_DIR / "styles"
 YT_DIR = PROMPTS_DIR / "youtube"
+CHARACTER_DIR = PROMPTS_DIR / "character"   # 主角（黑貓 Moni）定裝與品牌資料
 GEN_DIR = PROMPTS_DIR / "generated"
 PROMPT_LIB = PROMPTS_DIR / "prompt_library.csv"
 
@@ -40,4 +41,6 @@ PROMPT_LIB = PROMPTS_DIR / "prompt_library.csv"
 OUTPUT_DIR = ROOT / "output"
 VIDEOS_DIR = OUTPUT_DIR / "videos"
 EPISODES_DIR = OUTPUT_DIR / "episodes"
+RELEASES_DIR = OUTPUT_DIR / "releases"
+MASTERS_DIR = OUTPUT_DIR / "masters"      # 無損母帶倉庫（外接；見 docs/DISTRIBUTION.md §6-3）
 SECRETS_DIR = ROOT / ".secrets"

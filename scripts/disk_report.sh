@@ -47,12 +47,20 @@ done
 printf "  %-18s %s\n" "(專案總計)" "$(du -sh "$ROOT" 2>/dev/null | cut -f1)"
 
 # ---- ComfyUI ----
-if [ -d "$HOME/ComfyUI" ]; then
+COMFY_ROOT="${LOFI_COMFY_ROOT:-$HOME/ComfyUI}"
+if [ -d "$COMFY_ROOT" ]; then
   echo
   echo "◆ ComfyUI"
-  printf "  %-18s %s\n" "models" "$(du -sh "$HOME/ComfyUI/models" 2>/dev/null | cut -f1)"
-  printf "  %-18s %s\n" "venv" "$(du -sh "$HOME/ComfyUI/venv" 2>/dev/null | cut -f1)"
-  printf "  %-18s %s\n" "output/audio" "$(du -sh "$HOME/ComfyUI/output/audio" 2>/dev/null | cut -f1)"
+  printf "  %-18s %s\n" "models" "$(du -sh "$COMFY_ROOT/models" 2>/dev/null | cut -f1)"
+  printf "  %-18s %s\n" "venv" "$(du -sh "$COMFY_ROOT/venv" 2>/dev/null | cut -f1)"
+  printf "  %-18s %s\n" "output" "$(du -sh "$COMFY_ROOT/output" 2>/dev/null | cut -f1)"
+  printf "  %-18s %s\n" "output/audio" "$(du -sh "$COMFY_ROOT/output/audio" 2>/dev/null | cut -f1)"
+  COMFY_LEFTOVER=$(find -H "$COMFY_ROOT/output" -maxdepth 2 -type f \
+    \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' \
+       -o -name '*.flac' -o -name '*.wav' -o -name '*.mp3' \) 2>/dev/null | grep -c . || true)
+  if [ "${COMFY_LEFTOVER:-0}" -gt 0 ]; then
+    echo "  → 原始輸出殘留 ${COMFY_LEFTOVER} 個（建議 ./scripts/cleanup_outputs.sh --comfy）"
+  fi
 fi
 
 # ---- 最大影片 ----
@@ -82,7 +90,7 @@ LEFTOVER_FILES=$(find -H output -maxdepth 3 -type f \
   2>/dev/null)
 if [ -n "$LEFTOVER_FILES" ]; then
   LEFTOVER=$(printf '%s\n' "$LEFTOVER_FILES" | grep -c . || true)
-  echo "  找到 $LEFTOVER 個（建議 ./scripts/cleanup_outputs.sh）:"
+  echo "  找到 $LEFTOVER 個（建議 ./scripts/cleanup_outputs.sh；ComfyUI 原始輸出加 --comfy）:"
   printf '%s\n' "$LEFTOVER_FILES" | while IFS= read -r f; do
     [ -n "$f" ] && printf "    %-6s %s\n" "$(du -h "$f" 2>/dev/null | cut -f1)" "$f"
   done

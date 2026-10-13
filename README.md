@@ -89,6 +89,18 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ./scripts/lofi publish --mark-uploaded lofi_30min --url https://youtu.be/xxxx
 ```
 
+**Step 8 — 把生成批次包成上架包（串流／商店）**
+```bash
+# 一個 run（assets/tracks/<style>/<run>/）就是一張專輯
+./scripts/lofi release plan    --run coastal01                    # 先看曲序/長度/重複曲名
+./scripts/lofi release package --run coastal01                    # 產出 output/releases/coastal01/
+./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
+#   → audio/*.wav（-14 LUFS 母帶）+ cover_3000x3000.jpg + release.json + tracklist.csv + CHECKLIST.md
+```
+> DSP（Spotify/Apple…）與 Bandcamp **沒有公開 API**，所以這步產出「上架包＋清單」，上傳仍需手動。
+> artist 名義預設 `Moni's Journey`（`config.RELEASE_ARTIST`／`LOFI_RELEASE_ARTIST` 可覆寫）；
+> 完整平台地圖見 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)。
+
 > 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，**可直接照抄的成品配置見 [`docs/RECIPES.md`](docs/RECIPES.md)**。
 
 ---
@@ -189,19 +201,21 @@ lofi-studio/
 │   └── auto_qc.py / batch_generate.py / make_meta.py / …  # 相容 shim（實作在 src/lofi，新流程請用 scripts/lofi）
 ├── scratch/                   # 實驗／一次性腳本（不進版控）
 ├── tests/                     # python3 -m unittest discover -s tests -v
-├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、NAMING.md（命名規則）
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、NAMING.md（命名規則）、DISTRIBUTION.md（多平台上架規劃）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
 │   ├── prompt_library.csv     # 起始 prompt 庫（10 種氛圍）
 │   ├── styles/                # 風格骨架（固定 tag + 可變維度），如 rainy_lofi.json
 │   ├── youtube/               # 上片 metadata 範本（title/描述/tags），對應同名 style
+│   ├── character/             # 主角定裝與品牌資料（moni.json：設計/LoRA 方向/封面判別條件）
 │   └── generated/             # lofi expand 產出的曲目清單
 ├── assets/                    # ★ 整個不進版控（素材；紀錄見 catalog/）
 │   ├── tracks/<style>/<run>/  # 生成的曲子（分層）；每首附 .json 側錄（來源/品檢/標籤）
 │   └── visuals/<kind><NN>/    # AI 生成的場景圖（一批一夾）；manifest.json 逐檔記 prompt/seed
 ├── catalog/                   # 音樂目錄（P0/P1）
 │   ├── tracks.jsonl           # ★ 唯一進版控的紀錄：精簡事件流（每次生成/品檢/… 一行）
+│   ├── releases.jsonl         # 上架包事件流（lofi release 產出；本機檔）
 │   ├── visuals.jsonl          # 圖片品檢事件流（本機檔；跑過 visual-qc 才會有）
 │   ├── index.csv              # 由側錄重建的查詢索引（衍生物，不進版控）
 │   └── library.db             # SQLite 圖書館（衍生物，不進版控）
@@ -210,6 +224,8 @@ lofi-studio/
 ├── output/                    # symlink → 外接碟
 │   ├── videos/                # 最終影片（舊佈局）
 │   ├── episodes/<name>/       # ★ 一集一包：video.mp4 + mix.wav + visual_loop.mp4
+│   ├── releases/<run>/        # ★ 上架包：audio/ + cover_3000x3000.jpg + release.json + CHECKLIST.md
+│   ├── masters/<style>/<run>/ # ★ 無損母帶（FLAC；--format flac 生成，體積大故放外接）
 │   ├── mixes/                 # 長片音訊
 │   └── stems/                 # Demucs 輸出
 └── models/                    # 模型放置說明（權重實際在 ~/ComfyUI/models）
@@ -234,11 +250,15 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
 ./scripts/lofi config --licenses                      # 看模型授權登錄
 ./scripts/lofi license check                          # 商用授權稽核（掃產出用到的模型）
+./scripts/lofi release plan --run coastal01           # 看某個 run 會包成什麼樣的專輯
+./scripts/lofi release package --run coastal01        # 產出串流/商店上架包（母帶+封面+清單）
+./scripts/lofi character show                         # 主角（黑貓 Moni）定裝與旅程
+./scripts/lofi character check                        # LoRA 訓練集一致性（漏字幕/特徵矛盾/數量不足）
 ```
 
 - 也可以 `pip install -e .` 後直接打 `lofi <command>`（等價）；`PYTHONPATH=src python3 -m lofi.cli <command>` 亦可。
 - ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
-- **模型檔名與 ComfyUI 位址集中在 `src/lofi/config.py`**，可用環境變數覆寫（`LOFI_COMFY_URL`、`LOFI_IMAGE_CKPT`、`LOFI_UPSCALE_MODEL`…），換模型不必改程式。
+- **模型檔名與 ComfyUI 位址集中在 `src/lofi/config.py`**，可用環境變數覆寫（`LOFI_COMFY_URL`、`LOFI_IMAGE_CKPT`、`LOFI_UPSCALE_MODEL`、`LOFI_RELEASE_ARTIST`…），換模型不必改程式。
 - **生成互斥鎖**：`generate` / `visual` / `cinemagraph` 會互斥（鎖檔在內接 `logs/.gpu.lock`）。已有生成在跑時第二個會**直接中止**並印出持有者；要排隊設 `LOFI_LOCK_WAIT=秒`，硬要同時跑設 `LOFI_NO_LOCK=1`。
 - **等待逾時**：`generate` / `visual` 有 `--timeout`（預設 1800 / 900 秒）；ComfyUI 卡死或斷線時會報錯跳過，不會無限等。
 - **磁碟 preflight**：`generate` / `visual` 生成前會檢查內接碟可用空間（`MIN_FREE_GB`，預設 20GB，可 `LOFI_MIN_FREE_GB` 覆寫 / `lofi config` 查看），不足即中止。
@@ -328,7 +348,7 @@ ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定�
 | Text encoder | `qwen_0.6b_ace15` + `qwen_1.7b_ace15`（架構需要兩個） |
 | VAE | `ace_1.5_vae` |
 | 長度 | 120 秒 / 首 |
-| 輸出 | 存到 `~/ComfyUI/output/audio`，再複製到 `assets/tracks/` |
+| 輸出 | 存到 `~/ComfyUI/output/audio`，再複製到 `assets/tracks/`（`--clean-raw` 會刪掉原檔） |
 
 > 官方另有 **AIO 單檔 10GB**（`ace_step_1.5_turbo_aio.safetensors`），內容與分檔完全相同。
 > 分檔不會比較省空間；只是檔案數量不同。
@@ -342,9 +362,23 @@ ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定�
 ./scripts/lofi generate --limit 3        # 先生 3 首試水溫（約 15 分鐘）
 ./scripts/lofi generate                  # CSV 全部 10 首（約 50 分鐘）
 ./scripts/lofi generate --seed 12345     # 固定 seed 可重現
+./scripts/lofi generate --format flac    # 無損母帶（串流發行用；預設 mp3）
 ```
 
 每首在 M4 / 16GB 上約 **4–5 分鐘**，生成後自動複製到 `assets/tracks/`。
+
+> **要不要用 `--format flac`？** ACE-Step 預設直接輸出 mp3（48kHz ≈248kbps，3.6MB/首）。
+> 若要上架串流，母帶最好是無損；但 **FLAC 是同長度 mp3 的 ~8 倍大（≈30MB/首）**，內接碟（228GB）撐不住，
+> 所以 `--format flac` 採**兩層存放**：
+>
+> | 位置 | 內容 | 碟 |
+> |---|---|---|
+> | `assets/tracks/<style>/<run>/*.mp3` | **工作檔**（用於品檢/圖書館/混音/長片，流程完全不變） | 內接 |
+> | `output/masters/<style>/<run>/*.flac` | **無損母帶**（只給 `release package` 用） | 外接 |
+>
+> 生成時 ACE-Step 存 FLAC → 搬到外接母帶夾 → ffmpeg 轉一份 mp3 進工作目錄。
+> `release package` 會**自動優先採用無損母帶**當來源，並在 `release.json` 記 `master_source`。
+> 詳見 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) §6-3。
 
 ### 同風格量產（建議流程）
 
@@ -496,6 +530,9 @@ lofi visual-qc --json > vqc.json     # 給程式用
   --prompt "scenery, no humans, indoors, cozy study room at night, warm desk lamp, open book, \
 potted plant, lo-fi anime illustration, soft warm lighting, muted colors, masterpiece, best quality" \
   --negative "lowres, bad hands, text, watermark, people, 1girl, face"
+
+# 複製到 assets/visuals 後刪掉 ComfyUI 原始檔（內接碟很寶貴；事後也可用 cleanup_outputs.sh --comfy 清）
+./scripts/lofi visual --run-id sc07 --slug window --count 3 --clean-raw
 ```
 > 建議模型：預設 **DreamShaperXL-v1.0-Alpha2**（SDXL，半寫實插畫）；動漫 tag 風可用 NoobAI-XL、WAI-Illustrious。
 > ⚠️ SDXL 模型約 6.5GB，載入佔 RAM；生圖約 2.5 分鐘／張，生成期間勿同時跑音樂生成（見 AGENTS.md「資源限制」）。
@@ -618,13 +655,15 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 ./scripts/cleanup_outputs.sh --apply            # 真的刪
 ./scripts/cleanup_outputs.sh --keep 5 --apply   # 只留最新 5 支影片
 ./scripts/cleanup_outputs.sh --older-than 14 --apply
+./scripts/cleanup_outputs.sh --comfy --apply    # 連 ComfyUI 原始輸出一起清
 ./scripts/cleanup_outputs.sh --archive /Volumes/WJ_SATA/lofi-studio/output/videos --apply
 ```
 
 - 會一併清中間殘留檔（`lofi_loop*`、`lofi_video_*`、`*_raw.wav`、`_loop_list.txt`，以及 episode 內的 `_loop_1080.mp4`/`_video_copy.mp4`/`_mix_raw.wav`；可重生）。
 - `output/episodes/<name>/` 整包視為一支成片：`--keep` / `--older-than` 以**資料夾為單位**保留或清除。
+- `--comfy` 另外清 **ComfyUI 原始輸出**（`~/ComfyUI/output` 的圖與音檔；會留在內接碟，生圖後記得清）。
 - `make_long_lofi.sh` 開頭有**空間 preflight**：可用不足會直接中止（`SKIP_DISK_CHECK=1` 可略過）。
-- 省空間小技巧：`make_long_lofi.sh --vbitrate 5`（影片約砍半）、`batch_generate.py --clean-raw`（刪原始音檔）。
+- 省空間小技巧：`make_long_lofi.sh --vbitrate 5`（影片約砍半）、`batch_generate.py --clean-raw`（刪原始音檔）、`lofi visual --clean-raw`（刪原始圖）。
 
 ## 上片：YouTube metadata 與佇列
 

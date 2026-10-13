@@ -14,6 +14,8 @@
   lofi visual-qc [visual_qc 參數]（圖片品檢：黑圖/純色/灰圖/壞檔）
   lofi cinemagraph [make_cinemagraph 參數]（需 numpy，用 .venv）
   lofi upload    [yt_upload 參數]（需 Google 套件＋憑證，用 .venv）
+  lofi release   plan | package（把生成 run 包成上架包；串流/商店，見 docs/DISTRIBUTION.md）
+  lofi character show | check（主角定裝 + LoRA 訓練集一致性檢查）
   lofi config    [--json|--sh|--licenses]（集中設定：模型檔名 / ComfyUI 位址 / 授權）
   lofi license   check | models（商用授權稽核）
 
@@ -38,6 +40,8 @@ MODULES = {
     "upload":      ("lofi.upload",      "上傳成片到 YouTube（上線前自動；需 Google 套件/憑證）"),
     "config":      ("lofi.config",      "顯示集中設定（模型檔名 / ComfyUI 位址）"),
     "license":     ("lofi.license",     "商用授權稽核（掃模型與授權狀態）"),
+    "release":     ("lofi.release",     "把生成 run 包成上架包（plan | package；串流/商店）"),
+    "character":   ("lofi.character",   "主角定裝檢視 + LoRA 訓練集一致性檢查（show | check）"),
 }
 
 

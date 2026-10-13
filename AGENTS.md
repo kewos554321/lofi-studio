@@ -12,6 +12,7 @@
 | `docs/RECIPES.md` | 配方 | 量產用的錨定參數／成品配置 |
 | `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
 | `docs/NAMING.md` | 規則 | 檔名/資料夾命名（音樂 + 視覺）與通用原則 |
+| `docs/DISTRIBUTION.md` | 變現 | 多平台上架地圖、自動化天花板、release 上架包規劃 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
@@ -43,6 +44,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
+  release.py       # 把生成 run 包成上架包（母帶+封面+metadata+清單；DSP/Bandcamp 無 API，故只產包）
 scripts/lofi       # 統一 CLI 入口 wrapper（免安裝；= `python -m lofi.cli`，shell 產線與人都用它）
 scripts/check.sh   # 提交前自檢（compile + unittest；CI 跑同一套）
 scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用；新流程請走 `lofi <cmd>`
@@ -50,11 +52,13 @@ scripts/*.sh       # ffmpeg/ComfyUI 重流程（make_episode 五段產線 / buil
 scratch/           # 實驗／一次性腳本（不進版控）
 prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
+prompts/character/  # 主角定裝與品牌資料（moni.json：設計/LoRA 方向/封面判別條件）
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整個 assets/ 不進版控，紀錄看 catalog/tracks.jsonl）
+                               # ★ 內接只留工作用 mp3；無損母帶在 output/masters/（外接，--format flac）
 assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifest.json（一 run 一份：config 共用 + images 逐檔 prompt/seed；不進版控）
-catalog/            # tracks.jsonl + visuals.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
+catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
-output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）
+output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包；masters/<style>/<run>/ 為無損母帶（FLAC）
 tests/              # python3 -m unittest discover -s tests -v
 docs/RUNBOOK.md     # 操作手冊
 ```
@@ -69,11 +73,17 @@ docs/RUNBOOK.md     # 操作手冊
 ./scripts/lofi publish --ready
 ./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
 ./scripts/lofi visual --count 3 --size 768x512
+./scripts/lofi release plan --run coastal01                            # 看某 run 會包成什麼專輯
+./scripts/lofi release package --run coastal01 --limit 12              # 產出上架包（母帶+封面+清單）
+./scripts/lofi character check                                         # LoRA 訓練集一致性（訓練前必跑）
+./scripts/lofi visual --count 3 --clean-raw               # 生圖後刪 ComfyUI 原檔（省內接碟）
 ./scripts/lofi config                                  # 目前模型檔名／ComfyUI 位址
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40   # 五段產線一條龍
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑單一段（music/image/video/upload/cleanup）
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
+./scripts/cleanup_outputs.sh --comfy                   # 清 ComfyUI 原始輸出（預覽；加 --apply 才刪）
+./scripts/cleanup_outputs.sh --apply                   # 清專案 output（中間檔＋舊成片，保留最新 3 支）
 ./scripts/check.sh                                     # 提交前自檢（compile + unittest）
 python3 -m unittest discover -s tests -v
 ```
@@ -91,10 +101,10 @@ python3 -m unittest discover -s tests -v
 - **唯一命名**：生成檔名／目錄含 run 代號（音樂 `assets/tracks/<style>/<run>/`；圖片 `assets/visuals/<run-id>/`），禁止讓不同批次產生同名檔（會被覆蓋）。
   圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/NAMING.md`。
   音樂新 run 命名標準：`<run-id>_<NNNN>[_<slug>].mp3`（run-id 不可變、序號固定 4 位；`row_id`/`prompt`/`seed` 放 sidecar）。**`track_id` 記在 sidecar、不從檔名推算**；舊 run 檔名維持原樣不動。通用原則與遷移建議詳見 `docs/NAMING.md`。
-- **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
+- **只加不刪**：`catalog/tracks.jsonl` 與 `catalog/releases.jsonl` 是 append-only 事件流（狀態變更用新事件，不要改舊行）。
 - **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
-- **商用授權**：產出要能商用。換模型前先在 `config.MODEL_LICENSES` 登錄 `{license, commercial, source}`；`generate`/`visual` 對 `commercial!=True` 的模型 **fail-closed**（中止，除非 `--allow-unknown-license`）。生成時把 `model_license`/`model_source` 寫進 sidecar/manifest，`meta` 彙整成 `publish.credits`。稽核用 `./scripts/lofi license check`；矩陣見 `docs/LICENSING.md`。**別用非商用模型**（例：MusicGen CC-BY-NC）。
+- **商用授權**：產出要能商用。換模型前先在 `config.MODEL_LICENSES` 登錄 `{license, commercial, source}`；`generate`/`visual`/`release` 對 `commercial!=True` 的模型 **fail-closed**（中止，除非 `--allow-unknown-license`）。生成時把 `model_license`/`model_source` 寫進 sidecar/manifest，`meta` 彙整成 `publish.credits`、`release` 彙整成 `release.json` 的 `credits`。稽核用 `./scripts/lofi license check`；矩陣見 `docs/LICENSING.md`。**別用非商用模型**（例：MusicGen CC-BY-NC）。
 - **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
 - **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。
 
@@ -135,9 +145,14 @@ python3 -m unittest discover -s tests -v
 - 模型放內部碟 `~/ComfyUI/models`，目前約 37GB（含 ACE-Step 音訊與 SDXL）；**單一 SDXL checkpoint 就 6.5GB**。
 - 內部碟可用空間**建議維持 >20GB**（macOS 與 swap 需要），逼近就清。
 - 大檔（成片、mix、模型）能放外接（`output/` 已在 `WJ_SATA`）就別放內部。
+- **無損母帶（FLAC）一定要放外接**：FLAC 是同長度 mp3 的 **~8 倍**（實測 48kHz 立體 ≈30MB/首 vs mp3 3.6MB）。
+  內接只有 228GB，1000 首 FLAC 就吃掉 ~30GB。`generate --format flac` 只把**工作用 mp3** 留 `assets/tracks`（內接），
+  母帶寫 `output/masters/<style>/<run>/`（外接）；`release package` 會自動優先採用無損母帶。
+  flac 模式下 `--clean-raw` 更重要（ComfyUI 原始 FLAC 也是 30MB 級、先落內接）。詳見 `docs/DISTRIBUTION.md` §6-3。
 - **外接 `WJ_SATA` 是 USB/ExFAT、實測讀取僅 ~86MB/s，不適合放模型**：內部 NVMe 是 ~2.3GB/s，載入 SDXL（6.5GB）內部約 3 秒、外接要 ~80 秒。推理本身吃 RAM 不吃碟，但**載入會重複付**（16GB 下 ACE-Step 9GB 與 SDXL 6.5GB 互斥，切換就會重載）。
 - 所以模型留內部碟，**該控制的是模型數量**（用完的 checkpoint 清掉），不是把模型搬去慢碟。要擴充請換 USB 3.2 / Thunderbolt SSD。
 - **測試性的大模型用完就刪**；長期可考慮 `extra_model_paths.yaml` 把模型指到外接碟（僅限快碟）。
+- **ComfyUI 原始輸出不會自己消失**：成圖／音檔先落在 `~/ComfyUI/output`（在**內接碟**）。生音樂 `batch_run --clean-raw`、生圖 `lofi visual --clean-raw`（`make_episode.sh` 兩段都已預設帶）會在複製走之後刪原檔；漏掉的用 `./scripts/cleanup_outputs.sh --comfy --apply` 補清。
 
 ### 隨手檢查
 ```bash

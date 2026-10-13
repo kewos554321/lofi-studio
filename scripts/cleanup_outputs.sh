@@ -9,6 +9,7 @@
 #      以及一集一包的中間檔 output/episodes/*/_loop_1080.mp4、_video_copy.mp4、_mix_raw.wav、_loop_list.txt
 #   2) 舊成片：output/videos/*.mp4 與 output/episodes/<name>/（整包視為一支）
 #   3) 可選：--stems 清 output/stems
+#   4) 可選：--comfy 清 ComfyUI 原始輸出（~/ComfyUI/output 的圖與音檔）
 #
 # 用法:
 #   ./scripts/cleanup_outputs.sh                          # 預覽（預設保留最新 3 支影片）
@@ -17,6 +18,7 @@
 #   ./scripts/cleanup_outputs.sh --older-than 14 --apply  # 刪 14 天前的影片
 #   ./scripts/cleanup_outputs.sh --archive /Volumes/WJ_SATA/lofi-studio/output/videos --apply
 #   ./scripts/cleanup_outputs.sh --stems --apply          # 連 stems 一起清
+#   ./scripts/cleanup_outputs.sh --comfy --apply          # 只清 ComfyUI 原始輸出
 #
 set -uo pipefail
 
@@ -28,6 +30,7 @@ OLDER=""
 ARCHIVE=""
 APPLY=0
 DO_STEMS=0
+DO_COMFY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,7 +39,8 @@ while [ $# -gt 0 ]; do
     --archive)    ARCHIVE="$2"; shift 2;;
     --apply)      APPLY=1; shift;;
     --stems)      DO_STEMS=1; shift;;
-    -h|--help)    sed -n '2,26p' "$0"; exit 0;;
+    --comfy)      DO_COMFY=1; shift;;
+    -h|--help)    sed -n '2,27p' "$0"; exit 0;;
     *) echo "未知參數: $1（用 --help）" >&2; exit 1;;
   esac
 done
@@ -98,12 +102,29 @@ if [ "$DO_STEMS" = 1 ] && [ -d output/stems ]; then
   )
 fi
 
+# ---------- 收集 4) ComfyUI 原始輸出 ----------
+COMFY_OUT="${LOFI_COMFY_ROOT:-$HOME/ComfyUI}/output"
+COMFY_SEL=()
+if [ "$DO_COMFY" = 1 ]; then
+  if [ -d "$COMFY_OUT" ]; then
+    while IFS= read -r -d '' f; do COMFY_SEL+=("$f"); done < <(
+      find -H "$COMFY_OUT" -maxdepth 2 -type f \
+        \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' \
+           -o -name '*.flac' -o -name '*.wav' -o -name '*.mp3' \) \
+        -print0 2>/dev/null
+    )
+  else
+    echo "⚠️  找不到 ComfyUI 輸出目錄 ${COMFY_OUT}（略過 --comfy）" >&2
+  fi
+fi
+
 TARGETS=()
 FILES=()
 DIRS=()
 [ "${#LEFTOVERS[@]}" -gt 0 ] && { TARGETS+=("${LEFTOVERS[@]}"); FILES+=("${LEFTOVERS[@]}"); }
 [ "${#VIDEOS_SEL[@]}" -gt 0 ] && { TARGETS+=("${VIDEOS_SEL[@]}"); FILES+=("${VIDEOS_SEL[@]}"); }
 [ "${#STEMS_SEL[@]}" -gt 0 ] && { TARGETS+=("${STEMS_SEL[@]}"); FILES+=("${STEMS_SEL[@]}"); }
+[ "${#COMFY_SEL[@]}" -gt 0 ] && { TARGETS+=("${COMFY_SEL[@]}"); FILES+=("${COMFY_SEL[@]}"); }
 [ "${#EPISODES_SEL[@]}" -gt 0 ] && { TARGETS+=("${EPISODES_SEL[@]}"); DIRS+=("${EPISODES_SEL[@]}"); }
 
 # ---------- 報告 ----------
@@ -131,6 +152,10 @@ for d in "${EPISODES_SEL[@]+"${EPISODES_SEL[@]}"}"; do printf "  %-8s %s/\n" "$(
 if [ "$DO_STEMS" = 1 ]; then
   echo "【stems】${#STEMS_SEL[@]} 個"
   for f in "${STEMS_SEL[@]+"${STEMS_SEL[@]}"}"; do printf "  %-8s %s\n" "$(du -h "$f"|cut -f1)" "$f"; done
+fi
+if [ "$DO_COMFY" = 1 ]; then
+  echo "【ComfyUI 原始輸出】${#COMFY_SEL[@]} 個（${COMFY_OUT}）"
+  for f in "${COMFY_SEL[@]+"${COMFY_SEL[@]}"}"; do printf "  %-8s %s\n" "$(du -h "$f"|cut -f1)" "$f"; done
 fi
 
 if [ "$APPLY" = 1 ]; then

@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import (backfill, catalog, config, expand, generate, io, library,  # noqa: E402
-                  media, meta, qc, upload, visual, visual_qc)
+from lofi import (backfill, catalog, character, config, expand, generate, io,  # noqa: E402
+                  library, media, meta, qc, release, upload, visual, visual_qc)
 
 
 def _png_with_prompt(path, workflow):
@@ -805,6 +805,24 @@ class TestWorkflowAssembly(unittest.TestCase):
         self.assertEqual(wf["3"]["inputs"]["positive"], ["94", 0])
         self.assertEqual(wf["107"]["inputs"]["filename_prefix"], "audio/x")
 
+    def test_generate_save_node_switches_on_format(self):
+        """--format flac 要換成 SaveAudio（無損），預設仍是 SaveAudioMP3。"""
+        mp3 = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x")
+        self.assertEqual(mp3["107"]["class_type"], "SaveAudioMP3")
+        self.assertEqual(mp3["107"]["inputs"]["quality"], "V0")
+        flac = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x", audio_format="flac")
+        self.assertEqual(flac["107"]["class_type"], "SaveAudio")
+        self.assertNotIn("quality", flac["107"]["inputs"])
+
+    def test_unique_path_adds_suffix(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "a.mp3"
+            self.assertEqual(generate._unique(p), p)          # 不存在 → 原樣
+            p.write_text("x")
+            self.assertEqual(generate._unique(p).name, "a-2.mp3")
+            (Path(td) / "a-2.mp3").write_text("x")
+            self.assertEqual(generate._unique(p).name, "a-3.mp3")
+
     def test_upload_clamp_tags_500_limit(self):
         long = "x" * 400
         tags = upload.clamp_tags([long, long, "small"])       # 兩個 400 字元裝不下
@@ -981,6 +999,116 @@ class TestLicensing(unittest.TestCase):
         from lofi import license as lic
         self.assertIsInstance(lic.scan_music(), dict)
         self.assertIsInstance(lic.scan_visuals(), dict)
+
+
+class TestRelease(unittest.TestCase):
+    def test_slugify(self):
+        self.assertEqual(release.slugify("Warm Breeze at the Shore"), "warm-breeze-at-the-shore")
+        self.assertEqual(release.slugify("Slow Tide (pt. 2)"), "slow-tide-pt-2")
+        self.assertEqual(release.slugify("  ..  "), "")
+        self.assertEqual(release.slugify(None), "")
+
+    def test_unique_titles_adds_pt(self):
+        self.assertEqual(release.unique_titles(["Sunset", "Sunset", "Sunset"]),
+                         ["Sunset", "Sunset (pt. 2)", "Sunset (pt. 3)"])
+        self.assertEqual(release.unique_titles(["A", "B"]), ["A", "B"])
+
+    def test_unique_titles_is_case_insensitive(self):
+        self.assertEqual(release.unique_titles(["Rain", "rain"]), ["Rain", "rain (pt. 2)"])
+
+    def test_track_title_prefers_mood(self):
+        self.assertEqual(release.track_title("x.mp3", {"mood": "rain on the window"}),
+                         "Rain on the Window")
+        self.assertEqual(release.track_title("Slow Tide.mp3", {}), "Slow Tide")
+
+    def test_parse_loudnorm_json(self):
+        err = ('[Parsed_loudnorm_0 @ 0x7f] \n{\n\t"input_i" : "-12.90",\n'
+               '\t"input_tp" : "-0.10",\n\t"target_offset" : "0.20"\n}\n')
+        d = release.parse_loudnorm_json(err)
+        self.assertEqual(d["input_i"], "-12.90")
+        self.assertIsNone(release.parse_loudnorm_json(""))
+        self.assertIsNone(release.parse_loudnorm_json("no json here"))
+
+    def test_build_tracklist_csv(self):
+        csv_text = release.build_tracklist_csv([{
+            "no": 1, "title": "A", "artist": "X", "duration": 125,
+            "key": "G major", "bpm": 70, "mood": "m", "file": "f.mp3"}])
+        self.assertTrue(csv_text.startswith("No,Title,Artist,Duration"))
+        self.assertIn("02:05", csv_text)                 # 125s 格式化
+        self.assertIn("G major", csv_text)
+
+    def test_summarize_release_event_drops_empty(self):
+        ev = release.summarize_release_event(
+            {"run": "r1", "album": "A", "tracks": 3, "label": "", "notes": []})
+        self.assertEqual(ev, {"run": "r1", "album": "A", "tracks": 3})
+
+    def test_build_checklist_has_all_platforms(self):
+        md = release.build_checklist({
+            "album": "Coastal", "artist": "X", "master": {"lufs": -14, "tp": -1},
+            "master_source": "src", "credits": [{"model": "m", "license": "MIT"}],
+            "tracks": [{"title": "A"}]})
+        for section in ("DSP 串流", "Bandcamp", "stock／sync", "發布前檢查"):
+            self.assertIn(section, md)
+
+    def test_masters_subdir_mirrors_tracks(self):
+        self.assertEqual(str(catalog.masters_subdir("coastal guitar", "coastal01")),
+                         str(catalog.subdir(catalog.MASTERS_DIR, "coastal guitar", "coastal01")))
+        self.assertTrue(str(catalog.masters_subdir("a", "b")).endswith("a/b"))
+
+    def test_describe_master_source(self):
+        desc = release.describe_master_source
+        self.assertIn("無損母帶", desc([{"master_src": "/m.flac", "sidecar": {}},
+                                        {"master_src": "/m2.flac", "sidecar": {}}]))
+        self.assertIn("混合", desc([{"master_src": "/m.flac", "sidecar": {}},
+                                    {"master_src": None, "sidecar": {}}]))
+        self.assertIn("mp3", desc([{"master_src": None, "sidecar": {}}]))
+        self.assertIn("母帶檔不在", desc([{"master_src": None,
+                                          "sidecar": {"gen": {"format": "flac"}}}]))
+
+    def test_character_score(self):
+        ch = {"cover_match": {"must": ["black cat"],
+                              "never": ["orange tabby", "tabby"],
+                              "features": ["white paw", "white sock", "amber eye"]}}
+        # 主角：命中特徵越多分數越高
+        self.assertEqual(release.character_score("a sleek black cat with golden amber eyes", ch), 2)
+        self.assertEqual(release.character_score(
+            "black cat, clearly white paws, white socks on all four feet, golden amber eyes", ch), 4)
+        # 不是主角：別的貓 / 無主角 / 空
+        self.assertEqual(release.character_score("a chubby orange tabby cat", ch), -1)
+        self.assertEqual(release.character_score("soft watercolor background", ch), -1)
+        self.assertEqual(release.character_score("", ch), -1)
+        self.assertEqual(release.character_score("black cat", None), -1)   # 沒有角色檔 → 不認
+
+    def test_character_record_exists(self):
+        ch = release.load_character("moni")
+        self.assertIsNotNone(ch, "prompts/character/moni.json 應該存在")
+        self.assertEqual(ch["name"], "Moni")
+        self.assertEqual(ch["artist"], "Moni's Journey")
+        self.assertIn("black cat", ch["cover_match"]["must"])
+        self.assertIsNone(release.load_character("no-such-character"))
+
+    def test_caption_problems(self):
+        spec = {"require_tags": ["black cat", "white socks"],
+                "forbid_tags": ["black paws", "tabby"]}
+        self.assertEqual(character.caption_problems("a black cat with white socks", spec), [])
+        missing = character.caption_problems("a black cat", spec)
+        self.assertTrue(any("white socks" in m for m in missing))
+        conflict = character.caption_problems("a black cat with white socks and black paws", spec)
+        self.assertTrue(any("black paws" in m for m in conflict))
+        self.assertEqual(character.caption_problems("", spec), ["字幕是空的"])
+        self.assertEqual(character.caption_problems(None, spec), ["字幕是空的"])
+
+    def test_negative_problems(self):
+        spec = {"negative_should_contain": ["black paws", "black feet"]}
+        self.assertEqual(character.negative_problems("all black paws, black feet, blurry", spec), [])
+        self.assertEqual(len(character.negative_problems("blurry only", spec)), 2)
+
+    def test_moni_caption_check_matches_ds03_style(self):
+        """定裝的 caption_check 要能認過 ds03 那種字幕（避免規則訂得太嚴炸全部）。"""
+        ch = character.load_character("moni")
+        cap = ("a sleek black cat with (large round golden amber eyes:1.2), (clearly white paws:1.3), "
+               "(white socks on all four feet:1.2), pure black fur on the rest of the body")
+        self.assertEqual(character.caption_problems(cap, ch["caption_check"]), [])
 
 
 if __name__ == "__main__":

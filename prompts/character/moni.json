@@ -1,0 +1,52 @@
+{
+  "character_version": 2,
+  "name": "Moni",
+  "artist": "Moni's Journey",
+  "species": "black cat",
+  "art_style": "hand-painted watercolor anime illustration, delicate brush strokes, warm nostalgic color palette",
+  "design": {
+    "fur": "pure black, sleek",
+    "eyes": "large round golden amber",
+    "socks": "white（四腳白襪）",
+    "canonical_ref": "ref04_01_gold-socks.png",
+    "naming_note": "檔名 'gold-socks' 是誤稱——gold 指的是金眼，實際特徵是白襪。檔名保留不動（不必改舊檔），以本檔的 socks 欄位為準。"
+  },
+  "design_decisions": [
+    {
+      "date": "2026-10-13",
+      "decision": "襪子＝白襪",
+      "reason": "prompt（white paws like socks）、ds03 字幕（clearly white paws:1.3 / white socks on all four feet:1.2）與負向詞（all black paws, black feet）全部指向白襪；改金襪需同步改訓練字幕與負向詞。"
+    }
+  ],
+  "cover_match": {
+    "must": ["black cat"],
+    "never": ["orange tabby", "tabby"],
+    "features": ["white paw", "white sock", "amber eye"]
+  },
+  "caption_check": {
+    "require_tags": ["black cat", "white paws", "white socks", "amber eye"],
+    "forbid_tags": ["black paws", "black feet", "orange", "tabby"],
+    "negative_should_contain": ["black paws", "black feet"]
+  },
+  "reference_image": "mascot_blackcat_ref.png",
+  "lora": {
+    "target": "moni",
+    "status": "訓練中",
+    "dataset_runs": ["ds03", "ds04", "ds05"],
+    "min_images": 20,
+    "note": "白襪是小面積特徵，IPAdapter 鎖不牢（見 docs/RUNBOOK.md §6.1），必須靠 LoRA。下限 20 張是經驗值，低於就不要開訓。"
+  },
+  "journey": {
+    "concept": "每張專輯＝牠旅程的一站；封面一律是牠。",
+    "stops": {
+      "windowsill": "The Windowsill",
+      "fireplace": "By the Fireplace",
+      "rain_window": "Rain on the Glass",
+      "meadow": "Meadow, Late Light",
+      "bookshelf": "Between the Books",
+      "kitchen": "Kitchen at Dawn",
+      "stone_wall": "The Stone Wall",
+      "forest": "Into the Forest"
+    }
+  }
+}

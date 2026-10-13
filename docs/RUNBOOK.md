@@ -88,12 +88,15 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 | Steps | 30–50 |
 | CFG | 4–7 |
 | Seed | 每首換一個；滿意的記下來微調 |
-| 輸出 | 44.1 kHz 立體聲 WAV |
+| 輸出 | 預設 **48 kHz 立體聲 mp3**（ComfyUI `SaveAudioMP3`，≈248 kbps VBR）；`--format flac` 改存無損 FLAC |
 
 ### 2.3 批次生成
 - 目標一次做 **6–10 首**同氛圍但**互不重複**的曲子。
 - 每首稍微改 prompt（樂器、調性、BPM、情境），避免「同模板」。
 - 生成空檔去做別的事，別讓機器滿載連續跑好幾小時。
+- **要上架串流的曲請加 `--format flac`**：母帶（無損）寫外接 `output/masters/<style>/<run>/`，
+  內接只留 ffmpeg 轉出的工作 mp3（流程不變）。FLAC 是 mp3 的 ~8 倍大，**不要**放內接（見 `DISTRIBUTION.md` §3.3）。
+  批次範例：`./scripts/lofi generate --csv prompts/generated/x.csv --clean-raw --format flac`
 
 ### 2.4 挑選
 只留「能撐 2 分鐘不無聊」的。淘汰的不要省，硬用會讓長片變難聽。
@@ -177,6 +180,7 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 > - `--slug` 給短標籤（小寫英數），一眼看出內容；`--count 3` 會依序編號。
 > - 衍生檔的 slug 用保留字首：`anim-`（動畫）、`cmp-`（對照合成）、`mask-`（遮罩）、`fix-`（後處理）。
 > - 完整規則與舊→新對照表：`docs/NAMING.md`。
+> - `--clean-raw`：複製到 `assets/visuals/` 且寫完 manifest 後，刪掉 `~/ComfyUI/output` 的原檔（生圖不刪會一直堆在內接碟；事後可用 `cleanup_outputs.sh --comfy` 補清）。
 
 `manifest.json` 是「**一個 run 一份**」，分兩塊：
 
@@ -236,6 +240,14 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 - 授權：`--ref` 會一併查 IPAdapter 那兩支模型（`config.IPADAPTER_MODELS`），沒登錄會被 fail-closed 擋下。
 - `manifest.json` 的 `tool` 自動記成 `sdxl-ipadapter`，`config` 多記 `ref`/`weight`/`weight_type`/`preset`/`embeds_scaling`/`start`/`end`（這樣回頭才看得出這批是用哪張參考圖、多重鎖的）。
 - 生成會取 `logs/.gpu.lock` 互斥鎖：音樂生成跑著時會直接中止（保護 16GB RAM）。
+- **定裝記錄在 `prompts/character/moni.json`**（主角 ＝ 黑貓 **Moni**：純黑毛＋大而圓的琥珀金眼＋**四腳白襪**）。
+  它同時是 `release` 挑封面的判別依據，所以改定裝要改這一份，不要只在 prompt 裡改。
+- **訓練前先跑** `./scripts/lofi character check`：檢查訓練集（a）每張有沒有字幕、
+  （b）字幕是否與定裝一致、（c）負向詞是否對抗錯誤特徵、（d）張數是否夠（建議 ≥20）。
+  它把「manifest 記了但磁碟沒有」視為**正常的人工剔除**（不報錯），只報留下來那些圖的問題。
+  > ⚠️ **白襪 vs 金襪未確認**：`ref04_01_gold-socks.png` 檔名是「金襪」，但該圖 prompt、`ds03` 字幕
+  > （`clearly white paws`／`white socks on all four feet`）與負向詞（`all black paws, black feet`）**全部指向白襪**。
+  > 若定裝要改成金襪，`ds` 系列的訓練字幕與負向詞必須同步改，否則 LoRA 會學成白襪。
 
 #### 局部重繪（inpaint：`--init-image` + `--mask`）
 
@@ -357,13 +369,16 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 成片會累積（每分鐘約 37MB、每小時約 2.2GB），內接容易吃爆。策略：素材與程式留內接，`output/` 指到外接碟。
 
 ```bash
-./scripts/disk_report.sh              # 容量一覽
+./scripts/disk_report.sh              # 容量一覽（含 ComfyUI 原始輸出殘留）
 ./scripts/cleanup_outputs.sh          # 預覽要清什麼（預設保留最新 3 支影片）
 ./scripts/cleanup_outputs.sh --apply  # 真的刪
+./scripts/cleanup_outputs.sh --comfy --apply   # 連 ComfyUI 原始輸出（~/ComfyUI/output）一起清
 ```
 
 - 遷移與 ExFAT 注意事項詳見 `README.md` 的「容量管理與外接碟」。
 - `output/episodes/<name>/` 整包視為一支成片，`cleanup_outputs.sh --keep/--older-than` 以資料夾為單位處理；中間檔（`_loop_1080.mp4`、`_video_copy.mp4`、`_mix_raw.wav`）也會一併列入清理。
+- `--comfy` 清的是 **ComfyUI 自己的原始輸出**（圖 `.png/.jpg/.webp`、音 `.flac/.wav/.mp3`，深度 2 層；目錄可用 `LOFI_COMFY_ROOT` 覆寫）。`lofi visual` 沒有 `--clean-raw` 時這些檔會一直留在內接碟（實測曾累積 100+ 張、上百 MB），所以生圖後記得清。
+- 生圖／生音樂當下就刪：`lofi visual --clean-raw`（複製到 `assets/visuals/` 後刪原檔）、`lofi generate --clean-raw`（同理，刪 `output/audio` 原檔）。`--format flac` 時原檔是 30MB 級 FLAC，**更要記得帶**。
 - `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
 ### 6.6 五段式產線（一條龍 / 分段測試）
@@ -391,12 +406,13 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | 段 | 指令本體 | 產物 |
 |---|---|---|
 | `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
-| `image` | `generate_visual`（ComfyUI + SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json） |
+| `image` | `generate_visual`（ComfyUI + SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
 | `upload` | `yt_upload`（YouTube Data API，預設 private） | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
 - 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
+- 清理：`music` 段的 `batch_run` 帶 `--clean-raw`（刪 `~/ComfyUI/output/audio` 原檔）、`image` 段帶 `--clean-raw`（刪原圖），ComfyUI 輸出不會殘留；`cleanup` 段則封存成片到外接 `archive/`。
 - `--count 0`（預設）＝音樂段不生成、沿用既有曲目。
 - `all` 時可用 `--no-upload` / `--no-cleanup` 略過第 4/5 段；上傳可見性用 `--privacy private|unlisted|public`（預設 private）。
 
@@ -446,6 +462,51 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）。
 - 章節時間戳是 YouTube 需要的「策展痕跡」，務必帶上。
 - `make_long_lofi.sh --style <name>` 會在渲染後自動產生上片資訊。
+
+### 8.2 YouTube 以外的出路（上架包）
+
+目前產線只有 YouTube 一個出口，`assets/tracks/<style>/<run>/`（**一個 run 就是一張專輯**）沒有被當成獨立資產。
+多平台上架的地圖、自動化天花板與分期順序見 **[`DISTRIBUTION.md`](DISTRIBUTION.md)**。
+
+重點：DSP 商（DistroKid / TuneCore / Amuse / RouteNote / CD Baby）與 Bandcamp **都沒有公開 API**，
+所以自動化的正確形狀是「**產出上架包 ＋ 清單**」，不是「一鍵上架」。
+
+```bash
+# 先看這個 run 會變成什麼專輯（不寫檔）：曲序、長度、重複曲名、母帶估算
+./scripts/lofi release plan --run coastal01
+./scripts/lofi release plan --run coastal01 --limit 12        # 只取前 12 首
+
+# 產出上架包
+./scripts/lofi release package --run coastal01
+./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
+./scripts/lofi release package --run coastal01 --style coastal_guitar --visual-run sc06
+./scripts/lofi release package --run coastal01 --format flac  # 母帶用 FLAC（較小）
+```
+
+輸出在 `output/releases/<run>/`（外接碟）：
+
+| 檔案 | 內容 |
+|---|---|
+| `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留來源取樣率，ID3 已填） |
+| `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**） |
+| `release.json` | 機器用：album/artist/曲序/授權 provenance/每首母帶參數 |
+| `tracklist.csv` | 人用：No/Title/Duration/Key/BPM/Mood/ISRC |
+| `CHECKLIST.md` | DSP／Bandcamp／stock 各平台的上架步驟 |
+
+- **artist 名義**：已定案為 **`Moni's Journey`**（`config.RELEASE_ARTIST`，可用 `LOFI_RELEASE_ARTIST` 或 `--artist` 覆寫）。
+  刻意與 YouTube 頻道名（Drifted LoFi）分開，走「廠牌家族」路線；單字名在 Apple Music／MusicBrainz 全部撞名，見 DISTRIBUTION §6-2。
+  ⚠️ 一律用**直引號** `'`（U+0027），不要用彎引號 `’`。
+- **曲名重複自動去重**：sidecar 的 `mood` 會重複，同名者自動加 `(pt. N)`。
+  想改名字：編輯 `release.json` 的 `tracks[].title` 再**重跑**（會沿用你改過的曲名，並清掉改名前留下的舊母帶）。
+- **母帶來源會自動分級**：若該曲有無損母帶（`output/masters/<style>/<run>/*.flac`），`release` **優先採用**它；
+  沒有才退回 `assets/tracks` 的工作 mp3。`release.json` 的 `master_source` 與逐首 `lossless` 會明記，
+  不會讓你誤以為來源是有損的。要產無損母帶：`generate --format flac`（**母帶寫外接**，見 §8.2 上方與 `DISTRIBUTION.md` §3.3）。
+- **封面一律是主角（黑貓 Moni）**：`release` 會讀各 run 的 `manifest.json` 逐檔 prompt，只挑「黑貓」的圖，
+  **排除橘虎斑的 `sc01/sc02/sc06`**；判別條件在 `prompts/character/moni.json` 的 `cover_match`。
+  找不到主角圖會警告並要你用 `--cover` 指定。要換封面：`--cover <圖檔>` 或 `--visual-run <run>`。
+- **商用守門**：比照 `generate`/`visual`，模型授權未知／禁止商用的批會 **fail-closed**（`--allow-unknown-license` 可略過）。
+- **可中斷續跑**：已存在的母帶會略過（`--force` 重做），所以改一首歌名只需重算那一首。
+- 每次產出 append 一筆事件到 `catalog/releases.jsonl`（append-only）。
 
 ---
 

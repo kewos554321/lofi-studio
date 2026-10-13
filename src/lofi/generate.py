@@ -30,15 +30,47 @@ from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MIN_FREE_GB, MUSIC_CLIP1,
                          MUSIC_CLIP2, MUSIC_UNET, MUSIC_VAE, check_commercial,
                          model_license)
 from lofi.lock import gpu_lock
-from lofi.paths import PROMPT_LIB, TRACKS_DIR
+from lofi.paths import MASTERS_DIR, PROMPT_LIB, TRACKS_DIR
 
 CSV_PATH = PROMPT_LIB
 COMFY_OUT = COMFY_AUDIO_OUT
 
 
+def _unique(p):
+    """若路徑已存在，自動加 -2 / -3 序號（防跨批次覆蓋）。"""
+    p = Path(p)
+    if not p.exists():
+        return p
+    k = 2
+    while p.with_name(f"{p.stem}-{k}{p.suffix}").exists():
+        k += 1
+    return p.with_name(f"{p.stem}-{k}{p.suffix}")
+
+
+def ensure_external_dir(path, label="外接碟"):
+    """建立外接碟上的目錄；symlink 目標不在（碟未掛載）時給人話的錯誤。"""
+    try:
+        Path(path).mkdir(parents=True, exist_ok=True)
+    except (FileNotFoundError, OSError) as e:
+        sys.exit(f"{label} 無法寫入：{path}（{e}）\n"
+                 f"  外接碟可能沒掛載或掉線 → 先跑 ./scripts/disk_report.sh 確認。")
+    return Path(path)
+
+
+def transcode_to_mp3(src, dst):
+    """無損母帶 → 工作用 mp3（V0）。內接只留 mp3，母帶放外接（見 docs/DISTRIBUTION.md §6-3）。"""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    rc, _, err = media.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
+         "-c:a", "libmp3lame", "-q:a", "0", "-write_id3v2", "1", "-id3v2_version", "3", str(dst)])
+    if rc != 0:
+        sys.exit(f"無損母帶轉 mp3 失敗：{src.name}\n{err.strip()[:300]}")
+    return dst
+
+
 def build_prompt(tags, bpm, key, duration, seed, prefix,
-                 steps=8, cfg_scale=2.0, temperature=0.85):
-    return {
+                 steps=8, cfg_scale=2.0, temperature=0.85, audio_format="mp3"):
+    p = {
         "104": {"class_type": "UNETLoader", "inputs": {"unet_name": MUSIC_UNET, "weight_dtype": "default"}},
         "78":  {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["104", 0], "shift": 3.0}},
         "105": {"class_type": "DualCLIPLoader", "inputs": {
@@ -60,10 +92,20 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
         "107": {"class_type": "SaveAudioMP3", "inputs": {
                     "audio": ["18", 0], "filename_prefix": prefix, "quality": "V0"}},
     }
+    if audio_format == "flac":
+        # 無損母帶：改用 SaveAudio 存 FLAC（同一條管線，只換存檔節點）。
+        # 用途：串流發行的母帶來源；見 docs/DISTRIBUTION.md §6-3。
+        p["107"] = {"class_type": "SaveAudio", "inputs": {
+                        "audio": ["18", 0], "filename_prefix": prefix}}
+    return p
 
 
-def record_track(dst, row, style, rid, seed, args, csv_path):
-    """生成成功後，把可追溯的來源與參數寫進 sidecar + catalog/tracks.jsonl。"""
+def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None):
+    """生成成功後，把可追溯的來源與參數寫進 sidecar + catalog/tracks.jsonl。
+
+    `dst` 是**工作檔**（assets/tracks 內的 mp3）；`master_file` 是無損母帶
+    （output/masters 內的 FLAC，外接碟）；沒有就留空。
+    """
     record = {
         "source": "batch_generate",
         "source_csv": cat.relpath(csv_path),
@@ -79,6 +121,7 @@ def record_track(dst, row, style, rid, seed, args, csv_path):
         "bpm": int(row["bpm"]) if str(row.get("bpm", "")).strip().isdigit() else row.get("bpm"),
         "prompt": row.get("prompt", "").strip(),
         "negative": row.get("negative", ""),
+        "master_file": cat.relpath(master_file) if master_file else None,
         "gen": {
             "seed": seed,
             "steps": args.steps,
@@ -86,6 +129,7 @@ def record_track(dst, row, style, rid, seed, args, csv_path):
             "temperature": args.temperature,
             "duration": args.duration,
             "model": MUSIC_UNET,
+            "format": getattr(args, "format", "mp3"),
             "model_license": model_license(MUSIC_UNET)["license"],
             "model_source": model_license(MUSIC_UNET)["source"],
         },
@@ -121,6 +165,8 @@ def main():
                     help="單首等待上限秒數（預設 1800；ComfyUI 卡死就跳過該首）")
     ap.add_argument("--clean-raw", action="store_true",
                     help="複製到 assets/tracks 後刪除 ComfyUI 原始輸出（省硬碟）")
+    ap.add_argument("--format", default="mp3", choices=["mp3", "flac"],
+                    help="輸出格式：mp3（預設，省空間）或 flac（無損母帶，供串流發行；見 docs/DISTRIBUTION.md）")
     ap.add_argument("--no-catalog", action="store_true",
                     help="不要寫入音樂目錄（sidecar / tracks.jsonl）")
     ap.add_argument("--no-qc", action="store_true",
@@ -174,6 +220,10 @@ def main():
         ver = comfy.require_online(args.url)
         print(f"ComfyUI {ver} @ {args.url}")
         media.require_free(TRACKS_DIR, MIN_FREE_GB, "內接碟 assets/tracks")
+        if args.format == "flac":
+            # 母帶寫外接碟：先確認有掛載（symlink 目標不在會給人話錯誤），再查空間
+            ensure_external_dir(MASTERS_DIR, "無損母帶目錄 output/masters")
+            media.require_free(MASTERS_DIR, 5.0, "外接碟 output/masters")
 
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     ok = 0
@@ -204,7 +254,8 @@ def main():
             try:
                 pid = comfy.submit(args.url, build_prompt(
                     tags, bpm, key, args.duration, seed, prefix,
-                    steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature),
+                    steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature,
+                    audio_format=args.format),
                     client_id="lofi-batch")
             except urllib.error.HTTPError as e:
                 print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
@@ -229,25 +280,31 @@ def main():
                 if not src.exists():
                     print(f"    ⚠️  找不到輸出檔 {src}")
                     continue
-                dst = cat.track_subdir(style, args.run_id) / a["filename"]
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                # 防覆蓋：若同名檔已存在（跨批次殘留），自動加序號
-                if dst.exists():
-                    stem, ext = Path(a["filename"]).stem, Path(a["filename"]).suffix
-                    k = 2
-                    while dst.exists():
-                        dst = dst.with_name(f"{stem}-{k}{ext}")
-                        k += 1
-                shutil.copy2(src, dst)
-                if args.clean_raw:
-                    src.unlink()
-                    print(f"    ✅ {dt:.0f}s -> {dst.name}（已刪除 ComfyUI 原始檔）")
+
+                track_dir = cat.track_subdir(style, args.run_id)
+                if args.format == "flac":
+                    # 無損：母帶放外接（output/masters），內接只留轉出來的 mp3 工作檔
+                    dst = _unique(track_dir / (Path(a["filename"]).stem + ".mp3"))
+                    master = _unique(cat.masters_subdir(style, args.run_id) / (dst.stem + ".flac"))
+                    ensure_external_dir(master.parent, "無損母帶目錄")
+                    shutil.copy2(src, master)
+                    transcode_to_mp3(master, dst)
+                    if args.clean_raw:
+                        src.unlink()
+                    note = f"{dst.name}（母帶 {master.name} → 外接）"
                 else:
-                    print(f"    ✅ {dt:.0f}s -> {dst.name}")
+                    dst = _unique(track_dir / a["filename"])
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    master = None
+                    if args.clean_raw:
+                        src.unlink()
+                    note = dst.name
+                print(f"    ✅ {dt:.0f}s -> {note}" + ("（已刪除 ComfyUI 原始檔）" if args.clean_raw else ""))
                 ok += 1
 
                 if not args.no_catalog:
-                    record_track(dst, row, style, rid, seed, args, csv_path)
+                    record_track(dst, row, style, rid, seed, args, csv_path, master_file=master)
                     if not args.no_qc:
                         _, qcres, _ = qc.qc_file(dst)
                         print(f"       品檢: {qcres['verdict']} (score={qcres['score']})"

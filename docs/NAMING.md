@@ -153,6 +153,11 @@ assets/visuals/<kind><NN>/manifest.json      # 一 run 一份（config 共用 + 
 | `sc06/` | `(根目錄散落)/` | `sc06_02_watercolor-orange.png` | `ghibli_orange_DreamShaperXL_00002_.png` |
 | `sc06/` | `(根目錄散落)/` | `sc06_03_ukiyoe-style.png` | `style_ukiyoe_styles01_00001_.png` |
 | `sc06/` | `(根目錄散落)/` | `sc06_04_zimage-cat-desk.png` | `zgguf_cat_g01_00001_.png` |
+| `ds04/` | `lora_ds01/` | `ds04_01_sit-windowsill.png` … `ds04_23_paw-up-garden.png` | `cat01_lora_ds01_00001_.png` …（**未入選**的 23 張；入選 7 張見 `ds01/`） |
+| `ds05/` | `lora_ds02/` | `ds05_01_sit-windowsill.png` … `ds05_10_stretch-basket.png` | `cat01_lora_ds02_00001_.png` …（**未入選**的 10 張；入選 6 張見 `ds02/`） |
+
+> `ds04/`、`ds05/` 是 2026-10 從 `~/ComfyUI/output` 救回的**母批未入選候選**（`ds01/`、`ds02/` 只留了入選的 7／6 張）。
+> 逐檔原始檔名記在 manifest 的 `imported_from`；`config`／`prompt`／`seed` 由 PNG 內嵌 workflow 反推（`visual.backfill_manifest`）。
 
 ## 選定
 
@@ -174,4 +179,6 @@ assets/visuals/<kind><NN>/manifest.json      # 一 run 一份（config 共用 + 
 - `sc05/`（舊 `mip05`）：manifest 3 筆
 - `ds01/`（舊 `lora_ds01`）：manifest 7 筆
 - `ds02/`（舊 `lora_ds02`）：manifest 6 筆
+- `ds04/`（舊 `lora_ds01`）：manifest 23 筆（母批未入選候選）
+- `ds05/`（舊 `lora_ds02`）：manifest 10 筆（母批未入選候選）
 - `sc06/`（舊 `(根目錄散落)`）：manifest 4 筆
