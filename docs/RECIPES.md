@@ -114,9 +114,14 @@ python3 scratch/_tmp_make_mask.py --base assets/visuals/ds03/<圖>.png \
 - **框位要收在貓輪廓內**：矩形跨到背景時，重繪會把毛畫進背景（貓看起來變胖）。
 - **眼睛是禁區**：框到眼睛會把它們整片重畫掉。
 - **白襪要保留**：框位別蓋到腳掌，prompt 留著 `(clearly white paws:1.3)`。
+- **灰斑不要硬修**：大遮罩重繪時，prompt 裡的 `(clearly white paws:1.3)`／`(white socks on all four feet:1.2)`
+  這些**正向白詞會把白畫進重繪區** → 灰斑被修成白斑，比原圖更糟（實測 `ds03_16`、`ds03_06` 兩張都退步、
+  `ds03_07` 幾乎沒差）。真的要修灰斑：**prompt 不要出現 white**（只留 `pure black fur` ＋風格詞）、
+  遮罩盡量小、或降低 `--denoise`（讓模型保留多一點原圖）。
+- **大遮罩風險高**：矩形跨出貓輪廓時，重繪會把毛畫進背景（貓看起來變胖）；寧可拆成幾個小框。
 - 命名：修圖產物用 `fix-` 字首、對照合成用 `cmp-`（見 `docs/NAMING.md`）。
 - **同一個 run 別混不同參數**：manifest 的 `config` 是 run 級、後寫會蓋掉前值；真的混用時，
-  把每張的真實值記在逐檔 `images[].weight`（並用 `status: chosen|superseded` 標出選定版本）。
+  把每張的真實值記在逐檔 `images[].weight`（並用 `status: chosen|superseded|rejected` 標出選定版本）。
 
 ---
 
