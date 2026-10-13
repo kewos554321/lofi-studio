@@ -113,6 +113,8 @@ def main():
                     help="從清單第幾首開始（0-based；分批續傳用）")
     ap.add_argument("--sleep", type=float, default=0.0,
                     help="每首生成後等待秒數（散熱用，預設 0；建議 45~90）")
+    ap.add_argument("--timeout", type=float, default=1800.0,
+                    help="單首等待上限秒數（預設 1800；ComfyUI 卡死就跳過該首）")
     ap.add_argument("--clean-raw", action="store_true",
                     help="複製到 assets/tracks 後刪除 ComfyUI 原始輸出（省硬碟）")
     ap.add_argument("--no-catalog", action="store_true",
@@ -187,8 +189,16 @@ def main():
                     client_id="lofi-batch")
             except urllib.error.HTTPError as e:
                 print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
+            except urllib.error.URLError as e:
+                print(f"    ❌ 無法連線 ComfyUI（{args.url}）：{e}")
+                print("       請確認 ComfyUI 還在執行（scripts/launch_comfyui.sh）；中止本批。")
+                break
 
-            res, dt = comfy.wait_done(args.url, pid)
+            try:
+                res, dt = comfy.wait_done(args.url, pid, timeout=args.timeout)
+            except comfy.ComfyError as e:
+                print(f"    ❌ 等待失敗，跳過此首：{e}")
+                continue
             status = res.get("status", {}).get("status_str")
             if status != "success":
                 print(f"    ❌ 生成失敗: {status} {res.get('status',{}).get('messages',[])[-2:]}")

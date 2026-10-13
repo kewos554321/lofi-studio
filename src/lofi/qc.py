@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import media
 from lofi.media import ffprobe_duration
 
 DEFAULT_THRESHOLDS = {
@@ -194,9 +195,15 @@ def cosine(a, b):
 # ----------------------------- 判定 -----------------------------
 
 def measure(path):
-    """把一首歌所有量測集中成一個 dict（唯一的 I/O；判定交給 judge）。"""
+    """把一首歌所有量測集中成一個 dict（唯一的 I/O；判定交給 judge）。
+
+    工具缺失或完全量不到時，回傳 {"error": <原因>}，讓 judge 判成 error，
+    **不要**默默讓它變成 pass（曾發生 ffmpeg 壞掉 → 全 None → 假通過）。
+    """
+    if not (media.have("ffmpeg") and media.have("ffprobe")):
+        return {"error": "missing_tools"}
     duration = ffprobe_duration(path)
-    return {
+    m = {
         "duration": duration,
         "loud": measure_ebur128(path),
         "stats": measure_astats(path),
@@ -205,10 +212,27 @@ def measure(path):
         "bpm_est": estimate_bpm(path),
         "fingerprint": fingerprint(path),
     }
+    if duration is None and not m["loud"].get("lufs") and not m["stats"].get("rms_db"):
+        m["error"] = "no_measurement"
+    return m
+
+
+def _error_result(reason):
+    """量測/工具失敗時的結果；欄位齊全（None）讓下游不必特判。"""
+    labels = {"missing_tools": "找不到 ffmpeg/ffprobe", "no_measurement": "無法量測（檔案壞或工具失敗）"}
+    return {
+        "verdict": "error", "score": None, "flags": ["measure_failed", reason],
+        "note": labels.get(reason, reason),
+        "duration": None, "lufs": None, "lra": None, "true_peak": None,
+        "peak_db": None, "rms_db": None, "crest_db": None, "dc_offset": None,
+        "silence_ratio": None, "high_band_db": None, "bpm_est": None, "fingerprint": None,
+    }
 
 
 def judge(m, requested_duration=None, thresholds=None):
     """依量測值判定 verdict/score/flags（純函式，不碰檔案，方便測試）。"""
+    if m.get("error"):
+        return _error_result(m["error"])
     th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     duration = m.get("duration")
     loud = m.get("loud") or {}
@@ -217,6 +241,10 @@ def judge(m, requested_duration=None, thresholds=None):
     high = m.get("high") or {}
     bpm_est = m.get("bpm_est")
     fp = m.get("fingerprint")
+
+    # 三項關鍵量測全缺 → 視為量測失敗，不可判 pass
+    if duration is None and loud.get("lufs") is None and stats.get("rms_db") is None:
+        return _error_result("no_measurement")
 
     hard, warn = [], []
 
@@ -361,6 +389,8 @@ def main():
                     help="覆寫閾值，可重複，例如 --set true_peak_warn=-0.5")
     args = ap.parse_args()
 
+    media.require("ffmpeg", "ffprobe")
+
     thresholds = {}
     for kv in args.set:
         k, _, v = kv.partition("=")
@@ -390,20 +420,24 @@ def main():
         }, ensure_ascii=False, indent=2))
         return
 
-    icons = {"pass": "✅", "warn": "⚠️ ", "fail": "❌"}
-    counts = {"pass": 0, "warn": 0, "fail": 0}
+    icons = {"pass": "✅", "warn": "⚠️ ", "fail": "❌", "error": "❓"}
+    counts = {"pass": 0, "warn": 0, "fail": 0, "error": 0}
     for a, r, skipped in results:
         if skipped:
             print(f"  ⏭  {a.name}（已有品檢，--force 可重算）")
             continue
         counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+        if r["verdict"] == "error":
+            print(f"{icons['error']} {a.name}  量測失敗：{r.get('note','')}（{', '.join(r['flags'])}）")
+            continue
         print(f"{icons.get(r['verdict'],'?')} {a.name}  score={r['score']}"
               f" | {r['duration']}s | {r['lufs']} LUFS | TP {r['true_peak']} dB"
               f" | BPM~{r['bpm_est']}")
         if r["flags"]:
             print(f"      旗標: {', '.join(r['flags'])}")
 
-    print(f"\n小計: pass={counts['pass']}  warn={counts['warn']}  fail={counts['fail']}")
+    print(f"\n小計: pass={counts['pass']}  warn={counts['warn']}  fail={counts['fail']}"
+          + (f"  error={counts['error']}" if counts["error"] else ""))
 
     if dupes:
         print("\n⚠️  完全相同的內容（sha1 重複，建議刪掉多餘的）:")

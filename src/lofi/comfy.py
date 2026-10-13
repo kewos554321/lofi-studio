@@ -37,19 +37,36 @@ def submit(url, prompt, client_id="lofi"):
     return api(url, "/prompt", {"prompt": prompt, "client_id": client_id})["prompt_id"]
 
 
-def wait_done(url, pid, poll=5, on_tick=None):
+class ComfyError(RuntimeError):
+    """ComfyUI 工作逾時／連線連續失敗（呼叫端可據此跳過該首、不至於無限等待）。"""
+
+
+def wait_done(url, pid, poll=5, timeout=None, max_errors=20, on_tick=None):
     """輪詢直到工作完成，回傳 (result, 經過秒數)。
 
-    暫時性的連線錯誤會重試；on_tick(elapsed) 可選（給呼叫端印進度）。
+    - timeout：超過就丟 ComfyError（避免 ComfyUI 卡死時無限迴圈）。
+    - max_errors：連續連線失敗達此次數就丟 ComfyError（區分「暫時斷線」與「已死」）。
+    - on_tick(elapsed) 可選（給呼叫端印進度）。
     """
     t0 = time.time()
+    errors = 0
+    last_err = None
     while True:
         try:
             h = api(url, f"/history/{pid}", timeout=15)
-        except Exception:
+            errors = 0
+        except Exception as e:
+            errors += 1
+            last_err = e
             h = {}
+            if errors >= max_errors:
+                raise ComfyError(f"ComfyUI 連續 {errors} 次連線失敗：{last_err}")
         if h and pid in h:
             return h[pid], time.time() - t0
+        elapsed = time.time() - t0
+        if timeout and elapsed > timeout:
+            raise ComfyError(f"等待工作 {pid} 超過 {timeout:.0f}s（ComfyUI 可能卡死或過載）")
         if on_tick:
-            on_tick(time.time() - t0)
+            on_tick(elapsed)
         time.sleep(poll)
+

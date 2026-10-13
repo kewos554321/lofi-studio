@@ -431,6 +431,46 @@ class TestAudioQC(unittest.TestCase):
         self.assertTrue(callable(qc.judge))
         self.assertTrue(callable(qc.analyze))
 
+    def test_measure_failure_is_error_not_pass(self):
+        """工具壞/檔壞以致量不到時，不可判 pass（曾發生 ffmpeg 失敗→全綠）。"""
+        r = qc.judge({"error": "no_measurement"})
+        self.assertEqual(r["verdict"], "error")
+        self.assertIn("measure_failed", r["flags"])
+        self.assertIsNone(r["score"])
+        # 沒有 error 欄位、但關鍵量測全 None，也要判 error
+        r2 = qc.judge({"duration": None, "loud": {}, "stats": {}})
+        self.assertEqual(r2["verdict"], "error")
+
+    def test_missing_tools_is_error(self):
+        r = qc.judge({"error": "missing_tools"})
+        self.assertEqual(r["verdict"], "error")
+        self.assertIn("missing_tools", r["flags"])
+
+
+class TestComfyWait(unittest.TestCase):
+    """wait_done 不可無限等待（ComfyUI 卡死/斷線要能丟錯）。"""
+
+    def test_gives_up_after_max_errors(self):
+        from lofi import comfy
+        orig = comfy.api
+        comfy.api = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            with self.assertRaises(comfy.ComfyError):
+                comfy.wait_done("http://x", "pid", poll=0, max_errors=3)
+        finally:
+            comfy.api = orig
+
+    def test_returns_result_when_done(self):
+        from lofi import comfy
+        orig = comfy.api
+        comfy.api = lambda *a, **k: {"pid": {"status": {"status_str": "success"}}}
+        try:
+            res, dt = comfy.wait_done("http://x", "pid", poll=0)
+            self.assertEqual(res["status"]["status_str"], "success")
+        finally:
+            comfy.api = orig
+
+
 
 if __name__ == "__main__":
     unittest.main()

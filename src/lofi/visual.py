@@ -599,6 +599,8 @@ def main():
                     help="img2img 起點圖（檔名需在 ComfyUI/input/），搭配 --denoise < 1；此時 --size 會被忽略")
     ap.add_argument("--denoise", type=float, default=1.0,
                     help="重繪強度：1.0=完全重畫；0.5~0.7=大改；0.3~0.45=小幅改動保留構圖")
+    ap.add_argument("--timeout", type=float, default=900.0,
+                    help="單張等待上限秒數（預設 900；ComfyUI 卡死就中止）")
     ap.add_argument("--list", action="store_true",
                     help="列出 assets/visuals 各批（用途/建立時間/多久前/模型/張數）後結束，不需要 ComfyUI")
     ap.add_argument("--sort", default="id", choices=("id", "time"),
@@ -657,14 +659,20 @@ def main():
         for i in range(1, args.count + 1):
             seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
             print(f"[{i}/{args.count}] {tag} {w}x{h} seed={seed}")
-            pid = comfy.submit(args.url, build_prompt(
-                args.prompt, args.negative, w, h, seed, args.steps, args.cfg, prefix, args.ckpt,
-                upscale_model=args.upscale, up_out=up_out,
-                clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
-                init_image=args.init_image, denoise=args.denoise),
-                client_id="lofi-visual")
+            try:
+                pid = comfy.submit(args.url, build_prompt(
+                    args.prompt, args.negative, w, h, seed, args.steps, args.cfg, prefix, args.ckpt,
+                    upscale_model=args.upscale, up_out=up_out,
+                    clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
+                    init_image=args.init_image, denoise=args.denoise),
+                    client_id="lofi-visual")
+            except Exception as e:
+                print(f"    ❌ 提交失敗：{e}"); break
             t0 = time.time()
-            res, _ = comfy.wait_done(args.url, pid, poll=3)
+            try:
+                res, _ = comfy.wait_done(args.url, pid, poll=3, timeout=args.timeout)
+            except comfy.ComfyError as e:
+                print(f"    ❌ 等待失敗，中止：{e}"); break
             imgs = res.get("outputs", {}).get("9", {}).get("images", [])
             for im in imgs:
                 src = COMFY_OUT / im.get("subfolder", "") / im["filename"]
