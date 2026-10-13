@@ -189,7 +189,7 @@ lofi 通常要「去人聲」版本。本專案已封裝：
   "created_at": "…", "updated_at": "…",
   "config": { "ckpt": "DreamShaperXL-v1.0-Alpha2.safetensors", "size": "832x1216",
               "steps": 28, "cfg": 6.5, "sampler": "dpmpp_2m", "negative": "…" },
-  "images": [ { "file": "cat01_lofi_scene_00001_.png", "seed": 12345, "prompt": "a cat on a windowsill…" } ]
+  "images": [ { "file": "cat01_01_window.png", "seed": 12345, "prompt": "a cat on a windowsill…" } ]
 }
 ```
 
@@ -219,6 +219,23 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 > 建議模型：預設 **DreamShaperXL-v1.0-Alpha2**（SDXL，半寫實插畫）；動漫 tag 風可用 NoobAI-XL、WAI-Illustrious。
 > ⚠️ SDXL 模型約 6.5GB，載入佔 RAM；生圖約 2.5 分鐘／張，生成期間勿同時跑音樂生成（見 AGENTS.md「資源限制」）。
 > 要**純風景**（不要人）：`--prompt "scenery, no humans, indoors, ..."`。原本負向詞含 `people, face, hands` 會讓人出不來，已移除；`1girl, solo, ...` 就會有女生。
+
+#### 鎖角色（IPAdapter，固定吉祥物用）
+
+頻道吉祥物（黑貓）這種「**每次都要長一樣**」的角色，靠 prompt 描述鎖不住，要用參考圖注入特徵：
+
+```bash
+# 參考圖放 ~/ComfyUI/input/（本專案慣例：mascot_blackcat_ref.png ＝ 選定的定裝參考圖）
+./scripts/lofi visual --ref mascot_blackcat_ref.png --weight 0.6 \
+  --run-id ds03 --slug sit-window --size 832x1216 --steps 28 --cfg 6.5 \
+  --write-caption                      # LoRA 訓練集要字幕：同名 .txt（內容＝prompt）
+```
+
+- **`--weight` 是主控旋鈕**：0.60 場景自由但小特徵（白襪）會漂；0.75 特徵回來了但風格變硬。
+- IPAdapter 只注入 CLIP 特徵、**不搬像素**：小面積特徵（白襪）天生鎖不牢，要真正鎖死得走 img2img／局部重繪，或訓練 LoRA（`--write-caption` 就是為了餵 LoRA）。
+- 授權：`--ref` 會一併查 IPAdapter 那兩支模型（`config.IPADAPTER_MODELS`），沒登錄會被 fail-closed 擋下。
+- `manifest.json` 的 `tool` 自動記成 `sdxl-ipadapter`，`config` 多記 `ref`/`weight`/`weight_type`/`preset`/`embeds_scaling`/`start`/`end`（這樣回頭才看得出這批是用哪張參考圖、多重鎖的）。
+- 生成會取 `logs/.gpu.lock` 互斥鎖：音樂生成跑著時會直接中止（保護 16GB RAM）。
 
 **建議加 AI 放大**（768×512 直接升到 1080p 會軟糊）：
 

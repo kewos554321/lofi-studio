@@ -23,6 +23,9 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
       --size 832x1216 --steps 28 --cfg 6.5
   # 動漫 tag 系模型（NoobAI / Illustrious 家族）建議加 --clip-skip 2
   python3 scripts/generate_visual.py --dry-run
+  # 鎖角色（IPAdapter）：參考圖放 ComfyUI/input/，--weight 是主控旋鈕（0.6 場景自由／0.75 特徵硬）
+  ./scripts/lofi visual --ref mascot_blackcat_ref.png --weight 0.6 --kind ds \
+      --slug sit-window --size 832x1216 --steps 28 --cfg 6.5 --write-caption
 
 前置：ComfyUI 需執行中，且對應 checkpoint 已在 models/checkpoints。
 預設 checkpoint：DreamShaperXL-v1.0-Alpha2.safetensors（SDXL，半寫實插畫；見 models/README.md）。
@@ -35,8 +38,8 @@ from pathlib import Path
 from lofi import comfy
 from lofi import io
 from lofi import media
-from lofi.config import (COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, MIN_FREE_GB,
-                         check_commercial, model_license)
+from lofi.config import (COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, IPADAPTER_MODELS,
+                         MIN_FREE_GB, check_commercial, model_license)
 from lofi.lock import gpu_lock
 from lofi.paths import VISUALS_DIR
 
@@ -449,7 +452,10 @@ DEFAULT_NEG = ("lowres, blurry, bad anatomy, bad hands, extra digits, fewer digi
 def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
                  upscale_model="", up_out=None, clip_skip=0,
                  sampler="dpmpp_2m", scheduler="karras",
-                 init_image="", denoise=1.0):
+                 init_image="", denoise=1.0,
+                 ref_image="", ipa_weight=0.6, ipa_weight_type="linear",
+                 ipa_preset="PLUS (high strength)", ipa_embeds_scaling="K+V",
+                 ipa_start=0.0, ipa_end=1.0):
     g = {
         "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
@@ -472,8 +478,21 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
         clip_src = ["13", 0]
     g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": clip_src}}
     g["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": clip_src}}
+    # 參考圖（IPAdapter）：注入角色/風格特徵，用來鎖住固定角色（權重是主控旋鈕）
+    model_src = ["4", 0]
+    if ref_image:
+        g["16"] = {"class_type": "IPAdapterUnifiedLoader",
+                   "inputs": {"model": ["4", 0], "preset": ipa_preset}}
+        g["17"] = {"class_type": "LoadImage", "inputs": {"image": ref_image}}
+        g["18"] = {"class_type": "IPAdapterAdvanced",
+                   "inputs": {"model": ["16", 0], "ipadapter": ["16", 1], "image": ["17", 0],
+                              "weight": ipa_weight, "weight_type": ipa_weight_type,
+                              "combine_embeds": "concat",
+                              "start_at": ipa_start, "end_at": ipa_end,
+                              "embeds_scaling": ipa_embeds_scaling}}
+        model_src = ["18", 0]
     g["3"] = {"class_type": "KSampler", "inputs": {
-                  "model": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg,
+                  "model": model_src, "seed": seed, "steps": steps, "cfg": cfg,
                   "sampler_name": sampler, "scheduler": scheduler,
                   "positive": ["6", 0], "negative": ["7", 0],
                   "latent_image": latent_src, "denoise": denoise}}
@@ -602,6 +621,19 @@ def main():
                     help="img2img 起點圖（檔名需在 ComfyUI/input/），搭配 --denoise < 1；此時 --size 會被忽略")
     ap.add_argument("--denoise", type=float, default=1.0,
                     help="重繪強度：1.0=完全重畫；0.5~0.7=大改；0.3~0.45=小幅改動保留構圖")
+    ap.add_argument("--ref", default="",
+                    help="IPAdapter 參考圖（檔名需在 ComfyUI/input/）：鎖角色/風格；給了就走 SDXL + IPAdapter")
+    ap.add_argument("--weight", type=float, default=0.6,
+                    help="IPAdapter 權重＝主控旋鈕（0.6 場景自由／0.75 特徵回來但風格變硬）")
+    ap.add_argument("--weight-type", default="linear",
+                    help="IPAdapter 權重型別（linear / style transfer / composition …）")
+    ap.add_argument("--preset", default="PLUS (high strength)", help="IPAdapter preset")
+    ap.add_argument("--embeds-scaling", default="K+V",
+                    help="IPAdapter embeds 縮放（K+V / V only / K only）")
+    ap.add_argument("--start", type=float, default=0.0, help="IPAdapter 權重起點 0~1（幾步之後開始作用）")
+    ap.add_argument("--end", type=float, default=1.0, help="IPAdapter 權重終點 0~1")
+    ap.add_argument("--write-caption", action="store_true",
+                    help="同時寫同名 .txt（內容＝prompt）；LoRA 訓練集用")
     ap.add_argument("--timeout", type=float, default=900.0,
                     help="單張等待上限秒數（預設 900；ComfyUI 卡死就中止）")
     ap.add_argument("--allow-unknown-license", action="store_true",
@@ -617,9 +649,11 @@ def main():
         print_runs(sort=args.sort)
         return
 
-    # 商用合規守門：檢查 checkpoint／放大模型授權（未知授權預設 fail-closed）
+    # 商用合規守門：檢查 checkpoint／放大模型／IPAdapter 模型授權（未知授權預設 fail-closed）
     if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
         names = [args.ckpt] + ([args.upscale] if args.upscale else [])
+        if args.ref:
+            names += list(IPADAPTER_MODELS)
         blocked, findings = check_commercial(names, allow_unknown=args.allow_unknown_license)
         for n, info in findings:
             mark = {True: "✅", False: "⛔"}.get(info["commercial"], "⚠️")
@@ -665,7 +699,15 @@ def main():
         "license": model_license(args.ckpt)["license"],
         "source": model_license(args.ckpt)["source"],
     }
-    print_run_header("lofi.visual（ComfyUI + SDXL）", run_id, out_dir, config, count=args.count)
+    if args.ref:      # IPAdapter 相關設定只在使用參考圖時記錄（免得每批塞一堆無關欄位）
+        config.update({
+            "ref": args.ref, "weight": args.weight, "weight_type": args.weight_type,
+            "preset": args.preset, "embeds_scaling": args.embeds_scaling,
+            "start": args.start, "end": args.end,
+        })
+    tool = "sdxl-ipadapter" if args.ref else "lofi.visual"   # 與 guess_tool() 反推的一致
+    print_run_header(f"lofi.visual（ComfyUI + SDXL{' + IPAdapter 鎖角色' if args.ref else ''}）",
+                     run_id, out_dir, config, count=args.count)
     if args.dry_run:
         print(f"（dry-run，未實際生成）prompt：{args.prompt[:80]}…")
         return
@@ -683,7 +725,10 @@ def main():
                     args.prompt, args.negative, w, h, seed, args.steps, args.cfg, prefix, args.ckpt,
                     upscale_model=args.upscale, up_out=up_out,
                     clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
-                    init_image=args.init_image, denoise=args.denoise),
+                    init_image=args.init_image, denoise=args.denoise,
+                    ref_image=args.ref, ipa_weight=args.weight, ipa_weight_type=args.weight_type,
+                    ipa_preset=args.preset, ipa_embeds_scaling=args.embeds_scaling,
+                    ipa_start=args.start, ipa_end=args.end),
                     client_id="lofi-visual")
             except Exception as e:
                 print(f"    ❌ 提交失敗：{e}"); break
@@ -701,8 +746,11 @@ def main():
                 dst_name = output_filename(run_id, seq, args.slug, Path(im["filename"]).suffix)
                 seq += 1
                 shutil.copy2(src, out_dir / dst_name)
+                if args.write_caption:      # LoRA 訓練集：字幕與圖同名（.txt，內容＝prompt）
+                    io.atomic_write_text(out_dir / f"{Path(dst_name).stem}.txt",
+                                         args.prompt.strip() + "\n")
                 # 併寫：固定配置存一次，prompt/seed 逐檔對應；重跑同 run 不會蓋掉舊紀錄
-                update_manifest(out_dir, run_id=run_id, tool="lofi.visual",
+                update_manifest(out_dir, run_id=run_id, tool=tool,
                                 caller=Path(sys.argv[0]).name, config=config,
                                 images=[{"file": dst_name, "seed": seed, "prompt": args.prompt}])
                 done += 1

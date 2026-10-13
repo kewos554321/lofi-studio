@@ -363,6 +363,47 @@ class TestVisualRunDir(unittest.TestCase):
         self.assertIn("權重起點", dict(visual.format_run_fields({"start": 0.0})))  # 0.0 是有效值
 
 
+class TestVisualIPAdapter(unittest.TestCase):
+    """--ref（IPAdapter 鎖角色）的節點接線與紀錄往返：純函式，不需 ComfyUI。"""
+
+    @staticmethod
+    def _wf(**over):
+        kw = dict(pos="a black cat", neg="blurry", w=832, h=1216, seed=7, steps=28,
+                  cfg=6.5, prefix="p", ckpt="DreamShaperXL-v1.0-Alpha2.safetensors",
+                  ref_image="mascot_blackcat_ref.png", ipa_weight=0.6)
+        kw.update(over)
+        return visual.build_prompt(**kw)
+
+    def test_without_ref_keeps_plain_sampler(self):
+        g = self._wf(ref_image="")
+        self.assertNotIn("18", g)                       # 沒 --ref 就不掛 IPAdapter 節點
+        self.assertEqual(g["3"]["inputs"]["model"], ["4", 0])
+
+    def test_ref_wires_ipadapter_chain(self):
+        g = self._wf()
+        self.assertEqual(g["18"]["class_type"], "IPAdapterAdvanced")
+        self.assertEqual(g["18"]["inputs"]["model"], ["16", 0])     # 接在 UnifiedLoader 之後
+        self.assertEqual(g["18"]["inputs"]["image"], ["17", 0])
+        self.assertEqual(g["17"]["inputs"]["image"], "mascot_blackcat_ref.png")
+        self.assertEqual(g["18"]["inputs"]["weight"], 0.6)
+        self.assertEqual(g["3"]["inputs"]["model"], ["18", 0])      # KSampler 吃 IPAdapter 的模型
+
+    def test_ref_roundtrips_through_manifest(self):
+        """產圖後從 workflow 反推要能還原 ref/weight（backfill 與 tool 判定才對得上）。"""
+        g = self._wf(ipa_weight=0.65)
+        cfg, entry = visual.manifest_from_workflow(g)
+        self.assertEqual(cfg["ref"], "mascot_blackcat_ref.png")
+        self.assertEqual(cfg["weight"], 0.65)
+        self.assertEqual(cfg["preset"], "PLUS (high strength)")
+        self.assertEqual((entry["seed"], entry["prompt"]), (7, "a black cat"))
+        self.assertEqual(visual.guess_tool(g), "sdxl-ipadapter")
+
+    def test_ipadapter_models_are_registered(self):
+        """--ref 會一併查 IPAdapter 模型授權，這兩支沒登錄就會被 fail-closed 擋掉產圖。"""
+        for name in config.IPADAPTER_MODELS:
+            self.assertTrue(config.model_license(name)["commercial"], name)
+
+
 class TestAudioQC(unittest.TestCase):
     """qc.judge 是純函式（量測與判定分開），用合成量測值驗判定（不需 ffmpeg）。"""
 

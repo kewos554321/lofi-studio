@@ -42,6 +42,11 @@ MUSIC_VAE = _env("LOFI_MUSIC_VAE", "ace_1.5_vae.safetensors")
 IMAGE_CKPT = _env("LOFI_IMAGE_CKPT", "DreamShaperXL-v1.0-Alpha2.safetensors")
 UPSCALE_MODEL = _env("LOFI_UPSCALE_MODEL", "RealESRGAN_x4plus_anime_6B.pth")
 
+# IPAdapter 鎖角色用的輔助模型（`visual --ref`；PLUS 系列 preset 對應這兩支）。
+# 由 ComfyUI 的 IPAdapterUnifiedLoader 依 preset 自己挑檔，這裡只用來做商用授權稽核與記錄。
+IPADAPTER_MODELS = ("ip-adapter-plus_sdxl_vit-h.safetensors",
+                    "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
+
 # ── 資源保護 ─────────────────────────────────────────────────────────
 # 生成前要求內接碟至少這麼多可用 GB（見 AGENTS.md 資源限制）
 MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
