@@ -18,7 +18,7 @@ batch_generate.py — 用 ComfyUI API 批次生成 ACE-Step 1.5 lofi 曲子。
 
 前置：ComfyUI 需以 scripts/launch_comfyui.sh 啟動，且 ACE-Step 1.5 模型已就位。
 """
-import argparse, csv, random, re, shutil, sys, time, urllib.error
+import argparse, csv, os, random, re, shutil, sys, time, urllib.error
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -27,7 +27,8 @@ from lofi import comfy               # ComfyUI API 小客戶端
 from lofi import media               # ffmpeg 工具 + 磁碟空間檢查
 from lofi import qc                  # 生成後自動品檢（可用 --no-qc 關閉）
 from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MIN_FREE_GB, MUSIC_CLIP1,
-                         MUSIC_CLIP2, MUSIC_UNET, MUSIC_VAE)
+                         MUSIC_CLIP2, MUSIC_UNET, MUSIC_VAE, check_commercial,
+                         model_license)
 from lofi.lock import gpu_lock
 from lofi.paths import PROMPT_LIB, TRACKS_DIR
 
@@ -85,6 +86,8 @@ def record_track(dst, row, style, rid, seed, args, csv_path):
             "temperature": args.temperature,
             "duration": args.duration,
             "model": MUSIC_UNET,
+            "model_license": model_license(MUSIC_UNET)["license"],
+            "model_source": model_license(MUSIC_UNET)["source"],
         },
         "status": "unreviewed",
         "tags": [],
@@ -122,8 +125,22 @@ def main():
                     help="不要寫入音樂目錄（sidecar / tracks.jsonl）")
     ap.add_argument("--no-qc", action="store_true",
                     help="生成後不要跑自動品檢（預設會跑 auto_qc）")
+    ap.add_argument("--allow-unknown-license", action="store_true",
+                    help="允許使用授權未登錄的模型（商用前請先確認，見 docs/LICENSING.md）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    # 商用合規守門：檢查模型授權（未知授權預設 fail-closed）
+    if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
+        blocked, findings = check_commercial(
+            [MUSIC_UNET, MUSIC_CLIP1, MUSIC_CLIP2, MUSIC_VAE],
+            allow_unknown=args.allow_unknown_license)
+        for n, info in findings:
+            mark = {True: "✅", False: "⛔"}.get(info["commercial"], "⚠️")
+            print(f"  {mark} 授權 {n}：{info['license']}")
+        if blocked and not args.dry_run:
+            sys.exit("模型授權有疑慮（見上）→ 商用前請確認，或加 --allow-unknown-license 略過。"
+                     "\n（已知／登錄於 src/lofi/config.py；詳見 docs/LICENSING.md）")
 
     csv_path = Path(args.csv)
     if not csv_path.exists():

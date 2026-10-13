@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import (backfill, catalog, expand, generate, io, library, media,  # noqa: E402
-                  meta, qc, upload, visual, visual_qc)
+from lofi import (backfill, catalog, config, expand, generate, io, library,  # noqa: E402
+                  media, meta, qc, upload, visual, visual_qc)
 
 
 def _png_with_prompt(path, workflow):
@@ -663,6 +663,15 @@ class TestCatalogLayer(unittest.TestCase):
         self.assertIn("track_id", lines[0])
         self.assertEqual(len(lines), 4)          # 表頭 + 3 列
 
+    def test_model_credit_from_sidecar(self):
+        """商用 provenance：meta 由 sidecar 取模型授權（含舊記錄容錯）。"""
+        audio = self._audio("a/credit.mp3")
+        catalog.upsert_track(audio, {"gen": {"model": "acestep_v1.5_turbo"}})
+        c = meta.track_model_credit(audio)
+        self.assertEqual(c["model"], "acestep_v1.5_turbo")
+        self.assertEqual(c["license"], "MIT")
+        self.assertTrue(c["commercial"])
+
 
 class TestWorkflowAssembly(unittest.TestCase):
     """ComfyUI workflow 與上片內容組裝（純函式回傳 dict/字串，最容易被改壞）。"""
@@ -852,6 +861,36 @@ class TestCLISmoke(unittest.TestCase):
                     continue
                 with self.assertRaises(SystemExit):
                     self._cli([name, "--help"])
+
+
+class TestLicensing(unittest.TestCase):
+    """商用授權登錄與守門（config.MODEL_LICENSES / check_commercial）。"""
+
+    def test_known_models_commercial(self):
+        self.assertTrue(config.model_license("acestep_v1.5_turbo.safetensors")["commercial"])
+        # 容錯：舊記錄只存無副檔名，且 v1.5 的點不可被誤切
+        self.assertTrue(config.model_license("acestep_v1.5_turbo")["commercial"])
+        self.assertEqual(config.model_license("DreamShaperXL-v1.0-Alpha2.safetensors")["license"],
+                         "CreativeML Open RAIL++-M")
+        self.assertTrue(config.model_license("z-image-turbo-Q5_K_M.gguf")["commercial"])
+
+    def test_unknown_model_is_unknown(self):
+        info = config.model_license("mystery_model.safetensors")
+        self.assertIsNone(info["commercial"])
+        self.assertIsNone(config.model_license("")["commercial"])
+
+    def test_check_commercial_fail_closed_on_unknown(self):
+        blocked, findings = config.check_commercial(["mystery.safetensors"])
+        self.assertTrue(blocked)                                  # 未知 → 預設擋
+        blocked2, _ = config.check_commercial(["mystery.safetensors"], allow_unknown=True)
+        self.assertFalse(blocked2)                                # 明確允許則放行
+        blocked3, _ = config.check_commercial(["acestep_v1.5_turbo.safetensors"])
+        self.assertFalse(blocked3)                                # 已登錄可商用
+
+    def test_license_scan_returns_dicts(self):
+        from lofi import license as lic
+        self.assertIsInstance(lic.scan_music(), dict)
+        self.assertIsInstance(lic.scan_visuals(), dict)
 
 
 if __name__ == "__main__":

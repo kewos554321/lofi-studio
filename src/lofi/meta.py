@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import config
 from lofi import io
 from lofi.media import ffprobe_duration
 from lofi.paths import PUBLISH_DIR, STYLE_DIR, YT_DIR
@@ -164,6 +165,21 @@ def track_sidecar_meta(audio):
     }
 
 
+def track_model_credit(audio):
+    """回傳該曲的模型來源（for 商用 provenance）；沒有記錄回 None。"""
+    gen = (cat.load_sidecar(audio) or {}).get("gen") or {}
+    model = gen.get("model")
+    if not model:
+        return None
+    info = config.model_license(model)
+    return {
+        "model": model,
+        "license": gen.get("model_license") or info["license"],
+        "source": gen.get("model_source") or info["source"],
+        "commercial": info["commercial"],
+    }
+
+
 def compute_timeline(tracks, xfade):
     """依 acrossfade 規則推算每首在混音中的起始秒數。"""
     tl = []
@@ -288,6 +304,14 @@ def main():
 
     description = build_description(cfg, duration, chapters)
 
+    # 商用 provenance：彙整用到的音樂模型（授權/來源）
+    credits = {}
+    for t in tl:
+        c = track_model_credit(t.get("file"))
+        if c:
+            credits[(c["model"], c["license"], c["source"])] = c
+    credits = sorted(credits.values(), key=lambda x: x["model"])
+
     record = {
         "video": cat.relpath(video),
         "video_file": video.name,
@@ -301,6 +325,7 @@ def main():
         "category_id": cfg.get("category_id", 10),
         "chapters": chapters,
         "thumbnail_text": cfg.get("thumbnail_text", []),
+        "credits": credits,
         "ai_disclosure": True,
         "status": "pending",
         "generated_at": cat.now_iso(),
@@ -328,6 +353,10 @@ def main():
           f"- 狀態: {record['status']}", ""]
     if record.get("warning"):
         md += [f"> ⚠️ {record['warning']}", ""]
+    if credits:
+        md += ["- 模型 credits（商用 provenance）:"] + [
+            f"  - `{c['model']}` — {c['license']}{(' · ' + c['source']) if c['source'] else ''}"
+            for c in credits] + [""]
     md += ["## Title", "", "```", title, "```", "", "## Description", "", "```text",
            description.rstrip(), "```", "", "## Tags", "", "```",
            ", ".join(record["tags"]), "```", ""]

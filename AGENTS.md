@@ -10,6 +10,7 @@
 | `docs/RUNBOOK.md` | 操作手冊 | 逐步流程、疑難排解、維運細節 |
 | `AGENTS.md`（本檔） | agent 速查 | 架構、不變的約定、踩過的坑 |
 | `docs/RECIPES.md` | 配方 | 量產用的錨定參數／成品配置 |
+| `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
 | `docs/VISUAL_NAMING.md` | 規則 | 視覺檔名/資料夾命名 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
@@ -29,6 +30,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   comfy.py         # ComfyUI API 小客戶端（api/system_stats/submit/wait_done）
   lock.py          # 生成互斥鎖（fcntl，避免音樂/圖片同時跑爆 16GB RAM）
   io.py            # 原子寫入（atomic_write_text/json）+ JSONL 檔案鎖 + 壞檔隔離（quarantine）
+  license.py       # 商用授權稽核（掃 sidecar/manifest 的模型授權狀態）
   catalog.py       # 音樂目錄：sidecar assets/tracks/<style>/<run>/*.json + catalog/tracks.jsonl
   qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
   generate.py      # 批次生成（ComfyUI API）
@@ -91,6 +93,7 @@ python3 -m unittest discover -s tests -v
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
 - **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
+- **商用授權**：產出要能商用。換模型前先在 `config.MODEL_LICENSES` 登錄 `{license, commercial, source}`；`generate`/`visual` 對 `commercial!=True` 的模型 **fail-closed**（中止，除非 `--allow-unknown-license`）。生成時把 `model_license`/`model_source` 寫進 sidecar/manifest，`meta` 彙整成 `publish.credits`。稽核用 `./scripts/lofi license check`；矩陣見 `docs/LICENSING.md`。**別用非商用模型**（例：MusicGen CC-BY-NC）。
 - **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
 - **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。
 

@@ -28,14 +28,15 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
 預設 checkpoint：DreamShaperXL-v1.0-Alpha2.safetensors（SDXL，半寫實插畫；見 models/README.md）。
 放大模型放在 ~/ComfyUI/models/upscale_models/（見 download_p2_models.sh）。
 """
-import argparse, json, random, re, shutil, sys, time, unicodedata
+import argparse, json, os, random, re, shutil, sys, time, unicodedata
 from datetime import datetime
 from pathlib import Path
 
 from lofi import comfy
 from lofi import io
 from lofi import media
-from lofi.config import COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, MIN_FREE_GB
+from lofi.config import (COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, MIN_FREE_GB,
+                         check_commercial, model_license)
 from lofi.lock import gpu_lock
 from lofi.paths import VISUALS_DIR
 
@@ -374,12 +375,13 @@ _FIELD_LABELS = {
     "ref": "參考圖", "ref_image": "參考圖", "weight": "IPAdapter 權重",
     "weight_type": "權重型別", "preset": "IPAdapter preset",
     "embeds_scaling": "embeds 縮放", "start": "權重起點", "end": "權重終點",
+    "license": "模型授權", "source": "模型來源",
 }
 _FIELD_ORDER = ("ckpt", "unet", "clip", "clip_type", "vae", "lora", "lora_weight",
                 "size", "steps", "cfg", "shift", "sampler", "scheduler", "clip_skip",
                 "denoise", "upscale", "upscale_out", "init_image", "mask", "grow",
                 "ref", "ref_image", "weight", "weight_type", "preset",
-                "embeds_scaling", "start", "end")
+                "embeds_scaling", "start", "end", "license", "source")
 
 
 def model_tag(config, maxlen=34):
@@ -602,6 +604,8 @@ def main():
                     help="重繪強度：1.0=完全重畫；0.5~0.7=大改；0.3~0.45=小幅改動保留構圖")
     ap.add_argument("--timeout", type=float, default=900.0,
                     help="單張等待上限秒數（預設 900；ComfyUI 卡死就中止）")
+    ap.add_argument("--allow-unknown-license", action="store_true",
+                    help="允許使用授權未登錄的模型（商用前請先確認，見 docs/LICENSING.md）")
     ap.add_argument("--list", action="store_true",
                     help="列出 assets/visuals 各批（用途/建立時間/多久前/模型/張數）後結束，不需要 ComfyUI")
     ap.add_argument("--sort", default="id", choices=("id", "time"),
@@ -612,6 +616,17 @@ def main():
     if args.list:
         print_runs(sort=args.sort)
         return
+
+    # 商用合規守門：檢查 checkpoint／放大模型授權（未知授權預設 fail-closed）
+    if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
+        names = [args.ckpt] + ([args.upscale] if args.upscale else [])
+        blocked, findings = check_commercial(names, allow_unknown=args.allow_unknown_license)
+        for n, info in findings:
+            mark = {True: "✅", False: "⛔"}.get(info["commercial"], "⚠️")
+            print(f"  {mark} 授權 {n}：{info['license']}")
+        if blocked and not args.dry_run:
+            sys.exit("模型授權有疑慮（見上）→ 商用前請確認，或加 --allow-unknown-license 略過。"
+                     "\n（已知／登錄於 src/lofi/config.py；詳見 docs/LICENSING.md）")
 
     try:
         w, h = (int(x) for x in args.size.lower().split("x"))
@@ -647,6 +662,8 @@ def main():
         "upscale_out": f"{up_out[0]}x{up_out[1]}" if up_out else "",
         "init_image": args.init_image,
         "negative": args.negative,
+        "license": model_license(args.ckpt)["license"],
+        "source": model_license(args.ckpt)["source"],
     }
     print_run_header("lofi.visual（ComfyUI + SDXL）", run_id, out_dir, config, count=args.count)
     if args.dry_run:

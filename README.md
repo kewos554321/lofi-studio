@@ -189,7 +189,7 @@ lofi-studio/
 │   └── auto_qc.py / batch_generate.py / make_meta.py / …  # 相容 shim（實作在 src/lofi，新流程請用 scripts/lofi）
 ├── scratch/                   # 實驗／一次性腳本（不進版控）
 ├── tests/                     # python3 -m unittest discover -s tests -v
-├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、VISUAL_NAMING.md（命名規則）
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、VISUAL_NAMING.md（命名規則）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
@@ -232,6 +232,8 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi visual-qc --all --force               # 圖片品檢（黑圖/純色/灰圖/壞檔）
 ./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4   # 需 numpy（.venv）
 ./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
+./scripts/lofi config --licenses                      # 看模型授權登錄
+./scripts/lofi license check                          # 商用授權稽核（掃產出用到的模型）
 ```
 
 - 也可以 `pip install -e .` 後直接打 `lofi <command>`（等價）；`PYTHONPATH=src python3 -m lofi.cli <command>` 亦可。
@@ -294,6 +296,7 @@ cd ai-music/lofi-studio
 | `lofi meta` | 上片資訊 | `./scripts/lofi meta --video output/episodes/rl01/video.mp4 --style rainy_lofi` |
 | `lofi upload` | 上傳 YouTube | `./scripts/lofi upload --episode rl01` |
 | `lofi config` | 看集中設定（模型/位址） | `./scripts/lofi config` |
+| `lofi license` | 商用授權稽核 | `./scripts/lofi license check` |
 
 產品線 shell 腳本（`make_episode` / `make_long_lofi` / `build_long_mix` / `render_video` / `archive_episode` / `cleanup_outputs` / `disk_report` / `separate_stems` / `launch_comfyui` / `download_p2_models` / `batch_run`）用各自的 `--help` 看用法；逐段流程見下方與 `docs/RUNBOOK.md`。
 
@@ -690,7 +693,7 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 
 ## 合規重點（發布前）
 
-- 使用可商用授權的模型（本流程以 **ACE-Step（MIT）** 為主；授權請於使用前再次確認官方 repo）。
+- 使用可商用授權的模型（本流程以 **ACE-Step（MIT）** 為主；授權請於使用前再次確認官方 repo）。稽核：`./scripts/lofi license check`；授權矩陣見 [`docs/LICENSING.md`](docs/LICENSING.md)。
 - 上傳時勾選 **AI 揭露（變造或合成內容）**。
 - 視覺原創、每支片不同；影片要有 chapters / 曲目 credits。
 - 不要同一模板換首歌大量上傳（YouTube 2025/7 起以頻道層級偵測 inauthentic content）。

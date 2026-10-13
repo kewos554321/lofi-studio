@@ -4,7 +4,7 @@
 > 這份文件是把你提供的 SOP 整理、補齊缺漏後的版本。標記 **[待確認]** 的地方請以官方文件為準。
 
 > 程式結構：Python 邏輯在 `src/lofi/`（單一入口 `./scripts/lofi <command>`，或 `pip install -e .` 後直接 `lofi <command>`）；`scripts/*.py` 為相容 shim；ffmpeg/ComfyUI 重流程仍為 `scripts/*.sh`。詳見 `AGENTS.md` 與 `README.md`。
-> 模型檔名／ComfyUI 位址集中在 `src/lofi/config.py`（`./scripts/lofi config` 可查，`LOFI_*` 環境變數可覆寫）。生成互斥：`generate`/`visual`/`cinemagraph` 同鎖，衝突即中止（`LOFI_LOCK_WAIT=秒` 排隊、`LOFI_NO_LOCK=1` 硬跑）。提交前跑 `./scripts/check.sh`。
+> 模型檔名／ComfyUI 位址集中在 `src/lofi/config.py`（`./scripts/lofi config` 可查，`LOFI_*` 環境變數可覆寫）。**商用授權**登錄同檔（`MODEL_LICENSES`），生成會 fail-closed 擋非商用/未知模型，稽核用 `./scripts/lofi license check`（見 `docs/LICENSING.md`）。生成互斥：`generate`/`visual`/`cinemagraph` 同鎖，衝突即中止（`LOFI_LOCK_WAIT=秒` 排隊、`LOFI_NO_LOCK=1` 硬跑）。提交前跑 `./scripts/check.sh`。
 > 量產用的成品配置（錨定參數、影片長度／視覺／上片配方）見 [`RECIPES.md`](RECIPES.md)。
 
 ---
@@ -449,6 +449,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 ## 附錄：發布前合規檢查表
 
 - [ ] 使用可商用授權的模型（本流程以 ACE-Step 為主）
+- [ ] 跑 `./scripts/lofi license check` 確認用到的模型皆可商用（未知／NC 需先處理；見 `docs/LICENSING.md`）
 - [ ] 上傳勾選 AI 揭露
 - [ ] 視覺原創、每支片不同
 - [ ] 影片有 chapters / 曲目 credits（策展痕跡）
