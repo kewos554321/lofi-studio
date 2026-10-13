@@ -11,7 +11,11 @@ ComfyUI + ACE-Step 生音樂、SDXL 生場景圖、ffmpeg 做視覺循環與合�
 
 ```
 src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import ...`）
-  paths.py         # ROOT 解析（env LOFI_ROOT 或往上找 prompts/styles）
+  paths.py         # ROOT 與所有目錄的唯一來源（env LOFI_ROOT 或往上找 prompts/styles）
+  config.py        # 集中設定：模型檔名／ComfyUI 位址（LOFI_* 環境變數可覆寫；`lofi config` 可查）
+  media.py         # ffmpeg/ffprobe 小工具（ffprobe_duration…，純標準庫）
+  comfy.py         # ComfyUI API 小客戶端（api/system_stats/submit/wait_done）
+  lock.py          # 生成互斥鎖（fcntl，避免音樂/圖片同時跑爆 16GB RAM）
   catalog.py       # 音樂目錄：sidecar assets/tracks/<style>/<run>/*.json + catalog/tracks.jsonl
   qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
   generate.py      # 批次生成（ComfyUI API）
@@ -24,8 +28,11 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
-scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用
+scripts/lofi       # 統一 CLI 入口 wrapper（免安裝；= `python -m lofi.cli`，shell 產線與人都用它）
+scripts/check.sh   # 提交前自檢（compile + unittest；CI 跑同一套）
+scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用；新流程請走 `lofi <cmd>`
 scripts/*.sh       # ffmpeg/ComfyUI 重流程（make_episode 五段產線 / build_long_mix / make_long_lofi / archive_episode …）
+scratch/           # 實驗／一次性腳本（不進版控）
 prompts/styles/     # 音樂風格骨架（生成用）
 prompts/youtube/    # 上片 metadata 範本（對應同名 style）
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整個 assets/ 不進版控，紀錄看 catalog/tracks.jsonl）
@@ -40,17 +47,19 @@ docs/RUNBOOK.md     # 操作手冊
 ## 常用指令
 
 ```bash
-lofi generate --csv prompts/generated/x.csv --run-id b01   # 或 python3 scripts/batch_generate.py …
-lofi qc --all --index
-lofi library build && lofi library summary
-lofi meta --video output/videos/x.mp4 --style cozy_morning
-lofi publish --ready
-lofi expand --style rainy_lofi --count 20 --seed 42
-lofi visual --count 3 --size 768x512
+./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01   # 單一入口（免安裝；= lofi generate）
+./scripts/lofi qc --all --index
+./scripts/lofi library build && ./scripts/lofi library summary
+./scripts/lofi meta --video output/videos/x.mp4 --style cozy_morning
+./scripts/lofi publish --ready
+./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
+./scripts/lofi visual --count 3 --size 768x512
+./scripts/lofi config                                  # 目前模型檔名／ComfyUI 位址
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40   # 五段產線一條龍
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑單一段（music/image/video/upload/cleanup）
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
+./scripts/check.sh                                     # 提交前自檢（compile + unittest）
 python3 -m unittest discover -s tests -v
 ```
 
@@ -59,6 +68,8 @@ python3 -m unittest discover -s tests -v
 - **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）；圖片寫在該批 `assets/visuals/<kind><NN>/manifest.json`。沒記錄等於沒做。**紀錄是本機檔、不進版控**——git 只收 `catalog/*.jsonl`（音樂的事件流）。
   manifest 是「**一個 run 一份**」：該批固定的模型/尺寸/steps/cfg/negative… 放 `config`（所有圖共用，只寫一次），逐檔會變的 `prompt`/`seed` 列在 `images`。同一個 run 再跑只會**併寫**（新檔 append、舊檔就地更新），不會蓋掉既有紀錄；改某張的 prompt 就改 `images` 裡那一筆。寫入用 `visual.update_manifest()`，不要自己開檔覆寫。
 - **執行資訊要清楚**：任何生成前先用 `visual.print_run_header()` 印出工具、run-id、**哪個模型在跑**、參數與輸出路徑（逐張輸出也帶著模型短標籤），別讓 log 只剩下看不懂的進度行。
+- **生成互斥**：`generate`/`visual`/`cinemagraph` 取同一把鎖（`logs/.gpu.lock`），第二個程序會直接中止並印出持有者（避免 ACE-Step + SDXL 同時跑爆 RAM）。要排隊設 `LOFI_LOCK_WAIT=秒`；硬要同時跑設 `LOFI_NO_LOCK=1`。新模組若也吃 GPU/RAM，請照樣用 `from lofi.lock import gpu_lock`。
+- **設定集中**：模型檔名／ComfyUI 位址不要硬編散落，一律經 `src/lofi/config.py`（可用 `LOFI_*` 環境變數覆寫）。換模型只改一處，也可用 `lofi config` 查目前值。
 - **唯一命名**：生成檔名／目錄含 run 代號（音樂 `assets/tracks/<style>/<run>/`；圖片 `assets/visuals/<run-id>/`），禁止讓不同批次產生同名檔（會被覆蓋）。
   圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/VISUAL_NAMING.md`。
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。

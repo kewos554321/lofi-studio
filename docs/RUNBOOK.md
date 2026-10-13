@@ -3,7 +3,8 @@
 完整操作手冊。P1（自動化管線）已可執行；P2（AI 生成）需另外安裝並用 GUI 操作。
 > 這份文件是把你提供的 SOP 整理、補齊缺漏後的版本。標記 **[待確認]** 的地方請以官方文件為準。
 
-> 程式結構：Python 邏輯在 `src/lofi/`（單一入口 `lofi <command>`）；`scripts/*.py` 為相容 shim；ffmpeg/ComfyUI 重流程仍為 `scripts/*.sh`。詳見 `AGENTS.md` 與 `README.md`。
+> 程式結構：Python 邏輯在 `src/lofi/`（單一入口 `./scripts/lofi <command>`，或 `pip install -e .` 後直接 `lofi <command>`）；`scripts/*.py` 為相容 shim；ffmpeg/ComfyUI 重流程仍為 `scripts/*.sh`。詳見 `AGENTS.md` 與 `README.md`。
+> 模型檔名／ComfyUI 位址集中在 `src/lofi/config.py`（`./scripts/lofi config` 可查，`LOFI_*` 環境變數可覆寫）。生成互斥：`generate`/`visual`/`cinemagraph` 同鎖，衝突即中止（`LOFI_LOCK_WAIT=秒` 排隊、`LOFI_NO_LOCK=1` 硬跑）。提交前跑 `./scripts/check.sh`。
 > 量產用的成品配置（錨定參數、影片長度／視覺／上片配方）見 [`RECIPES.md`](RECIPES.md)。
 
 ---
@@ -437,6 +438,8 @@ python3 scripts/upload_status.py --mark-uploaded xxx --url https://youtu.be/...
 | 音訊有金屬感雜音 | ACE-Step 已知 metallic shimmer | 後製加磁帶飽和、EQ 修掉 |
 | 生出來的曲子太像 | prompt 太接近 | 改調性/BPM/樂器，長期靠 LoRA 拉開差異 |
 | 影片接點有跳動 | 視覺非無縫 | 用 `make_visual_loop.sh`（sin 週期保證頭尾相接） |
+| 第二個生成一啟動就中止 | 生成互斥鎖（正常保護） | 等前一個跑完；要排隊 `LOFI_LOCK_WAIT=300 ./scripts/lofi ...`；確認沒在跑卻被檔可 `LOFI_NO_LOCK=1` |
+| 換了 checkpoint 但行為沒變 | 仍在用集中設定裡的預設 | `./scripts/lofi config` 看目前值；改 `src/lofi/config.py` 或設 `LOFI_IMAGE_CKPT` |
 
 ---
 

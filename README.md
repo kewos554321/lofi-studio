@@ -21,8 +21,9 @@
 | Python 3.9+ | 系統 `python3` 即可（套件只用標準庫）；Demucs 走 `.venv` |
 | 外接碟（建議） | `output/` 指到外接；見「容量管理與外接碟」 |
 
-安裝成 `lofi` 指令（可選）：`pip install -e .`
-未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接 `python3 scripts/<指令>.py`。
+CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 python 執行，**免安裝**）。
+（可選）`pip install -e .` 後即可直接打 `lofi <command>`。
+`python3 scripts/<指令>.py` 仍可用，但只是**相容 shim**——新流程請用 `./scripts/lofi`。
 
 ## 使用流程（端到端）
 
@@ -207,23 +208,28 @@ lofi-studio/
 
 ## 架構與 CLI
 
-Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim**，兩者等價：
+Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim**。唯一入口是 `scripts/lofi`（wrapper，免安裝）：
 
 ```bash
-lofi qc --all --index              # 等同 python3 scripts/auto_qc.py --all --index
-lofi library build
-lofi library query --tag style:rainy_lofi --status keep
-lofi meta --video output/videos/x.mp4 --style cozy_morning
-lofi publish --ready
-lofi generate --csv prompts/generated/x.csv --run-id b01
-lofi expand --style rainy_lofi --count 20 --seed 42
-lofi visual --count 3 --size 768x512
-lofi visual-qc --all --force       # 圖片品檢（黑圖/純色/灰圖/壞檔）
-lofi cinemagraph assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4   # 需 numpy（.venv）
+./scripts/lofi qc --all --index
+./scripts/lofi library build
+./scripts/lofi library query --tag style:rainy_lofi --status keep
+./scripts/lofi meta --video output/videos/x.mp4 --style cozy_morning
+./scripts/lofi publish --ready
+./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01
+./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
+./scripts/lofi visual --count 3 --size 768x512
+./scripts/lofi visual --list                         # 批次總表（用途/時間/模型/張數）
+./scripts/lofi visual-qc --all --force               # 圖片品檢（黑圖/純色/灰圖/壞檔）
+./scripts/lofi cinemagraph assets/visuals/sc07/sc07_01_window.png output/visual_loop.mp4   # 需 numpy（.venv）
+./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
 ```
 
-（可選）安裝成指令：`pip install -e .`。未安裝時用 `PYTHONPATH=src python3 -m lofi.cli <command>`，或直接用 `scripts/*.py`。
-ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
+- 也可以 `pip install -e .` 後直接打 `lofi <command>`（等價）；`PYTHONPATH=src python3 -m lofi.cli <command>` 亦可。
+- ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
+- **模型檔名與 ComfyUI 位址集中在 `src/lofi/config.py`**，可用環境變數覆寫（`LOFI_COMFY_URL`、`LOFI_IMAGE_CKPT`、`LOFI_UPSCALE_MODEL`…），換模型不必改程式。
+- **生成互斥鎖**：`generate` / `visual` / `cinemagraph` 會互斥（鎖檔在內接 `logs/.gpu.lock`）。已有生成在跑時第二個會**直接中止**並印出持有者；要排隊設 `LOFI_LOCK_WAIT=秒`，硬要同時跑設 `LOFI_NO_LOCK=1`。
+- 提交前自檢：`./scripts/check.sh`（編譯 + 單元測試，+ 有裝 shellcheck 就跑）。CI（`.github/workflows/ci.yml`）跑同一套。
 
 ## 示範管線（不需 ComfyUI，先測流程）
 
@@ -259,7 +265,7 @@ python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png outpu
 
 ## 腳本參數速查
 
-> 下表 Python 指令都有 `lofi` 別名：`python3 scripts/<x>.py` ≡ `lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload`）。`scripts/*.sh` 仍為 bash。
+> 下表 Python 指令請用 `./scripts/lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload` / `config`）。`python3 scripts/<x>.py` 為相容 shim。`scripts/*.sh` 仍為 bash。
 
 | 腳本 | 用法 |
 |---|---|
