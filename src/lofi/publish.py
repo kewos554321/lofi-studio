@@ -16,15 +16,11 @@ import argparse
 import csv
 import json
 import sys
-from pathlib import Path
 
 from lofi import catalog as cat
 from lofi import meta as mm
+from lofi.paths import EPISODES_DIR, PUBLISH_DIR, VIDEOS_DIR
 
-ROOT = cat.ROOT
-PUBLISH_DIR = ROOT / "publish"
-VIDEOS_DIR = ROOT / "output" / "videos"
-EPISODES_DIR = ROOT / "output" / "episodes"
 LEGACY = {"demo_lofi"}  # 測試片不算正式成片
 
 ICON = {"pending": "🟢", "scheduled": "🟡", "uploaded": "✅"}

@@ -17,10 +17,7 @@ expand_style.py — 把「一個風格骨架」展開成多首同風格、變化
 import argparse, csv, itertools, json, random, sys
 from pathlib import Path
 
-from lofi.paths import ROOT
-
-STYLE_DIR = ROOT / "prompts" / "styles"
-GEN_DIR = ROOT / "prompts" / "generated"
+from lofi.paths import GEN_DIR, STYLE_DIR
 
 FIELDS = ["id", "style", "mood", "instruments", "key", "bpm", "prompt", "negative"]
 

@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi.media import ffprobe_duration
 
 DEFAULT_THRESHOLDS = {
     "duration_ratio_min": 0.9,    # 實際/要求 < 此值 -> 截斷
@@ -59,18 +60,6 @@ DEFAULT_THRESHOLDS = {
 def _run(cmd):
     """執行 ffmpeg 並回傳 stderr（filter 的統計都印在 stderr）。"""
     return subprocess.run(cmd, capture_output=True, text=True).stderr
-
-
-def ffprobe_duration(path):
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nw=1:nk=1", str(path)],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    try:
-        return float(out)
-    except ValueError:
-        return None
 
 
 def measure_ebur128(path):

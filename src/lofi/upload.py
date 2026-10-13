@@ -26,11 +26,9 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
-from lofi.paths import ROOT
+from lofi.paths import PUBLISH_DIR, ROOT, SECRETS_DIR
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-PUBLISH_DIR = ROOT / "publish"
-SECRETS_DIR = ROOT / ".secrets"
 DEFAULT_CLIENT_SECRET = SECRETS_DIR / "client_secret.json"
 DEFAULT_TOKEN = SECRETS_DIR / "yt_token.json"
 MAX_TITLE = 100

@@ -20,11 +20,11 @@ import argparse
 import json
 import sqlite3
 import sys
-from pathlib import Path
 
 from lofi import catalog as cat
+from lofi.paths import CATALOG_DIR
 
-DB_PATH = cat.CATALOG_DIR / "library.db"
+DB_PATH = CATALOG_DIR / "library.db"
 
 AUTO_PREFIXES = ("style:", "key:", "bpm:", "energy:", "brightness:",
                  "verdict:", "rating:", "duration:", "instrumental")

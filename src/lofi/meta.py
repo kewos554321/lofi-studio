@@ -27,28 +27,12 @@ make_meta.py — 為成片產生 YouTube 上片資訊（title / description / ch
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 from lofi import catalog as cat
-
-ROOT = cat.ROOT
-YT_DIR = ROOT / "prompts" / "youtube"
-STYLE_DIR = ROOT / "prompts" / "styles"
-PUBLISH_DIR = ROOT / "publish"
-
-
-def ffprobe_duration(path):
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nw=1:nk=1", str(path)],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    try:
-        return float(out)
-    except ValueError:
-        return None
+from lofi.media import ffprobe_duration
+from lofi.paths import PUBLISH_DIR, STYLE_DIR, YT_DIR
 
 
 def prettify(name):

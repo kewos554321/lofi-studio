@@ -9,7 +9,6 @@ migrate.py — 把 assets/tracks 舊的扁平檔案搬到 <style>/<run_id>/ 分�
 import argparse
 import json
 import shutil
-import sys
 from pathlib import Path
 
 from lofi import catalog as cat

@@ -22,10 +22,9 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi.paths import GEN_DIR, LOGS_DIR, PROMPT_LIB, ROOT, STYLE_DIR
 
-ROOT = cat.ROOT
-LOGS_DIRS = [ROOT / "logs", ROOT / "output" / "logs"]
-PROMPT_LIB = ROOT / "prompts" / "prompt_library.csv"
+LOGS_DIRS = [LOGS_DIR, ROOT / "output" / "logs"]
 
 # cozy_morning_16_00001.mp3 -> style="cozy_morning", id="16"
 NAME_ID_RE = re.compile(r"^(?P<style>.+?)_(?P<id>\d{2})_\d{5}$")
@@ -55,7 +54,7 @@ def load_rows():
     """把所有 CSV 依『列的 style 欄』分組；prompt_library 歸到 style=""。
     回傳 {style: {id: (row, source_path)}}。同一 id 以檔名排序第一個出現者為準。"""
     groups = {}
-    gen_dir = ROOT / "prompts" / "generated"
+    gen_dir = GEN_DIR
     files = [PROMPT_LIB]
     if gen_dir.exists():
         files += sorted(gen_dir.glob("*.csv"))
@@ -95,7 +94,7 @@ def build_record(audio, groups, seeds):
     row, src_path = entry if entry else ({}, None)
 
     # 只有真的存在 prompts/styles/<style>.json 才算「風格曲」
-    real_style = style if (style and (ROOT / "prompts" / "styles" / f"{style}.json").exists()) else ""
+    real_style = style if (style and (STYLE_DIR / f"{style}.json").exists()) else ""
 
     record = {
         "track_id": stem,
@@ -129,7 +128,7 @@ def build_record(audio, groups, seeds):
 
     # 建議時長：優先用風格 JSON 的 duration
     if real_style:
-        sp = ROOT / "prompts" / "styles" / f"{real_style}.json"
+        sp = STYLE_DIR / f"{real_style}.json"
         if sp.exists():
             try:
                 record["gen"]["duration"] = json.loads(sp.read_text(encoding="utf-8")).get("duration")
