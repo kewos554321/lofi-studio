@@ -48,6 +48,10 @@ printf 'id,style,mood,instruments,key,bpm,prompt,negative\n1,test,,,A minor,70,l
   || { echo "  ❌ CLI 乾跑失敗"; fail=1; }
 rm -f "$tmpcsv"
 
+echo "==> 商用授權稽核（掃 assets；僅警告）"
+./scripts/lofi license check >/dev/null 2>&1 \
+  || echo "  ⚠️ 有模型授權待確認 → ./scripts/lofi license check（見 docs/LICENSING.md）"
+
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck: scripts/*.sh"
   shellcheck scripts/*.sh || { echo "  ❌ shellcheck 有問題"; fail=1; }
