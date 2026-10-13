@@ -510,9 +510,9 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | `tracklist.csv` | 人用：No/Title/Duration/Key/BPM/Mood/ISRC |
 | `CHECKLIST.md` | DSP／Bandcamp／stock 各平台的上架步驟 |
 
-- **artist 名義**：已定案為 **`Moni's Journey`**（`config.RELEASE_ARTIST`，可用 `LOFI_RELEASE_ARTIST` 或 `--artist` 覆寫）。
+- **artist 名義**：已定案為 **`Moni on the Journey`**（`config.RELEASE_ARTIST`，可用 `LOFI_RELEASE_ARTIST` 或 `--artist` 覆寫）。
   刻意與 YouTube 頻道名（Drifted LoFi）分開，走「廠牌家族」路線；單字名在 Apple Music／MusicBrainz 全部撞名，見 DISTRIBUTION §6-2。
-  ⚠️ 一律用**直引號** `'`（U+0027），不要用彎引號 `’`。
+  （2026-10 由舊名 `Moni's Journey` 改名；新名無撇號，原本的直／彎引號問題消失。）
 - **曲名重複自動去重**：sidecar 的 `mood` 會重複，同名者自動加 `(pt. N)`。
   想改名字：編輯 `release.json` 的 `tracks[].title` 再**重跑**（會沿用你改過的曲名，並清掉改名前留下的舊母帶）。
 - **母帶來源會自動分級**：若該曲有無損母帶（`output/masters/<style>/<run>/*.flac`），`release` **優先採用**它；

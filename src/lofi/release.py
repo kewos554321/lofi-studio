@@ -456,7 +456,7 @@ def _run_images(d):
 def pick_cover(visual_run=None):
     """挑封面：**必須是主角（黑貓 Moni）**，其次才比 run 種類與新舊。
 
-    為什麼：品牌 Moni's Journey 的主體就是這隻貓，封面不能出現別的貓（`sc01/sc02/sc06`
+    為什麼：品牌 Moni on the Journey 的主體就是這隻貓，封面不能出現別的貓（`sc01/sc02/sc06`
     是橘虎斑）或無主角的圖。判別條件來自 `prompts/character/<name>.json`。
 
     沒指定 `--visual-run` 時會掃**所有** run（不只是最新的 sc）——否則會挑到別隻貓。

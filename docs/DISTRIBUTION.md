@@ -173,9 +173,9 @@ ffmpeg 轉一份 mp3 進工作目錄 → `--clean-raw` 刪掉 ComfyUI 原始檔�
 若日後真的要疊字，唯一不破壞約定的路是**在 ComfyUI 端生圖時就帶文字**（模型不一定可靠），
 否則就得引入 Pillow 到 `.venv` 並在 AGENTS.md 說明理由。**預設不做。**
 
-### 6-2. artist / label 名稱 → **決定：`Moni's Journey`**（與 YouTube 頻道分開，走廠牌家族）
+### 6-2. artist / label 名稱 → **決定：`Moni on the Journey`**（與 YouTube 頻道分開，走廠牌家族）
 
-頻道 `Drifted LoFi`（影片）／音樂 `Moni's Journey`（串流），形成 `[X] LoFi` 的廠牌家族聯想，
+頻道 `Drifted LoFi`（影片）／音樂 `Moni on the Journey`（串流），形成 `[X] LoFi` 的廠牌家族聯想，
 主角是**黑貓**，每張專輯＝牠旅程的一站。名稱放 `config.RELEASE_ARTIST`（`LOFI_RELEASE_ARTIST` 可覆寫）。
 
 定案依據（2026-10 實查 Apple Music ＋ MusicBrainz）：
@@ -184,12 +184,17 @@ ffmpeg 轉一份 mp3 進工作目錄 → `--clean-raw` 刪掉 ComfyUI 原始檔�
 |---|---|
 | `Sumi` / `Hoshi` / `Ember` / `Soot` / `Nori` / `Kage` / `Marlow` / `Bramble` | **全部撞名**（單字名對新藝人是死路） |
 | `Moni` 單獨 | 撞名嚴重 |
-| **`Moni's Journey`** | **兩邊零撞名** ✅ |
+| `Moni's Journey`（初版，2026-10 改名） | 兩邊零撞名，但已棄用 |
+| **`Moni on the Journey`** | **兩邊零撞名** ✅ |
 
-可用 handle：`monisjourney.bandcamp.com` ✅、`monisjourney.com` ✅、`@monis-journey` ✅
-（`@monisjourney` 已被佔用；若導流全走 Drifted LoFi 頻道則無妨）。
+> 改名原因：`Moni's Journey` 帶撇號，發行商可能把直引號 `'`（U+0027）與彎引號 `’` 當成**不同藝人**；
+> 新名沒有撇號，這個坑消失。改名後已重新查核：Apple Music 無真實撞名（僅模糊比對）、MusicBrainz 0 筆。
 
-- ⚠️ **一律用直引號 `'`（U+0027）**，不要用彎引號 `’`——部分發行商會視為不同藝人。
+可用 handle：`monionthejourney.bandcamp.com` ✅（導向 `/signup?new_domain=` = 可申請）、`monionthejourney.com` ✅、`@monionthejourney` ✅
+（舊名 `@monisjourney` 反而已被佔用）。
+
+- ⚠️ 全專案字串保持一致（`config.RELEASE_ARTIST`／`prompts/character/moni.json` 的 `artist`／文件）；
+  發行商以**這個字串**建藝人頁，改字等於換藝人。
 - label 欄位留空（DistroKid 免費方案本就不能自訂）。
 
 #### 主角定裝（`prompts/character/moni.json`）

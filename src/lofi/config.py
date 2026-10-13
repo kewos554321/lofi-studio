@@ -54,12 +54,12 @@ MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
 
 # ── 發行（release / 上架包）─────────────────────────────────────────────
 # 串流上架用的 artist 名義：**刻意與 YouTube 頻道名（Drifted LoFi）分開**，
-# 走「廠牌家族」路線（頻道 = Drifted LoFi／音樂 = Moni's Journey），見 docs/DISTRIBUTION.md §6-2。
+# 走「廠牌家族」路線（頻道 = Drifted LoFi／音樂 = Moni on the Journey），見 docs/DISTRIBUTION.md §6-2。
 # 定案依據（2026-10 實查）：單字名（Sumi/Hoshi/Ember/Nori/Kage/Marlow/Bramble…）在
-# Apple Music 與 MusicBrainz **全部撞名**；`Moni's Journey` 兩邊零撞名，
-# 且把主角（黑貓的旅程）寫進品牌。可用 handle：`monisjourney.bandcamp.com`、`@monis-journey`、`monisjourney.com`。
-# ⚠️ 一律用**直引號** `'`（U+0027），不要用彎引號 `’`——部分發行商會視為不同藝人。
-RELEASE_ARTIST = _env("LOFI_RELEASE_ARTIST", "Moni's Journey")
+# Apple Music 與 MusicBrainz **全部撞名**；`Moni on the Journey` 兩邊零撞名，
+# 且把主角（黑貓的旅程）寫進品牌。可用 handle：`monionthejourney.bandcamp.com`、`@monionthejourney`、`monionthejourney.com`。
+# （2026-10 由舊名 `Moni's Journey` 改名：新名沒有撇號，原本「直／彎引號會被當成不同藝人」的坑自然消失。）
+RELEASE_ARTIST = _env("LOFI_RELEASE_ARTIST", "Moni on the Journey")
 RELEASE_LABEL = _env("LOFI_RELEASE_LABEL", "")
 RELEASE_GENRE = _env("LOFI_RELEASE_GENRE", "Lo-fi")
 # 母帶響度目標：Spotify 建議 -14 LUFS；true peak 留 1 dB 餘裕。

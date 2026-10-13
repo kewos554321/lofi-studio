@@ -1184,7 +1184,7 @@ class TestRelease(unittest.TestCase):
         ch = release.load_character("moni")
         self.assertIsNotNone(ch, "prompts/character/moni.json 應該存在")
         self.assertEqual(ch["name"], "Moni")
-        self.assertEqual(ch["artist"], "Moni's Journey")
+        self.assertEqual(ch["artist"], "Moni on the Journey")
         self.assertIn("black cat", ch["cover_match"]["must"])
         self.assertIsNone(release.load_character("no-such-character"))
 
