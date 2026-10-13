@@ -62,7 +62,11 @@
 ```bash
 ./scripts/lofi release plan    --run coastal01                    # 只印，不寫檔
 ./scripts/lofi release package --run coastal01 --limit 12
+./scripts/lofi release package --run forest-1hr-01 --tracks 32,10,4,7,36,11 --album "Into the Forest"
 ```
+
+> **一個 run 的 `mood` 通常只有 5–6 種**，所以「取前 12 首」會滿是 `(pt. 2)`。實務做法是用 `--tracks`
+> **策展**（挑一組），再把重複的曲名改成有敘事的名字——改 `release.json` 的 `tracks[].title` 後重跑即可。
 
 ```
 output/releases/coastal01/

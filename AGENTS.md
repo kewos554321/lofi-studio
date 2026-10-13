@@ -13,6 +13,7 @@
 | `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
 | `docs/NAMING.md` | 規則 | 檔名/資料夾命名（音樂 + 視覺）與通用原則 |
 | `docs/DISTRIBUTION.md` | 變現 | 多平台上架地圖、自動化天花板、release 上架包規劃 |
+| `docs/LORA.md` | 訓練 | 主角 LoRA 的雲端訓練流程（RunPod + kohya_ss）與疑難排解 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
@@ -45,6 +46,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
   release.py       # 把生成 run 包成上架包（母帶+封面+metadata+清單；DSP/Bandcamp 無 API，故只產包）
+  character.py     # 主角定裝（prompts/character/）＋ LoRA 訓練集一致性檢查／字幕／RunPod 打包
 scripts/lofi       # 統一 CLI 入口 wrapper（免安裝；= `python -m lofi.cli`，shell 產線與人都用它）
 scripts/check.sh   # 提交前自檢（compile + unittest；CI 跑同一套）
 scripts/*.py       # 相容 shim（呼叫 src/lofi/*.main），舊指令仍可用；新流程請走 `lofi <cmd>`

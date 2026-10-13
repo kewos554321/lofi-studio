@@ -240,11 +240,17 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 - 授權：`--ref` 會一併查 IPAdapter 那兩支模型（`config.IPADAPTER_MODELS`），沒登錄會被 fail-closed 擋下。
 - `manifest.json` 的 `tool` 自動記成 `sdxl-ipadapter`，`config` 多記 `ref`/`weight`/`weight_type`/`preset`/`embeds_scaling`/`start`/`end`（這樣回頭才看得出這批是用哪張參考圖、多重鎖的）。
 - 生成會取 `logs/.gpu.lock` 互斥鎖：音樂生成跑著時會直接中止（保護 16GB RAM）。
-- **定裝記錄在 `prompts/character/moni.json`**（主角 ＝ 黑貓 **Moni**：純黑毛＋大而圓的琥珀金眼＋**四腳白襪**）。
-  它同時是 `release` 挑封面的判別依據，所以改定裝要改這一份，不要只在 prompt 裡改。
+- **鎖角色：LoRA 是正解**。IPAdapter 只注入 CLIP 特徵、不搬像素，白襪這種小面積特徵鎖不牢；
+  定裝與訓練流程見 [`LORA.md`](LORA.md)（本機只生資料集，訓練在 RunPod）。
+  訓好後用 `lofi visual --lora moni.safetensors --lora-weight 0.8`（workflow 會接成 checkpoint → LoRA → IPAdapter）。
+  ⚠️ **定裝以 `prompts/character/moni.json` 為唯一來源**（純黑毛＋琥珀金眼＋四腳白襪）。
 - **訓練前先跑** `./scripts/lofi character check`：檢查訓練集（a）每張有沒有字幕、
   （b）字幕是否與定裝一致、（c）負向詞是否對抗錯誤特徵、（d）張數是否夠（建議 ≥20）。
   它把「manifest 記了但磁碟沒有」視為**正常的人工剔除**（不報錯），只報留下來那些圖的問題。
+- **要訓 LoRA 請走 [`LORA.md`](LORA.md)**：本機 16GB 不可能訓練（推論都只剩 6.5GB 餘裕），
+  流程是「本機生資料集 → `character caption` 補觸發詞 → `character export` → RunPod(kohya_ss) 訓練 →
+  下載 `*.safetensors` 到 `~/ComfyUI/models/loras/` → 登錄授權 → `lofi visual --lora`」。
+  ⚠️ 字幕**一定要有觸發詞**（`moni`），否則模型會把「黑貓」這個通用概念學進去。
   > ⚠️ **白襪 vs 金襪未確認**：`ref04_01_gold-socks.png` 檔名是「金襪」，但該圖 prompt、`ds03` 字幕
   > （`clearly white paws`／`white socks on all four feet`）與負向詞（`all black paws, black feet`）**全部指向白襪**。
   > 若定裝要改成金襪，`ds` 系列的訓練字幕與負向詞必須同步改，否則 LoRA 會學成白襪。
@@ -475,13 +481,24 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 # 先看這個 run 會變成什麼專輯（不寫檔）：曲序、長度、重複曲名、母帶估算
 ./scripts/lofi release plan --run coastal01
 ./scripts/lofi release plan --run coastal01 --limit 12        # 只取前 12 首
+./scripts/lofi release plan --run coastal01 --min-score 95    # 只看品檢分數高的
+
+# 選曲（策展用）：--tracks 吃 plan 印出的序號／track_id／檔名片段
+./scripts/lofi release plan    --run forest-1hr-01 --tracks 32,10,4,7,36,11
+./scripts/lofi release package --run forest-1hr-01 --tracks 32,10,4,7,36,11 --album "Into the Forest"
 
 # 產出上架包
 ./scripts/lofi release package --run coastal01
 ./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
 ./scripts/lofi release package --run coastal01 --style coastal_guitar --visual-run sc06
 ./scripts/lofi release package --run coastal01 --format flac  # 母帶用 FLAC（較小）
+./scripts/lofi release package --run coastal01 --threads 2 --nice 15   # 與其他工作共存
 ```
+
+> **一個 run 的 `mood` 通常只有 5–6 種**（同風格量產的必然結果），所以「取前 12 首」會產生一堆 `(pt. 2)`。
+> 正確做法是 **策展**：用 `--tracks` 挑一組，並把重複的曲名改成有敘事的名字。
+> 改法：先產出 → 編輯 `output/releases/<run>/release.json` 的 `tracks[].title` → **重跑**（會沿用你的名字，並清掉改名前留下的舊母帶）。
+> 若只是要快，`--limit 6` 取每種 mood 一首可得到「零重複曲名」的短 EP。
 
 輸出在 `output/releases/<run>/`（外接碟）：
 
@@ -506,6 +523,10 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
   找不到主角圖會警告並要你用 `--cover` 指定。要換封面：`--cover <圖檔>` 或 `--visual-run <run>`。
 - **商用守門**：比照 `generate`/`visual`，模型授權未知／禁止商用的批會 **fail-closed**（`--allow-unknown-license` 可略過）。
 - **可中斷續跑**：已存在的母帶會略過（`--force` 重做），所以改一首歌名只需重算那一首。
+- **跑其他工作時請限流**：`release` 的母帶是 ffmpeg loudnorm（**純 CPU、不碰 GPU**），
+  但不設限時 ffmpeg 會**吃滿所有核心**，會跟 ComfyUI 生成搶 CPU。加 `--threads 2 --nice 15`
+  （或設 `LOFI_THREADS=2 LOFI_NICE=15`）就能溫和共存，比照 `make_long_lofi.sh` 的 `THREADS`/`NICE`。
+  註：它**不取 GPU 鎖**——那不是 GPU 工作，沒必要互相阻擋。
 - 每次產出 append 一筆事件到 `catalog/releases.jsonl`（append-only）。
 
 ---

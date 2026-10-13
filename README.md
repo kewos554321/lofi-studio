@@ -201,7 +201,7 @@ lofi-studio/
 │   └── auto_qc.py / batch_generate.py / make_meta.py / …  # 相容 shim（實作在 src/lofi，新流程請用 scripts/lofi）
 ├── scratch/                   # 實驗／一次性腳本（不進版控）
 ├── tests/                     # python3 -m unittest discover -s tests -v
-├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、NAMING.md（命名規則）、DISTRIBUTION.md（多平台上架規劃）
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、NAMING.md（命名規則）、DISTRIBUTION.md（多平台上架規劃）、LORA.md（LoRA 雲端訓練）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
@@ -254,6 +254,8 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi release package --run coastal01        # 產出串流/商店上架包（母帶+封面+清單）
 ./scripts/lofi character show                         # 主角（黑貓 Moni）定裝與旅程
 ./scripts/lofi character check                        # LoRA 訓練集一致性（漏字幕/特徵矛盾/數量不足）
+./scripts/lofi character caption                      # 補齊字幕＋觸發詞（訓練前必跑）
+./scripts/lofi character export                       # 打包 RunPod／kohya_ss 訓練包（見 docs/LORA.md）
 ```
 
 - 也可以 `pip install -e .` 後直接打 `lofi <command>`（等價）；`PYTHONPATH=src python3 -m lofi.cli <command>` 亦可。
