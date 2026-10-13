@@ -18,31 +18,30 @@ batch_generate.py — 用 ComfyUI API 批次生成 ACE-Step 1.5 lofi 曲子。
 
 前置：ComfyUI 需以 scripts/launch_comfyui.sh 啟動，且 ACE-Step 1.5 模型已就位。
 """
-import argparse, csv, json, random, re, shutil, sys, time, urllib.request, urllib.error
+import argparse, csv, random, re, shutil, sys, time, urllib.error
+from contextlib import nullcontext
 from pathlib import Path
 
 from lofi import catalog as cat      # 音樂目錄（sidecar + JSONL）
+from lofi import comfy               # ComfyUI API 小客戶端
 from lofi import qc                  # 生成後自動品檢（可用 --no-qc 關閉）
+from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MUSIC_CLIP1, MUSIC_CLIP2,
+                         MUSIC_UNET, MUSIC_VAE)
+from lofi.lock import gpu_lock
+from lofi.paths import PROMPT_LIB, TRACKS_DIR
 
-ROOT = cat.ROOT
-CSV_PATH = ROOT / "prompts" / "prompt_library.csv"
-TRACKS_DIR = ROOT / "assets" / "tracks"
-COMFY_OUT = Path.home() / "ComfyUI" / "output" / "audio"
-
-UNET = "acestep_v1.5_turbo.safetensors"
-CLIP1 = "qwen_0.6b_ace15.safetensors"
-CLIP2 = "qwen_1.7b_ace15.safetensors"
-VAE = "ace_1.5_vae.safetensors"
+CSV_PATH = PROMPT_LIB
+COMFY_OUT = COMFY_AUDIO_OUT
 
 
 def build_prompt(tags, bpm, key, duration, seed, prefix,
                  steps=8, cfg_scale=2.0, temperature=0.85):
     return {
-        "104": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+        "104": {"class_type": "UNETLoader", "inputs": {"unet_name": MUSIC_UNET, "weight_dtype": "default"}},
         "78":  {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["104", 0], "shift": 3.0}},
         "105": {"class_type": "DualCLIPLoader", "inputs": {
-                    "clip_name1": CLIP1, "clip_name2": CLIP2, "type": "ace", "device": "default"}},
-        "106": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+                    "clip_name1": MUSIC_CLIP1, "clip_name2": MUSIC_CLIP2, "type": "ace", "device": "default"}},
+        "106": {"class_type": "VAELoader", "inputs": {"vae_name": MUSIC_VAE}},
         "94":  {"class_type": "TextEncodeAceStepAudio1.5", "inputs": {
                     "clip": ["105", 0], "tags": tags, "lyrics": "", "seed": seed,
                     "bpm": int(bpm), "duration": float(duration), "timesignature": "4",
@@ -59,26 +58,6 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
         "107": {"class_type": "SaveAudioMP3", "inputs": {
                     "audio": ["18", 0], "filename_prefix": prefix, "quality": "V0"}},
     }
-
-
-def api(url, path, payload=None, timeout=30):
-    data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url + path, data=data,
-                                 headers={"Content-Type": "application/json"} if data else {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
-
-
-def wait_done(url, pid, poll=5):
-    t0 = time.time()
-    while True:
-        try:
-            h = api(url, f"/history/{pid}", timeout=15)
-        except Exception:
-            h = {}
-        if h and pid in h:
-            return h[pid], time.time() - t0
-        time.sleep(poll)
 
 
 def record_track(dst, row, style, rid, seed, args, csv_path):
@@ -104,7 +83,7 @@ def record_track(dst, row, style, rid, seed, args, csv_path):
             "cfg_scale": args.cfg_scale,
             "temperature": args.temperature,
             "duration": args.duration,
-            "model": UNET,
+            "model": MUSIC_UNET,
         },
         "status": "unreviewed",
         "tags": [],
@@ -117,7 +96,7 @@ def record_track(dst, row, style, rid, seed, args, csv_path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default="http://127.0.0.1:8188")
+    ap.add_argument("--url", default=COMFY_URL)
     ap.add_argument("--csv", default=str(CSV_PATH), help="曲目清單 CSV（預設 prompts/prompt_library.csv）")
     ap.add_argument("--limit", type=int, default=0, help="只生成前 N 首（0=全部）")
     ap.add_argument("--duration", type=float, default=120.0)
@@ -172,82 +151,81 @@ def main():
             print(f"續傳：此 run（{args.run_id}）已完成 {len(done)} 列，將跳過")
 
     if not args.dry_run:
-        try:
-            stats = api(args.url, "/system_stats", timeout=5)
-            print(f"ComfyUI {stats['system']['comfyui_version']} @ {args.url}")
-        except Exception as e:
-            sys.exit(f"無法連線 ComfyUI ({args.url})：{e}\n請先執行 scripts/launch_comfyui.sh")
+        ver = comfy.require_online(args.url)
+        print(f"ComfyUI {ver} @ {args.url}")
 
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     ok = 0
-    for i, row in enumerate(rows, 1):
-        rid = row.get("id", f"{i:02d}")
-        tags = row["prompt"].strip()
-        bpm = row.get("bpm", "70")
-        key = row.get("key", "D minor")
-        seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
-        # 風格 + 批次 id 當檔名前綴（rainy_lofi_01_r2026...），確保唯一、不覆蓋舊曲
-        style = (row.get("style") or "").strip().replace(" ", "_")
-        base = f"{style}_{rid}" if style else f"lofi_{rid}"
-        prefix = f"audio/{base}_{args.run_id}"
+    # 互斥鎖：音樂與圖片生成同時跑會爆 16GB RAM（見 AGENTS.md）
+    guard = gpu_lock("music") if not args.dry_run else nullcontext()
+    with guard:
+        for i, row in enumerate(rows, 1):
+            rid = row.get("id", f"{i:02d}")
+            tags = row["prompt"].strip()
+            bpm = row.get("bpm", "70")
+            key = row.get("key", "D minor")
+            seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
+            # 風格 + 批次 id 當檔名前綴（rainy_lofi_01_r2026...），確保唯一、不覆蓋舊曲
+            style = (row.get("style") or "").strip().replace(" ", "_")
+            base = f"{style}_{rid}" if style else f"lofi_{rid}"
+            prefix = f"audio/{base}_{args.run_id}"
 
-        if str(rid) in done:
-            print(f"[{i}/{total}] id={rid} 已完成，跳過")
-            continue
-
-        print(f"\n[{i}/{total}] id={rid} | {row.get('mood','')} | {bpm} BPM | {key} | seed={seed}")
-        print(f"    {tags[:90]}…")
-
-        if args.dry_run:
-            continue
-
-        try:
-            r = api(args.url, "/prompt", {"prompt": build_prompt(
-                tags, bpm, key, args.duration, seed, prefix,
-                steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature),
-                "client_id": "lofi-batch"})
-        except urllib.error.HTTPError as e:
-            print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
-        pid = r["prompt_id"]
-
-        res, dt = wait_done(args.url, pid)
-        status = res.get("status", {}).get("status_str")
-        if status != "success":
-            print(f"    ❌ 生成失敗: {status} {res.get('status',{}).get('messages',[])[-2:]}")
-            continue
-
-        audio = res.get("outputs", {}).get("107", {}).get("audio", [])
-        for a in audio:
-            src = Path.home() / "ComfyUI" / "output" / a.get("subfolder", "") / a["filename"]
-            if not src.exists():
-                print(f"    ⚠️  找不到輸出檔 {src}")
+            if str(rid) in done:
+                print(f"[{i}/{total}] id={rid} 已完成，跳過")
                 continue
-            dst = cat.track_subdir(style, args.run_id) / a["filename"]
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            # 防覆蓋：若同名檔已存在（跨批次殘留），自動加序號
-            if dst.exists():
-                stem, ext = Path(a["filename"]).stem, Path(a["filename"]).suffix
-                k = 2
-                while dst.exists():
-                    dst = dst.with_name(f"{stem}-{k}{ext}")
-                    k += 1
-            shutil.copy2(src, dst)
-            if args.clean_raw:
-                src.unlink()
-                print(f"    ✅ {dt:.0f}s -> {dst.name}（已刪除 ComfyUI 原始檔）")
-            else:
-                print(f"    ✅ {dt:.0f}s -> {dst.name}")
-            ok += 1
 
-            if not args.no_catalog:
-                record_track(dst, row, style, rid, seed, args, csv_path)
-                if not args.no_qc:
-                    _, qcres, _ = qc.qc_file(dst)
-                    print(f"       品檢: {qcres['verdict']} (score={qcres['score']})"
-                          f"{' | ' + ', '.join(qcres['flags']) if qcres.get('flags') else ''}")
-        if args.sleep and i < len(rows):
-            print(f"    ⏸  降溫 {args.sleep:g}s…")
-            time.sleep(args.sleep)
+            print(f"\n[{i}/{total}] id={rid} | {row.get('mood','')} | {bpm} BPM | {key} | seed={seed}")
+            print(f"    {tags[:90]}…")
+
+            if args.dry_run:
+                continue
+
+            try:
+                pid = comfy.submit(args.url, build_prompt(
+                    tags, bpm, key, args.duration, seed, prefix,
+                    steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature),
+                    client_id="lofi-batch")
+            except urllib.error.HTTPError as e:
+                print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
+
+            res, dt = comfy.wait_done(args.url, pid)
+            status = res.get("status", {}).get("status_str")
+            if status != "success":
+                print(f"    ❌ 生成失敗: {status} {res.get('status',{}).get('messages',[])[-2:]}")
+                continue
+
+            audio = res.get("outputs", {}).get("107", {}).get("audio", [])
+            for a in audio:
+                src = COMFY_OUT / a.get("subfolder", "") / a["filename"]
+                if not src.exists():
+                    print(f"    ⚠️  找不到輸出檔 {src}")
+                    continue
+                dst = cat.track_subdir(style, args.run_id) / a["filename"]
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                # 防覆蓋：若同名檔已存在（跨批次殘留），自動加序號
+                if dst.exists():
+                    stem, ext = Path(a["filename"]).stem, Path(a["filename"]).suffix
+                    k = 2
+                    while dst.exists():
+                        dst = dst.with_name(f"{stem}-{k}{ext}")
+                        k += 1
+                shutil.copy2(src, dst)
+                if args.clean_raw:
+                    src.unlink()
+                    print(f"    ✅ {dt:.0f}s -> {dst.name}（已刪除 ComfyUI 原始檔）")
+                else:
+                    print(f"    ✅ {dt:.0f}s -> {dst.name}")
+                ok += 1
+
+                if not args.no_catalog:
+                    record_track(dst, row, style, rid, seed, args, csv_path)
+                    if not args.no_qc:
+                        _, qcres, _ = qc.qc_file(dst)
+                        print(f"       品檢: {qcres['verdict']} (score={qcres['score']})"
+                              f"{' | ' + ', '.join(qcres['flags']) if qcres.get('flags') else ''}")
+            if args.sleep and i < len(rows):
+                print(f"    ⏸  降溫 {args.sleep:g}s…")
+                time.sleep(args.sleep)
 
     if args.dry_run:
         print("\n（dry-run，未實際生成）")

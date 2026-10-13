@@ -60,6 +60,8 @@ from pathlib import Path
 
 import numpy as np
 
+from lofi.lock import gpu_lock
+
 TAU = 2.0 * math.pi
 
 
@@ -528,10 +530,11 @@ def main():
         return
 
     vw = VideoWriter(Path(args.output), w, h, args.fps, args.crf)
-    for i in range(frames):
-        vw.write(cg.render_frame(i / args.fps))
-        if (i + 1) % 60 == 0 or i + 1 == frames:
-            print(f"    {i + 1}/{frames}", end="\r", flush=True)
+    with gpu_lock("cinemagraph"):        # 別和其他 GPU/RAM 重活同時跑（見 AGENTS.md）
+        for i in range(frames):
+            vw.write(cg.render_frame(i / args.fps))
+            if (i + 1) % 60 == 0 or i + 1 == frames:
+                print(f"    {i + 1}/{frames}", end="\r", flush=True)
     vw.close()
     print(f"\n✅ 完成：{args.output}（無縫循環，可直接餵給 render_video.sh）")
 

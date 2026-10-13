@@ -28,15 +28,17 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
 預設 checkpoint：DreamShaperXL-v1.0-Alpha2.safetensors（SDXL，半寫實插畫；見 models/README.md）。
 放大模型放在 ~/ComfyUI/models/upscale_models/（見 download_p2_models.sh）。
 """
-import argparse, json, random, re, shutil, sys, time, unicodedata, urllib.request, urllib.error
+import argparse, json, random, re, shutil, sys, time, unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from lofi.paths import ROOT
+from lofi import comfy
+from lofi.config import COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT
+from lofi.lock import gpu_lock
+from lofi.paths import VISUALS_DIR
 
-VIS_DIR = ROOT / "assets" / "visuals"
-COMFY_OUT = Path.home() / "ComfyUI" / "output"
-CKPT = "DreamShaperXL-v1.0-Alpha2.safetensors"
+VIS_DIR = VISUALS_DIR
+COMFY_OUT = COMFY_OUTPUT
 
 
 def sanitize_run_id(s):
@@ -441,7 +443,7 @@ DEFAULT_NEG = ("lowres, blurry, bad anatomy, bad hands, extra digits, fewer digi
                "2girls, multiple girls, extra limbs, watermark, signature, text, error, jpeg artifacts")
 
 
-def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=CKPT,
+def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
                  upscale_model="", up_out=None, clip_skip=0,
                  sampler="dpmpp_2m", scheduler="karras",
                  init_image="", denoise=1.0):
@@ -484,14 +486,6 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=CKPT,
         src = ["12", 0]
     g["9"] = {"class_type": "SaveImage", "inputs": {"images": src, "filename_prefix": prefix}}
     return g
-
-
-def api(url, path, payload=None, timeout=30):
-    data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url + path, data=data,
-                                 headers={"Content-Type": "application/json"} if data else {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
 
 
 # ── 批次總表：一眼看出哪批是什麼、什麼時候跑的（時間不塞進檔名）──────────
@@ -577,7 +571,7 @@ def print_runs(vis_dir=None, sort="id"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default="http://127.0.0.1:8188")
+    ap.add_argument("--url", default=COMFY_URL)
     ap.add_argument("--prompt", default=DEFAULT_POS)
     ap.add_argument("--negative", default=DEFAULT_NEG)
     ap.add_argument("--count", type=int, default=1)
@@ -593,7 +587,7 @@ def main():
                     help="用途代號（未給 --run-id 時用來編號）：ref=定裝參考 ds=訓練集 sc=場景測試")
     ap.add_argument("--run-id", default="",
                     help="批次代號＝資料夾名，建議 <kind><NN>（例 ds02）；未給則自動 <kind><NN>")
-    ap.add_argument("--ckpt", default=CKPT, help="checkpoint 檔名（放在 ComfyUI/models/checkpoints）")
+    ap.add_argument("--ckpt", default=IMAGE_CKPT, help="checkpoint 檔名（放在 ComfyUI/models/checkpoints）")
     ap.add_argument("--upscale", default="",
                     help="放大模型檔名（放 ComfyUI/models/upscale_models/），空=不放大，例：RealESRGAN_x4plus_anime_6B.pth")
     ap.add_argument("--upscale-out", default="", help="放大後輸出尺寸 寬x高（預設生成尺寸×2）")
@@ -629,10 +623,7 @@ def main():
             sys.exit("--upscale-out 格式應為 寬x高，例如 1536x1024")
 
     if not args.dry_run:
-        try:
-            api(args.url, "/system_stats", timeout=5)
-        except Exception as e:
-            sys.exit(f"無法連線 ComfyUI ({args.url})：{e}")
+        comfy.require_online(args.url)
 
     # 一批一夾：assets/visuals/<kind><NN>/；未給 run-id 就自動編號（ref05 之後給 ref06）
     run_id = sanitize_run_id(args.run_id) or next_run_id(args.kind)
@@ -661,41 +652,34 @@ def main():
     tag = model_tag(config)
     done = 0
     seq = next_seq(out_dir, run_id)
-    for i in range(1, args.count + 1):
-        seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
-        print(f"[{i}/{args.count}] {tag} {w}x{h} seed={seed}")
-        r = api(args.url, "/prompt", {"prompt": build_prompt(
-            args.prompt, args.negative, w, h, seed, args.steps, args.cfg, prefix, args.ckpt,
-            upscale_model=args.upscale, up_out=up_out,
-            clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
-            init_image=args.init_image, denoise=args.denoise),
-            "client_id": "lofi-visual"})
-        pid = r["prompt_id"]
-        t0 = time.time()
-        while True:
-            try:
-                hist = api(args.url, f"/history/{pid}", timeout=15)
-            except Exception:
-                hist = {}
-            if hist and pid in hist:
-                break
-            time.sleep(3)
-        res = hist[pid]
-        imgs = res.get("outputs", {}).get("9", {}).get("images", [])
-        for im in imgs:
-            src = COMFY_OUT / im.get("subfolder", "") / im["filename"]
-            if not src.exists():
-                continue
-            # 複製時改成標準檔名：<run-id>_<NN>[_<slug>].<ext>（ComfyUI 的 _00001_ 不帶走）
-            dst_name = output_filename(run_id, seq, args.slug, Path(im["filename"]).suffix)
-            seq += 1
-            shutil.copy2(src, out_dir / dst_name)
-            # 併寫：固定配置存一次，prompt/seed 逐檔對應；重跑同 run 不會蓋掉舊紀錄
-            update_manifest(out_dir, run_id=run_id, tool="lofi.visual",
-                            caller=Path(sys.argv[0]).name, config=config,
-                            images=[{"file": dst_name, "seed": seed, "prompt": args.prompt}])
-            done += 1
-            print(f"    ✅ {time.time()-t0:.0f}s -> {dst_name}")
+    # 互斥鎖：圖片與音樂生成同時跑會爆 16GB RAM（見 AGENTS.md）
+    with gpu_lock("image"):
+        for i in range(1, args.count + 1):
+            seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
+            print(f"[{i}/{args.count}] {tag} {w}x{h} seed={seed}")
+            pid = comfy.submit(args.url, build_prompt(
+                args.prompt, args.negative, w, h, seed, args.steps, args.cfg, prefix, args.ckpt,
+                upscale_model=args.upscale, up_out=up_out,
+                clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
+                init_image=args.init_image, denoise=args.denoise),
+                client_id="lofi-visual")
+            t0 = time.time()
+            res, _ = comfy.wait_done(args.url, pid, poll=3)
+            imgs = res.get("outputs", {}).get("9", {}).get("images", [])
+            for im in imgs:
+                src = COMFY_OUT / im.get("subfolder", "") / im["filename"]
+                if not src.exists():
+                    continue
+                # 複製時改成標準檔名：<run-id>_<NN>[_<slug>].<ext>（ComfyUI 的 _00001_ 不帶走）
+                dst_name = output_filename(run_id, seq, args.slug, Path(im["filename"]).suffix)
+                seq += 1
+                shutil.copy2(src, out_dir / dst_name)
+                # 併寫：固定配置存一次，prompt/seed 逐檔對應；重跑同 run 不會蓋掉舊紀錄
+                update_manifest(out_dir, run_id=run_id, tool="lofi.visual",
+                                caller=Path(sys.argv[0]).name, config=config,
+                                images=[{"file": dst_name, "seed": seed, "prompt": args.prompt}])
+                done += 1
+                print(f"    ✅ {time.time()-t0:.0f}s -> {dst_name}")
     print(f"\n完成：{done} 張 -> {out_dir}（manifest.json 已更新）")
 
 
