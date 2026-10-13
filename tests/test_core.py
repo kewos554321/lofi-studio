@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import library, meta, visual, visual_qc  # noqa: E402
+from lofi import library, meta, qc, visual, visual_qc  # noqa: E402
 
 
 def _png_with_prompt(path, workflow):
@@ -358,6 +358,78 @@ class TestVisualRunDir(unittest.TestCase):
         self.assertEqual(visual.model_tag({"unet": "z-image-turbo-Q5_K_M.gguf"}), "z-image-turbo-Q5_K_M")
         self.assertNotIn("權重起點", dict(visual.format_run_fields({"start": None})))
         self.assertIn("權重起點", dict(visual.format_run_fields({"start": 0.0})))  # 0.0 是有效值
+
+
+class TestAudioQC(unittest.TestCase):
+    """qc.judge 是純函式（量測與判定分開），用合成量測值驗判定（不需 ffmpeg）。"""
+
+    @staticmethod
+    def _m(**over):
+        m = {
+            "duration": 120.0,
+            "loud": {"lufs": -14.0, "lra": 6.0, "true_peak": -1.0},
+            "stats": {"dc_offset": 0.0, "peak_db": -1.5, "rms_db": -18.0,
+                      "flat_factor": 0.0, "zcr": 0.1, "peak_count": 3},
+            "silence": 0.02,
+            "high": {"rms_db": -40.0},
+            "bpm_est": 72.0,
+            "fingerprint": None,
+        }
+        for k, v in over.items():
+            if isinstance(v, dict) and isinstance(m.get(k), dict):
+                m[k] = {**m[k], **v}
+            else:
+                m[k] = v
+        return m
+
+    def test_normal_passes(self):
+        r = qc.judge(self._m())
+        self.assertEqual(r["verdict"], "pass")
+        self.assertEqual(r["flags"], [])
+        self.assertEqual(r["score"], 100)
+
+    def test_clipping_fails(self):
+        r = qc.judge(self._m(loud={"true_peak": 3.0}))
+        self.assertEqual(r["verdict"], "fail")
+        self.assertIn("clipping", r["flags"])
+
+    def test_hot_true_peak_warns(self):
+        r = qc.judge(self._m(loud={"true_peak": 0.5}))
+        self.assertEqual(r["verdict"], "warn")
+        self.assertIn("hot_true_peak", r["flags"])
+
+    def test_loudness_out_of_range_warns(self):
+        self.assertIn("loudness_out_of_range", qc.judge(self._m(loud={"lufs": -25.0}))["flags"])
+
+    def test_truncated_fails(self):
+        r = qc.judge(self._m(duration=100.0), requested_duration=200.0)
+        self.assertEqual(r["verdict"], "fail")
+        self.assertIn("truncated", r["flags"])
+
+    def test_near_silent_fails(self):
+        r = qc.judge(self._m(stats={"rms_db": -60.0}))
+        self.assertIn("near_silent", r["flags"])
+
+    def test_mostly_silent_fails(self):
+        self.assertIn("mostly_silent", qc.judge(self._m(silence=0.6))["flags"])
+
+    def test_trailing_silence_warns(self):
+        self.assertIn("trailing_silence", qc.judge(self._m(silence=0.3))["flags"])
+
+    def test_dc_offset_warns(self):
+        self.assertIn("dc_offset", qc.judge(self._m(stats={"dc_offset": 0.05}))["flags"])
+
+    def test_harsh_highs_warns(self):
+        self.assertIn("harsh_highs", qc.judge(self._m(high={"rms_db": -8.0}))["flags"])
+
+    def test_wide_dynamics_warns(self):
+        self.assertIn("wide_dynamics", qc.judge(self._m(stats={"peak_db": 5.0}))["flags"])
+
+    def test_measure_and_judge_are_separate(self):
+        """judge 只吃量測 dict；analyze 才是 I/O 進入點。"""
+        self.assertTrue(callable(qc.measure))
+        self.assertTrue(callable(qc.judge))
+        self.assertTrue(callable(qc.analyze))
 
 
 if __name__ == "__main__":

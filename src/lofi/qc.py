@@ -193,15 +193,30 @@ def cosine(a, b):
 
 # ----------------------------- 判定 -----------------------------
 
-def analyze(path, requested_duration=None, thresholds=None):
-    th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+def measure(path):
+    """把一首歌所有量測集中成一個 dict（唯一的 I/O；判定交給 judge）。"""
     duration = ffprobe_duration(path)
-    loud = measure_ebur128(path)
-    stats = measure_astats(path)
-    silence = measure_silence_ratio(path, duration)
-    high = measure_astats(path, af="highpass=f=6000")
-    bpm_est = estimate_bpm(path)
-    fp = fingerprint(path)
+    return {
+        "duration": duration,
+        "loud": measure_ebur128(path),
+        "stats": measure_astats(path),
+        "silence": measure_silence_ratio(path, duration),
+        "high": measure_astats(path, af="highpass=f=6000"),
+        "bpm_est": estimate_bpm(path),
+        "fingerprint": fingerprint(path),
+    }
+
+
+def judge(m, requested_duration=None, thresholds=None):
+    """依量測值判定 verdict/score/flags（純函式，不碰檔案，方便測試）。"""
+    th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    duration = m.get("duration")
+    loud = m.get("loud") or {}
+    stats = m.get("stats") or {}
+    silence = m.get("silence")
+    high = m.get("high") or {}
+    bpm_est = m.get("bpm_est")
+    fp = m.get("fingerprint")
 
     hard, warn = [], []
 
@@ -275,6 +290,10 @@ def analyze(path, requested_duration=None, thresholds=None):
         "bpm_est": bpm_est,
         "fingerprint": fp,
     }
+
+
+def analyze(path, requested_duration=None, thresholds=None):
+    return judge(measure(path), requested_duration=requested_duration, thresholds=thresholds)
 
 
 def qc_file(audio, force=False, thresholds=None, write=True):
