@@ -16,6 +16,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   media.py         # ffmpeg/ffprobe 小工具（ffprobe_duration…，純標準庫）
   comfy.py         # ComfyUI API 小客戶端（api/system_stats/submit/wait_done）
   lock.py          # 生成互斥鎖（fcntl，避免音樂/圖片同時跑爆 16GB RAM）
+  io.py            # 原子寫入（atomic_write_text/json）+ JSONL 檔案鎖 + 壞檔隔離（quarantine）
   catalog.py       # 音樂目錄：sidecar assets/tracks/<style>/<run>/*.json + catalog/tracks.jsonl
   qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
   generate.py      # 批次生成（ComfyUI API）
@@ -70,6 +71,8 @@ python3 -m unittest discover -s tests -v
 - **執行資訊要清楚**：任何生成前先用 `visual.print_run_header()` 印出工具、run-id、**哪個模型在跑**、參數與輸出路徑（逐張輸出也帶著模型短標籤），別讓 log 只剩下看不懂的進度行。
 - **生成互斥**：`generate`/`visual`/`cinemagraph` 取同一把鎖（`logs/.gpu.lock`），第二個程序會直接中止並印出持有者（避免 ACE-Step + SDXL 同時跑爆 RAM）。要排隊設 `LOFI_LOCK_WAIT=秒`；硬要同時跑設 `LOFI_NO_LOCK=1`。新模組若也吃 GPU/RAM，請照樣用 `from lofi.lock import gpu_lock`。
 - **設定集中**：模型檔名／ComfyUI 位址不要硬編散落，一律經 `src/lofi/config.py`（可用 `LOFI_*` 環境變數覆寫）。換模型只改一處，也可用 `lofi config` 查目前值。
+- **寫入要原子**：sidecar / manifest / publish / token 等一律用 `lofi.io.atomic_write_*`（同目錄 tmp → `os.replace`），不要直接 `write_text`；append 事件流用 `lofi.io.append_jsonl`（自帶 flock）。讀到壞 JSON 先 `io.quarantine()` 隔離成 `*.corrupt-*`，**不可**當新檔覆蓋。理由：半截檔會被 `load_sidecar→None` 抹掉人工評分/標籤。
+- **生成前查空間**：會寫內接碟的生成流程先 `media.require_free(...)`（門檻 `config.MIN_FREE_GB`／`LOFI_MIN_FREE_GB`）；量測類工具（ffmpeg）先 `media.require("ffmpeg","ffprobe")`，且量測不到時 `qc` 要判 `error`，不可假通過。
 - **唯一命名**：生成檔名／目錄含 run 代號（音樂 `assets/tracks/<style>/<run>/`；圖片 `assets/visuals/<run-id>/`），禁止讓不同批次產生同名檔（會被覆蓋）。
   圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/VISUAL_NAMING.md`。
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。

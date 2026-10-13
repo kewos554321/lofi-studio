@@ -229,6 +229,10 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 - ffmpeg 重流程（`build_long_mix` / `make_long_lofi` / `render_video`）仍以 bash 執行。
 - **模型檔名與 ComfyUI 位址集中在 `src/lofi/config.py`**，可用環境變數覆寫（`LOFI_COMFY_URL`、`LOFI_IMAGE_CKPT`、`LOFI_UPSCALE_MODEL`…），換模型不必改程式。
 - **生成互斥鎖**：`generate` / `visual` / `cinemagraph` 會互斥（鎖檔在內接 `logs/.gpu.lock`）。已有生成在跑時第二個會**直接中止**並印出持有者；要排隊設 `LOFI_LOCK_WAIT=秒`，硬要同時跑設 `LOFI_NO_LOCK=1`。
+- **等待逾時**：`generate` / `visual` 有 `--timeout`（預設 1800 / 900 秒）；ComfyUI 卡死或斷線時會報錯跳過，不會無限等。
+- **磁碟 preflight**：`generate` / `visual` 生成前會檢查內接碟可用空間（`MIN_FREE_GB`，預設 20GB，可 `LOFI_MIN_FREE_GB` 覆寫 / `lofi config` 查看），不足即中止。
+- **資料安全**：sidecar / manifest / publish / token 一律**原子寫入**，JSONL 有檔案鎖；若 sidecar JSON 壞損會**隔離成 `*.corrupt-<時間>`** 再重建，不會把半壞檔當新檔覆蓋。
+- **品檢判定**：量測不到（ffmpeg 壞、檔案壞）時 `qc` 判 `error`（不會假通過）。
 - 提交前自檢：`./scripts/check.sh`（編譯 + 單元測試，+ 有裝 shellcheck 就跑）。CI（`.github/workflows/ci.yml`）跑同一套。
 
 ## 示範管線（不需 ComfyUI，先測流程）

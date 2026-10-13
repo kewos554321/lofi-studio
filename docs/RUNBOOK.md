@@ -440,6 +440,9 @@ python3 scripts/upload_status.py --mark-uploaded xxx --url https://youtu.be/...
 | 影片接點有跳動 | 視覺非無縫 | 用 `make_visual_loop.sh`（sin 週期保證頭尾相接） |
 | 第二個生成一啟動就中止 | 生成互斥鎖（正常保護） | 等前一個跑完；要排隊 `LOFI_LOCK_WAIT=300 ./scripts/lofi ...`；確認沒在跑卻被檔可 `LOFI_NO_LOCK=1` |
 | 換了 checkpoint 但行為沒變 | 仍在用集中設定裡的預設 | `./scripts/lofi config` 看目前值；改 `src/lofi/config.py` 或設 `LOFI_IMAGE_CKPT` |
+| 生成前就中止「磁碟空間不足」 | Python 端 preflight（正常保護） | 清理 `./scripts/cleanup_outputs.sh --apply`；或調低門檻 `LOFI_MIN_FREE_GB=10` |
+| 品檢出現 `❓ error` | ffmpeg/ffprobe 缺失或檔案壞 | 確認 `ffmpeg -version`；該曲重測或刪除 |
+| 目錄旁多了 `*.json.corrupt-*` | sidecar JSON 壞損被隔離（正常保護） | 檢查該檔；原檔已保留，必要時手動救回後刪除 |
 
 ---
 
