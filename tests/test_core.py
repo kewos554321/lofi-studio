@@ -2,6 +2,7 @@
 import json
 import struct
 import sys
+import tempfile
 import unittest
 import zlib
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import library, meta, qc, visual, visual_qc  # noqa: E402
+from lofi import catalog, io, library, meta, qc, visual, visual_qc  # noqa: E402
 
 
 def _png_with_prompt(path, workflow):
@@ -470,6 +471,44 @@ class TestComfyWait(unittest.TestCase):
         finally:
             comfy.api = orig
 
+
+
+class TestIO(unittest.TestCase):
+    """原子寫入 / append_jsonl / 壞檔隔離。"""
+
+    def test_atomic_write_json_no_tmp_left(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "sub" / "a.json"
+            io.atomic_write_json(p, {"k": "值"})
+            self.assertTrue(p.exists())
+            self.assertFalse((p.with_name(p.name + ".tmp")).exists())
+            self.assertEqual(json.loads(p.read_text(encoding="utf-8"))["k"], "值")
+
+    def test_append_jsonl_multiple_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "e.jsonl"
+            io.append_jsonl(p, {"a": 1})
+            io.append_jsonl(p, {"a": 2})
+            lines = p.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual([json.loads(x)["a"] for x in lines], [1, 2])
+
+    def test_quarantine_keeps_bad_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "t.mp3.json"
+            p.write_text("{ not json", encoding="utf-8")
+            dest = io.quarantine(p, why="test", log=False)
+            self.assertFalse(p.exists())
+            self.assertTrue(dest.exists())
+            self.assertIn(".corrupt-", dest.name)
+
+    def test_load_sidecar_quarantines_corrupt(self):
+        """壞掉的 sidecar 不可被當成新檔覆蓋——要留下 .corrupt-。"""
+        with tempfile.TemporaryDirectory() as d:
+            audio = Path(d) / "a.mp3"
+            audio.write_bytes(b"")
+            catalog.sidecar_path(audio).write_text("{ bad", encoding="utf-8")
+            self.assertIsNone(catalog.load_sidecar(audio))
+            self.assertEqual(len(list(Path(d).glob("*.corrupt-*"))), 1)
 
 
 if __name__ == "__main__":

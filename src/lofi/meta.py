@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import io
 from lofi.media import ffprobe_duration
 from lofi.paths import PUBLISH_DIR, STYLE_DIR, YT_DIR
 
@@ -320,8 +321,7 @@ def main():
         return
 
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-    (PUBLISH_DIR / f"{stem}.json").write_text(
-        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(PUBLISH_DIR / f"{stem}.json", record)
 
     md = [f"# {title}", "", f"- 影片: `{record['video']}`",
           f"- 長度: {record['duration']}s | 風格: {record['style']} | 章節: {len(chapters)}",
@@ -331,7 +331,7 @@ def main():
     md += ["## Title", "", "```", title, "```", "", "## Description", "", "```text",
            description.rstrip(), "```", "", "## Tags", "", "```",
            ", ".join(record["tags"]), "```", ""]
-    (PUBLISH_DIR / f"{stem}.md").write_text("\n".join(md), encoding="utf-8")
+    io.atomic_write_text(PUBLISH_DIR / f"{stem}.md", "\n".join(md))
 
     print(f"✅ {stem}")
     print(f"   標題: {title}")

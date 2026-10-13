@@ -17,7 +17,8 @@ expand_style.py — 把「一個風格骨架」展開成多首同風格、變化
 import argparse, csv, itertools, json, random, sys
 from pathlib import Path
 
-from lofi.paths import GEN_DIR, STYLE_DIR
+from lofi import io
+from lofi.paths import GEN_DIR, ROOT, STYLE_DIR
 
 FIELDS = ["id", "style", "mood", "instruments", "key", "bpm", "prompt", "negative"]
 
@@ -95,11 +96,12 @@ def main():
         return
 
     out = Path(args.out) if args.out else GEN_DIR / f"{st['name']}.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        w.writeheader()
-        w.writerows(rows)
+    import io as _io
+    buf = _io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=FIELDS)
+    w.writeheader()
+    w.writerows(rows)
+    io.atomic_write_text(out, buf.getvalue())
 
     keys_used = sorted({r["key"] for r in rows})
     try:

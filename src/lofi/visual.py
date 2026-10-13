@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 from lofi import comfy
+from lofi import io
 from lofi.config import COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT
 from lofi.lock import gpu_lock
 from lofi.paths import VISUALS_DIR
@@ -131,8 +132,7 @@ def _now_iso():
 
 def write_manifest(out_dir, meta):
     """原樣寫入 manifest.json（底層介面；併寫請用 update_manifest）。"""
-    (out_dir / MANIFEST_NAME).write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(Path(out_dir) / MANIFEST_NAME, meta)
 
 
 def upgrade_manifest(raw):

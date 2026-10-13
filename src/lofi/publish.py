@@ -18,6 +18,7 @@ import json
 import sys
 
 from lofi import catalog as cat
+from lofi import io
 from lofi import meta as mm
 from lofi.paths import EPISODES_DIR, PUBLISH_DIR, VIDEOS_DIR
 
@@ -67,13 +68,15 @@ def duration_of(stem, rec, path):
 
 def refresh_index(rows):
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-    with (PUBLISH_DIR / "index.csv").open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=[
-            "stem", "duration", "style", "status", "title", "chapters",
-            "warning", "uploaded_at", "youtube_url"])
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
+    import io as _io
+    buf = _io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=[
+        "stem", "duration", "style", "status", "title", "chapters",
+        "warning", "uploaded_at", "youtube_url"])
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    io.atomic_write_text(PUBLISH_DIR / "index.csv", buf.getvalue())
 
 
 def main():
@@ -99,7 +102,7 @@ def main():
                 rec["youtube_url"] = args.url
         else:
             rec["status"] = "scheduled"
-        p.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        io.atomic_write_json(p, rec)
         print(f"✅ {stem} → {rec['status']}" + (f" ({rec.get('youtube_url')})" if rec.get("youtube_url") else ""))
         return
 

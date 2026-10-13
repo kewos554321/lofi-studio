@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import io
 
 
 def plan_moves():
@@ -31,7 +32,7 @@ def _move_sidecar(src, dest):
         return
     data = json.loads(sj.read_text(encoding="utf-8"))
     data["file"] = cat.relpath(dest)
-    dj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(dj, data)
     sj.unlink()
 
 
@@ -43,7 +44,7 @@ def cmd_apply(moves):
         _move_sidecar(src, dest)
         manifest["moves"].append([cat.relpath(src), cat.relpath(dest)])
     mpath = cat.CATALOG_DIR / f"migrate_layout_{cat.now_iso().replace(':', '').replace('+', '_')}.json"
-    mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(mpath, manifest)
     return mpath, len(moves)
 
 

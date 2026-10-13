@@ -14,6 +14,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from lofi import io
 from lofi.paths import ROOT, TRACKS_DIR, CATALOG_DIR
 
 JSONL_PATH = CATALOG_DIR / "tracks.jsonl"
@@ -85,15 +86,13 @@ def read_jsonl():
 
 
 def append_event(event, record):
-    """把一筆事件 append 到 catalog/tracks.jsonl。"""
-    CATALOG_DIR.mkdir(parents=True, exist_ok=True)
+    """把一筆事件 append 到 catalog/tracks.jsonl（含檔案鎖，append-only）。"""
     ev = {"ts": now_iso(), "event": event}
     if isinstance(record, dict):
         ev.update(record)
     else:
         ev["track_id"] = record
-    with JSONL_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    io.append_jsonl(JSONL_PATH, ev)
     return ev
 
 
@@ -104,13 +103,15 @@ def load_sidecar(audio):
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
+        # 壞檔先隔離保留，避免被當新檔覆蓋掉半壞的內容
+        io.quarantine(p, why="sidecar JSON 壞損")
         return None
 
 
 def save_sidecar(audio, data):
     p = sidecar_path(audio)
     data["updated_at"] = now_iso()
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(p, data)
     return p
 
 
@@ -151,6 +152,7 @@ def style_version(name):
 def reconstruct_index():
     """由 sidecar 重建 catalog/index.csv，回傳 (路徑, 曲數)。"""
     import csv
+    import io as _io
 
     catalog = load_catalog()
     CATALOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -159,30 +161,31 @@ def reconstruct_index():
         "key", "bpm", "rating", "status", "auto_verdict", "auto_score",
         "tags", "seed", "duration", "sha1", "used_count",
     ]
-    with INDEX_CSV.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        for tid, r in sorted(catalog.items()):
-            aq = r.get("auto_qc") or {}
-            rv = r.get("review") or {}
-            gen = r.get("gen") or {}
-            w.writerow({
-                "track_id": tid,
-                "file": r.get("file", ""),
-                "style": r.get("style", ""),
-                "style_version": r.get("style_version", ""),
-                "mood": r.get("mood", ""),
-                "instruments": r.get("instruments", ""),
-                "key": r.get("key", ""),
-                "bpm": r.get("bpm", ""),
-                "rating": rv.get("rating", ""),
-                "status": r.get("status", ""),
-                "auto_verdict": aq.get("verdict", ""),
-                "auto_score": aq.get("score", ""),
-                "tags": "|".join(r.get("tags", [])),
-                "seed": gen.get("seed", ""),
-                "duration": gen.get("duration", ""),
-                "sha1": r.get("sha1", ""),
-                "used_count": len(r.get("usage") or []),
-            })
+    buf = _io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fields)
+    w.writeheader()
+    for tid, r in sorted(catalog.items()):
+        aq = r.get("auto_qc") or {}
+        rv = r.get("review") or {}
+        gen = r.get("gen") or {}
+        w.writerow({
+            "track_id": tid,
+            "file": r.get("file", ""),
+            "style": r.get("style", ""),
+            "style_version": r.get("style_version", ""),
+            "mood": r.get("mood", ""),
+            "instruments": r.get("instruments", ""),
+            "key": r.get("key", ""),
+            "bpm": r.get("bpm", ""),
+            "rating": rv.get("rating", ""),
+            "status": r.get("status", ""),
+            "auto_verdict": aq.get("verdict", ""),
+            "auto_score": aq.get("score", ""),
+            "tags": "|".join(r.get("tags", [])),
+            "seed": gen.get("seed", ""),
+            "duration": gen.get("duration", ""),
+            "sha1": r.get("sha1", ""),
+            "used_count": len(r.get("usage") or []),
+        })
+    io.atomic_write_text(INDEX_CSV, buf.getvalue())
     return INDEX_CSV, len(catalog)

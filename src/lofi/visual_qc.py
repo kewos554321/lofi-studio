@@ -39,6 +39,8 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import io
+from lofi import media
 from lofi.paths import CATALOG_DIR, VISUALS_DIR
 
 VISUAL_EXTS = (".png", ".jpg", ".jpeg", ".webp")
@@ -224,14 +226,12 @@ def qc_file(image, force=False, thresholds=None, expect_size=None, write=True):
 
 
 def append_event(image, record):
-    """把一筆視覺品檢事件 append 到 catalog/visuals.jsonl。"""
-    CATALOG_DIR.mkdir(parents=True, exist_ok=True)
+    """把一筆視覺品檢事件 append 到 catalog/visuals.jsonl（含檔案鎖）。"""
     ev = {"ts": cat.now_iso(), "event": "visual_qc",
           "visual_id": record.get("visual_id", Path(image).stem),
           "file": record.get("file", cat.relpath(image)),
           "visual_qc": record.get("visual_qc")}
-    with VISUALS_JSONL.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    io.append_jsonl(VISUALS_JSONL, ev)
     return ev
 
 
@@ -265,6 +265,8 @@ def main():
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VAL",
                     help="覆寫閾值，可重複，例如 --set black_ymax=25")
     args = ap.parse_args()
+
+    media.require("ffmpeg", "ffprobe")
 
     thresholds = {}
     for kv in args.set:

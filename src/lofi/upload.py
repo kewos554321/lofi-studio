@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 from lofi import catalog as cat
+from lofi import io
 from lofi.paths import PUBLISH_DIR, ROOT, SECRETS_DIR
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -117,7 +118,7 @@ def get_credentials(client_secret, token_path):
             flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), SCOPES)
             creds = flow.run_local_server(port=0)
         Path(token_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(token_path).write_text(creds.to_json(), encoding="utf-8")
+        io.atomic_write_text(Path(token_path), creds.to_json())
         print(f"已快取授權 token：{token_path}（不進版控）")
     return creds
 
@@ -214,7 +215,7 @@ def main():
     rec["privacy"] = args.privacy
     rec["uploaded_at"] = cat.now_iso()
     rec["status"] = "uploaded"
-    rec_path.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    io.atomic_write_json(rec_path, rec)
 
     print()
     print("接下來請手動完成（上線）：")
