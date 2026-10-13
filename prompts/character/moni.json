@@ -24,7 +24,7 @@
     "features": ["white paw", "white sock", "amber eye"]
   },
   "caption_check": {
-    "require_tags": ["black cat", "white paws", "white socks", "amber eye"],
+    "require_tags": ["moni", "black cat", "white paws", "white socks", "amber eye"],
     "forbid_tags": ["black paws", "black feet", "orange", "tabby"],
     "negative_should_contain": ["black paws", "black feet"]
   },
@@ -34,7 +34,8 @@
     "status": "訓練中",
     "dataset_runs": ["ds03", "ds04", "ds05"],
     "min_images": 20,
-    "note": "白襪是小面積特徵，IPAdapter 鎖不牢（見 docs/RUNBOOK.md §6.1），必須靠 LoRA。下限 20 張是經驗值，低於就不要開訓。"
+    "trigger": "moni",
+    "note": "白襪是小面積特徵，IPAdapter 鎖不牢（見 docs/RUNBOOK.md §6.1），必須靠 LoRA。下限 20 張是經驗值，低於就不要開訓。字幕一律前置 trigger token，否則會把『黑貓』這個通用概念學進去。"
   },
   "journey": {
     "concept": "每張專輯＝牠旅程的一站；封面一律是牠。",
