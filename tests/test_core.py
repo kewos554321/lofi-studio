@@ -1,4 +1,5 @@
 """核心純函式測試。執行： python3 -m unittest discover -s tests -v"""
+import argparse
 import json
 import struct
 import sys
@@ -10,7 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import catalog, io, library, media, meta, qc, visual, visual_qc  # noqa: E402
+from lofi import (backfill, catalog, expand, generate, io, library, media,  # noqa: E402
+                  meta, qc, upload, visual, visual_qc)
 
 
 def _png_with_prompt(path, workflow):
@@ -526,6 +528,205 @@ class TestDiskFree(unittest.TestCase):
     def test_require_free_exits_when_full(self):
         with self.assertRaises(SystemExit):
             media.require_free(".", 10 ** 9, "test")   # 要求 10 億 GB
+
+
+class TestCatalogLayer(unittest.TestCase):
+    """catalog 資料層：sidecar 生命週期 / 事件流 / 路徑。
+
+    P2-11 改過寫入路徑（原子寫 + 隔離 + 鎖），這層需要回歸測試。
+    以 temp 目錄取代 ROOT，不碰真實 assets/。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / "assets" / "tracks").mkdir(parents=True)
+        (self.root / "catalog").mkdir()
+        self._saved = {k: getattr(catalog, k) for k in
+                       ("ROOT", "TRACKS_DIR", "CATALOG_DIR", "JSONL_PATH", "INDEX_CSV")}
+        catalog.ROOT = self.root
+        catalog.TRACKS_DIR = self.root / "assets" / "tracks"
+        catalog.CATALOG_DIR = self.root / "catalog"
+        catalog.JSONL_PATH = catalog.CATALOG_DIR / "tracks.jsonl"
+        catalog.INDEX_CSV = catalog.CATALOG_DIR / "index.csv"
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(catalog, k, v)
+        self.tmp.cleanup()
+
+    def _audio(self, rel="rainy_lofi/run01/song_01.mp3"):
+        p = catalog.TRACKS_DIR / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"ID3")
+        return p
+
+    def test_upsert_load_roundtrip(self):
+        audio = self._audio()
+        catalog.upsert_track(audio, {"style": "rainy_lofi", "track_id": "t-1", "tags": ["a"]})
+        sc = catalog.load_sidecar(audio)
+        self.assertEqual(sc["track_id"], "t-1")
+        self.assertEqual(sc["style"], "rainy_lofi")
+        self.assertEqual(sc["file"], "assets/tracks/rainy_lofi/run01/song_01.mp3")
+        self.assertIn("updated_at", sc)
+        self.assertEqual(sc["schema_version"], catalog.SCHEMA_VERSION)
+
+    def test_upsert_defaults_track_id_and_file(self):
+        audio = self._audio("misc/run/song.mp3")
+        catalog.upsert_track(audio, {})
+        sc = catalog.load_sidecar(audio)
+        self.assertEqual(sc["track_id"], "song")
+        self.assertEqual(sc["file"], "assets/tracks/misc/run/song.mp3")
+
+    def test_sidecar_written_atomically(self):
+        audio = self._audio()
+        catalog.upsert_track(audio, {"style": "x"})
+        p = catalog.sidecar_path(audio)
+        self.assertTrue(p.exists())
+        json.loads(p.read_text(encoding="utf-8"))                      # 合法 JSON
+        self.assertFalse(p.with_name(p.name + ".tmp").exists())        # 無 tmp 殘留
+
+    def test_append_event_fields(self):
+        ev = catalog.append_event("generated", {"track_id": "t1", "seed": 7})
+        self.assertEqual((ev["event"], ev["track_id"], ev["seed"]), ("generated", "t1", 7))
+        self.assertIn("ts", ev)
+        ev2 = catalog.append_event("tag", "t2")      # 非 dict → 當 track_id
+        self.assertEqual(ev2["track_id"], "t2")
+
+    def test_event_stream_lines_parse(self):
+        catalog.append_event("generated", {"track_id": "t1"})
+        catalog.append_event("auto_qc", {"track_id": "t1", "verdict": "pass"})
+        lines = catalog.JSONL_PATH.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual([json.loads(x)["event"] for x in lines], ["generated", "auto_qc"])
+
+    def test_track_subdir_cleans_names(self):
+        self.assertEqual(catalog.track_subdir("rainy lofi", "run/1"),
+                         catalog.TRACKS_DIR / "rainy_lofi" / "run_1")
+        self.assertEqual(catalog.track_subdir("", ""), catalog.TRACKS_DIR / "misc" / "legacy")
+
+    def test_iter_audio_files_recursive_sorted(self):
+        self._audio("b/x.wav")
+        self._audio("a/y.mp3")
+        (catalog.TRACKS_DIR / "a" / "note.txt").write_text("x", encoding="utf-8")
+        self.assertEqual([p.name for p in catalog.iter_audio_files()], ["y.mp3", "x.wav"])
+
+    def test_is_audio(self):
+        self.assertTrue(catalog.is_audio("a.MP3"))
+        self.assertFalse(catalog.is_audio("a.txt"))
+
+    def test_relpath_inside_and_outside(self):
+        self.assertEqual(catalog.relpath(self.root / "catalog" / "x.json"), "catalog/x.json")
+        outside = self.root.parent / "nope.mp3"
+        self.assertEqual(catalog.relpath(outside), str(outside))
+
+    def test_sha1_stable(self):
+        p = self.root / "f.bin"
+        p.write_bytes(b"hello")
+        self.assertEqual(catalog.sha1_file(p), catalog.sha1_file(p))
+
+    def test_style_version_reads_json(self):
+        (self.root / "prompts" / "styles").mkdir(parents=True)
+        (self.root / "prompts" / "styles" / "rainy.json").write_text('{"version": 7}', encoding="utf-8")
+        self.assertEqual(catalog.style_version("rainy"), 7)
+        self.assertIsNone(catalog.style_version("nope"))
+        self.assertIsNone(catalog.style_version(""))
+
+    def test_load_catalog_keyed_by_track_id(self):
+        catalog.upsert_track(self._audio("a/one.mp3"), {"track_id": "keep-me"})
+        self.assertIn("keep-me", catalog.load_catalog())
+
+    def test_reconstruct_index_writes_rows(self):
+        for i in range(3):
+            catalog.upsert_track(self._audio(f"a/s{i}.mp3"),
+                                 {"track_id": f"t{i}", "auto_qc": {"verdict": "pass", "score": 90}})
+        idx, n = catalog.reconstruct_index()
+        self.assertEqual(n, 3)
+        lines = idx.read_text(encoding="utf-8").strip().splitlines()
+        self.assertIn("track_id", lines[0])
+        self.assertEqual(len(lines), 4)          # 表頭 + 3 列
+
+
+class TestWorkflowAssembly(unittest.TestCase):
+    """ComfyUI workflow 與上片內容組裝（純函式回傳 dict/字串，最容易被改壞）。"""
+
+    def test_visual_prompt_default_graph(self):
+        g = visual.build_prompt("a cat", "blurry", 768, 512, 42, 25, 6.5, "p1", ckpt="M.safetensors")
+        self.assertEqual(g["4"]["inputs"]["ckpt_name"], "M.safetensors")
+        ks = g["3"]["inputs"]
+        self.assertEqual(ks["seed"], 42)
+        self.assertEqual(ks["steps"], 25)
+        self.assertEqual(ks["positive"], ["6", 0])
+        self.assertEqual(ks["negative"], ["7", 0])
+        self.assertEqual(ks["latent_image"], ["5", 0])       # 無 init → 空 latent
+        self.assertEqual(g["9"]["inputs"]["images"], ["8", 0])
+        self.assertEqual(g["9"]["inputs"]["filename_prefix"], "p1")
+
+    def test_visual_prompt_img2img_uses_encode(self):
+        g = visual.build_prompt("a", "b", 768, 512, 1, 25, 6.5, "p", init_image="ref.png", denoise=0.5)
+        self.assertIn("15", g)                                # VAEEncode
+        self.assertEqual(g["3"]["inputs"]["latent_image"], ["15", 0])
+        self.assertEqual(g["3"]["inputs"]["denoise"], 0.5)
+
+    def test_visual_prompt_clip_skip_inserts_layer(self):
+        g = visual.build_prompt("a", "b", 768, 512, 1, 25, 6.5, "p", clip_skip=2)
+        self.assertEqual(g["13"]["inputs"]["stop_at_clip_layer"], -2)
+        self.assertEqual(g["6"]["inputs"]["clip"], ["13", 0])
+
+    def test_visual_prompt_upscale_branch(self):
+        g = visual.build_prompt("a", "b", 768, 512, 1, 25, 6.5, "p", upscale_model="up.pth")
+        self.assertEqual(g["10"]["inputs"]["model_name"], "up.pth")
+        self.assertEqual(g["12"]["inputs"]["width"], 1536)    # 預設 2x
+        self.assertEqual(g["9"]["inputs"]["images"], ["12", 0])
+
+    def test_generate_prompt_nodes_and_params(self):
+        wf = generate.build_prompt("lofi, rain", 70, "A minor", 120, 123, "audio/x", steps=8)
+        self.assertEqual(wf["94"]["inputs"]["tags"], "lofi, rain")
+        self.assertEqual(wf["94"]["inputs"]["bpm"], 70)
+        self.assertEqual(wf["94"]["inputs"]["duration"], 120.0)
+        self.assertEqual(wf["94"]["inputs"]["keyscale"], "A minor")
+        self.assertEqual(wf["3"]["inputs"]["seed"], 123)
+        self.assertEqual(wf["3"]["inputs"]["positive"], ["94", 0])
+        self.assertEqual(wf["107"]["inputs"]["filename_prefix"], "audio/x")
+
+    def test_upload_clamp_tags_500_limit(self):
+        long = "x" * 400
+        tags = upload.clamp_tags([long, long, "small"])       # 兩個 400 字元裝不下
+        self.assertEqual(tags, [long])
+
+    def test_upload_build_body_truncates(self):
+        body = upload.build_body({"title": "T" * 200, "description": "D" * 6000, "tags": ["a"]}, "private")
+        self.assertEqual(len(body["snippet"]["title"]), 100)
+        self.assertEqual(len(body["snippet"]["description"]), 5000)
+        self.assertEqual(body["status"]["privacyStatus"], "private")
+        self.assertEqual(body["snippet"]["categoryId"], "10")
+
+    def test_library_build_where(self):
+        ns = argparse.Namespace(tag=["style:rainy_lofi"], style="rainy_lofi", status="keep",
+                                verdict=None, min_score=90, min_rating=None,
+                                bpm_min=None, bpm_max=None)
+        where, params = library.build_where(ns)
+        self.assertIn("EXISTS", where)
+        self.assertEqual(params, ["style:rainy_lofi", "rainy_lofi", "keep", 90])
+
+    def test_backfill_parse_name(self):
+        self.assertEqual(backfill.parse_name("cozy_morning_16_00001"), ("cozy_morning", "16"))
+        self.assertEqual(backfill.parse_name("lofi_rainy_night_00001"), ("lofi_rainy_night", None))
+        self.assertEqual(backfill.parse_name("garbage"), (None, None))
+
+    def test_meta_stable_index_and_dominant(self):
+        self.assertEqual(meta.stable_index("x", 0), 0)
+        self.assertIn(meta.stable_index("abc", 5), range(5))
+        self.assertEqual(meta.stable_index("abc", 5), meta.stable_index("abc", 5))
+        self.assertEqual(meta.dominant([None, "a", "a", "b"]), "a")
+        self.assertIsNone(meta.dominant([None, ""]))
+
+    def test_expand_build_prompt_joins_and_skips_empty(self):
+        self.assertEqual(
+            expand.build_prompt({"backbone": "lofi hip hop", "closing": ""}, "cozy", "warm keys", 70, "A minor"),
+            "lofi hip hop, cozy, warm keys, 70 BPM, A minor")
+        self.assertEqual(
+            expand.build_prompt({"backbone": "x", "closing": "instrumental"}, "", "", 80, "C major"),
+            "x, 80 BPM, C major, instrumental")
 
 
 if __name__ == "__main__":
