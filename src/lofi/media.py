@@ -43,6 +43,20 @@ def ffprobe_duration(path):
     return parse_duration(out)
 
 
+def ffprobe_size(path):
+    """回傳 (寬, 高)；解不開或不是圖／影片回 None（純工具，不做判定）。"""
+    p = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
+        capture_output=True, text=True,
+    )
+    try:
+        w, h = (int(x) for x in p.stdout.strip().split("x"))
+    except (ValueError, AttributeError):
+        return None
+    return (w, h) if w > 0 and h > 0 else None    # 壞檔 ffprobe 可能回 0x0，視為解不開
+
+
 # ----------------------------- 磁碟空間 -----------------------------
 
 def free_gb(path):

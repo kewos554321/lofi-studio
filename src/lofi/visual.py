@@ -41,7 +41,7 @@ from pathlib import Path
 from lofi import comfy
 from lofi import io
 from lofi import media
-from lofi.config import (COMFY_OUTPUT, COMFY_URL, IMAGE_CKPT, IPADAPTER_MODELS,
+from lofi.config import (COMFY_OUTPUT, COMFY_ROOT, COMFY_URL, IMAGE_CKPT, IPADAPTER_MODELS,
                          MIN_FREE_GB, check_commercial, model_license)
 from lofi.lock import gpu_lock
 from lofi.paths import VISUALS_DIR
@@ -391,7 +391,7 @@ def backfill_manifest(out_dir, tool=""):
 _FIELD_LABELS = {
     "ckpt": "checkpoint", "unet": "UNet", "clip": "CLIP", "clip_type": "CLIP 型別",
     "vae": "VAE", "lora": "LoRA", "lora_weight": "LoRA 權重",
-    "size": "尺寸", "steps": "步數", "cfg": "CFG", "shift": "shift",
+    "size": "尺寸", "size_source": "尺寸來源", "steps": "步數", "cfg": "CFG", "shift": "shift",
     "sampler": "取樣器", "scheduler": "排程", "clip_skip": "clip skip",
     "denoise": "重繪強度", "upscale": "放大模型", "upscale_out": "放大後尺寸",
     "init_image": "起點圖", "mask": "遮罩", "grow": "遮罩擴張",
@@ -402,7 +402,7 @@ _FIELD_LABELS = {
     "license": "模型授權", "source": "模型來源",
 }
 _FIELD_ORDER = ("ckpt", "unet", "clip", "clip_type", "vae", "lora", "lora_weight",
-                "size", "steps", "cfg", "shift", "sampler", "scheduler", "clip_skip",
+                "size", "size_source", "steps", "cfg", "shift", "sampler", "scheduler", "clip_skip",
                 "denoise", "upscale", "upscale_out", "init_image", "mask", "grow",
                 "grow_mask", "grow_mask_by", "mask_channel",
                 "ref", "ref_image", "weight", "weight_type", "preset",
@@ -722,6 +722,16 @@ def main():
     if args.mask and not args.init_image:
         sys.exit("--mask 要搭配 --init-image（遮罩是「這張圖的哪一塊要重畫」）")
 
+    # img2img／inpaint 的尺寸由起點圖決定，--size 只是沒被用到的預設值。
+    # 這裡量真實尺寸寫進紀錄，免得 manifest 記著假的 768x512（紀錄要說真話）。
+    size_label = f"{w}x{h}"
+    size_source = ""
+    if args.init_image:
+        real = media.ffprobe_size(COMFY_ROOT / "input" / args.init_image)
+        if real:
+            size_label = f"{real[0]}x{real[1]}"
+            size_source = "init_image"
+
     if not args.dry_run:
         comfy.require_online(args.url)
         media.require_free(VIS_DIR, MIN_FREE_GB, "內接碟 assets/visuals")
@@ -733,7 +743,8 @@ def main():
     # config＝該批固定、所有圖共用的設定（manifest 只寫一次）；逐檔會變的只有 file/seed/prompt
     config = {
         "ckpt": args.ckpt,
-        "size": f"{w}x{h}",
+        "size": size_label,
+        "size_source": size_source,
         "steps": args.steps,
         "cfg": args.cfg,
         "sampler": args.sampler,
@@ -759,9 +770,14 @@ def main():
             "grow_mask_by": args.grow_mask_by, "mask_channel": args.mask_channel,
         })
     tool = "sdxl-ipadapter" if args.ref else "lofi.visual"   # 與 guess_tool() 反推的一致
-    mode = (" + IPAdapter 鎖角色" if args.ref else
-            " + 局部重繪" if args.mask else
-            " + img2img" if args.init_image else "")
+    modes = []
+    if args.ref:
+        modes.append("IPAdapter 鎖角色")
+    if args.mask:
+        modes.append("局部重繪")
+    elif args.init_image:
+        modes.append("img2img")
+    mode = f" + {' + '.join(modes)}" if modes else ""
     print_run_header(f"lofi.visual（ComfyUI + SDXL{mode}）", run_id, out_dir, config, count=args.count)
     if args.dry_run:
         print(f"（dry-run，未實際生成）prompt：{args.prompt[:80]}…")

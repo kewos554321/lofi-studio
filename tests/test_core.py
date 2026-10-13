@@ -620,6 +620,24 @@ class TestDiskFree(unittest.TestCase):
             media.require_free(".", 10 ** 9, "test")   # 要求 10 億 GB
 
 
+class TestMediaProbe(unittest.TestCase):
+    """ffprobe 尺寸：img2img/inpaint 的 manifest 要記真實尺寸，不能記沒用到的 --size。"""
+
+    def test_ffprobe_size_reads_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = _png_with_prompt(Path(d) / "one.png", {})     # 1x1 的最小 PNG
+            self.assertEqual(media.ffprobe_size(p), (1, 1))
+
+    def test_ffprobe_size_on_garbage_is_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "not.png"
+            bad.write_bytes(b"not an image")
+            self.assertIsNone(media.ffprobe_size(bad))
+
+    def test_ffprobe_size_missing_file_is_none(self):
+        self.assertIsNone(media.ffprobe_size("/no/such/image.png"))
+
+
 class TestCatalogLayer(unittest.TestCase):
     """catalog 資料層：sidecar 生命週期 / 事件流 / 路徑。
 
@@ -1103,12 +1121,37 @@ class TestRelease(unittest.TestCase):
         self.assertEqual(character.negative_problems("all black paws, black feet, blurry", spec), [])
         self.assertEqual(len(character.negative_problems("blurry only", spec)), 2)
 
+    def test_has_trigger_is_token_not_substring(self):
+        self.assertTrue(character.has_trigger("moni, a black cat", "moni"))
+        self.assertTrue(character.has_trigger("a black cat, moni", "moni"))
+        self.assertFalse(character.has_trigger("monitor, a black cat", "moni"))  # 不能誤中
+        self.assertTrue(character.has_trigger("anything", ""))                   # 沒設觸發詞 → 算過
+
+    def test_caption_plan(self):
+        # 沒字幕 → 從 prompt 重建並補觸發詞
+        self.assertEqual(character.caption_plan("", "a black cat", "moni"),
+                         ("moni, a black cat", "reconstruct+trigger"))
+        # 有字幕、缺觸發詞 → 補
+        self.assertEqual(character.caption_plan("a black cat", "", "moni"),
+                         ("moni, a black cat", "add-trigger"))
+        # 已正確 → 不動
+        self.assertEqual(character.caption_plan("moni, a black cat", "", "moni"),
+                         ("moni, a black cat", "ok"))
+        # 沒有來源 → None
+        self.assertEqual(character.caption_plan("", "", "moni"), (None, None))
+        # 沒設定觸發詞 → 不亂加
+        self.assertEqual(character.caption_plan("a black cat", "", ""), ("a black cat", "ok"))
+
     def test_moni_caption_check_matches_ds03_style(self):
         """定裝的 caption_check 要能認過 ds03 那種字幕（避免規則訂得太嚴炸全部）。"""
         ch = character.load_character("moni")
-        cap = ("a sleek black cat with (large round golden amber eyes:1.2), (clearly white paws:1.3), "
+        cap = ("moni, a sleek black cat with (large round golden amber eyes:1.2), (clearly white paws:1.3), "
                "(white socks on all four feet:1.2), pure black fur on the rest of the body")
         self.assertEqual(character.caption_problems(cap, ch["caption_check"]), [])
+        # 沒有觸發詞就該被擋（否則模型會把「黑貓」這個通用概念學進去）
+        no_trigger = cap.replace("moni, ", "")
+        self.assertTrue(any("moni" in p
+                            for p in character.caption_problems(no_trigger, ch["caption_check"])))
 
 
 if __name__ == "__main__":
