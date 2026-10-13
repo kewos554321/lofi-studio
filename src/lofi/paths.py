@@ -43,4 +43,5 @@ VIDEOS_DIR = OUTPUT_DIR / "videos"
 EPISODES_DIR = OUTPUT_DIR / "episodes"
 RELEASES_DIR = OUTPUT_DIR / "releases"
 MASTERS_DIR = OUTPUT_DIR / "masters"      # 無損母帶倉庫（外接；見 docs/DISTRIBUTION.md §6-3）
+LORA_DIR = OUTPUT_DIR / "lora"            # LoRA 訓練包（kohya_ss／RunPod 用；外接）
 SECRETS_DIR = ROOT / ".secrets"
