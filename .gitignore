@@ -9,6 +9,10 @@ __pycache__/
 
 # 衍生資料庫（由 sidecar 重建）
 catalog/*.db
+# 衍生索引／一次性遷移產物（可由 sidecar 重建，不必進版控）
+/catalog/index.csv
+/publish/index.csv
+/catalog/migrate_layout_*.json
 
 # 素材（AI 生成的大檔）：整個 assets/ 不進版控
 # 可追溯的紀錄不放這裡——音樂在 catalog/tracks.jsonl（append-only 事件流，含 prompt/seed/params/QC），
@@ -18,6 +22,9 @@ catalog/*.db
 # 模型權重
 models/*
 !models/README.md
+
+# 實驗／一次性腳本（本地保留、不進版控）
+/scratch/
 
 # YouTube OAuth 憑證 / token（機密）
 .secrets/
