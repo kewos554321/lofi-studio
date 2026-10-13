@@ -587,11 +587,29 @@ class TestCatalogLayer(unittest.TestCase):
         self.assertFalse(p.with_name(p.name + ".tmp").exists())        # 無 tmp 殘留
 
     def test_append_event_fields(self):
-        ev = catalog.append_event("generated", {"track_id": "t1", "seed": 7})
+        ev = catalog.append_event("generated", {"track_id": "t1", "gen": {"seed": 7}})
         self.assertEqual((ev["event"], ev["track_id"], ev["seed"]), ("generated", "t1", 7))
         self.assertIn("ts", ev)
+        self.assertEqual(ev["schema_version"], catalog.SCHEMA_VERSION)
         ev2 = catalog.append_event("tag", "t2")      # 非 dict → 當 track_id
         self.assertEqual(ev2["track_id"], "t2")
+
+    def test_event_is_compact_not_snapshot(self):
+        """事件只記發生什麼，不是整包快照（避免 tracks.jsonl 單調膨脹）。"""
+        rec = {"track_id": "t1", "file": "a.mp3", "style": "x", "prompt": "p",
+               "auto_qc": {"verdict": "pass", "score": 90, "flags": [],
+                           "lufs": -14.0, "fingerprint": [0.1] * 40}}
+        ev = catalog.append_event("auto_qc", rec)
+        self.assertEqual(ev["verdict"], "pass")
+        self.assertEqual(ev["score"], 90)
+        self.assertNotIn("fingerprint", ev)      # 大欄位不進事件
+        self.assertNotIn("auto_qc", ev)          # 不再是整包快照
+        self.assertNotIn("prompt", ev)           # auto_qc 事件不需要 prompt
+
+    def test_event_drops_empty_values(self):
+        ev = catalog.append_event("generated", {"track_id": "t1", "style": "", "gen": {"seed": 7}})
+        self.assertNotIn("style", ev)
+        self.assertEqual(ev["seed"], 7)
 
     def test_event_stream_lines_parse(self):
         catalog.append_event("generated", {"track_id": "t1"})

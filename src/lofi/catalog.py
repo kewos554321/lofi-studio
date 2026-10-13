@@ -85,13 +85,35 @@ def read_jsonl():
     return events
 
 
+def summarize_event(event, record):
+    """事件流只記「發生什麼」，不記整包快照（避免 tracks.jsonl 單調膨脹）。
+
+    完整狀態在 sidecar（唯一真相）；事件只需可追溯的關鍵欄位，
+    `fingerprint` 等大欄位不進事件流。空值會被省略讓每行更短。
+    """
+    d = record if isinstance(record, dict) else {"track_id": record}
+    out = {"track_id": d.get("track_id"), "file": d.get("file")}
+    if event == "auto_qc":
+        aq = d.get("auto_qc") or {}
+        out.update({k: aq.get(k) for k in
+                    ("verdict", "score", "flags", "lufs", "true_peak", "bpm_est", "duration")})
+    elif event == "tag":
+        out["tags"] = d.get("tags")
+    elif event == "set-status":
+        out["status"] = d.get("status")
+    else:  # generated / backfill / upsert / 其他
+        out.update({k: d.get(k) for k in
+                    ("style", "style_version", "mood", "row_id", "run_id",
+                     "source", "source_csv", "sha1", "prompt", "negative", "bpm", "key")})
+        gen = d.get("gen") or {}
+        out.update({k: gen.get(k) for k in ("seed", "model", "duration")})
+    return {k: v for k, v in out.items() if v not in (None, "", [], {})}
+
+
 def append_event(event, record):
-    """把一筆事件 append 到 catalog/tracks.jsonl（含檔案鎖，append-only）。"""
-    ev = {"ts": now_iso(), "event": event}
-    if isinstance(record, dict):
-        ev.update(record)
-    else:
-        ev["track_id"] = record
+    """把一筆（精簡的）事件 append 到 catalog/tracks.jsonl（含檔案鎖，append-only）。"""
+    ev = {"ts": now_iso(), "schema_version": SCHEMA_VERSION, "event": event}
+    ev.update(summarize_event(event, record))
     io.append_jsonl(JSONL_PATH, ev)
     return ev
 
