@@ -404,6 +404,55 @@ class TestVisualIPAdapter(unittest.TestCase):
             self.assertTrue(config.model_license(name)["commercial"], name)
 
 
+class TestVisualInpaint(unittest.TestCase):
+    """局部重繪（--init-image + --mask）的節點接線與紀錄往返：純函式，不需 ComfyUI。"""
+
+    @staticmethod
+    def _wf(**over):
+        kw = dict(pos="a black cat", neg="blurry", w=832, h=1216, seed=7, steps=28,
+                  cfg=6.5, prefix="p", ckpt="DreamShaperXL-v1.0-Alpha2.safetensors",
+                  ref_image="")                       # 預設不掛 IPAdapter，單獨看 inpaint
+        kw.update(over)
+        return visual.build_prompt(**kw)
+
+    def test_init_image_without_mask_is_plain_img2img(self):
+        g = self._wf(init_image="base.png")
+        self.assertEqual(g["15"]["class_type"], "VAEEncode")
+        self.assertNotIn("19", g)                        # 沒遮罩就不掛遮罩鏈
+        self.assertEqual(g["3"]["inputs"]["latent_image"], ["15", 0])
+
+    def test_mask_wires_inpaint_chain(self):
+        g = self._wf(init_image="base.png", mask_image="m.png", grow_mask=12, grow_mask_by=4)
+        self.assertEqual(g["15"]["class_type"], "VAEEncodeForInpaint")
+        self.assertEqual(g["15"]["inputs"]["pixels"], ["14", 0])       # 起點圖
+        self.assertEqual(g["15"]["inputs"]["mask"], ["21", 0])
+        self.assertEqual(g["15"]["inputs"]["grow_mask_by"], 4)
+        self.assertEqual(g["20"]["class_type"], "ImageToMask")
+        self.assertEqual(g["20"]["inputs"]["image"], ["19", 0])
+        self.assertEqual(g["21"]["inputs"]["expand"], 12)
+        self.assertEqual(g["3"]["inputs"]["latent_image"], ["15", 0])
+
+    def test_inpaint_roundtrips_through_manifest(self):
+        """反推要能還原起點圖／遮罩／擴張值（改遮罩設定才看得出哪批重繪過什麼）。"""
+        g = self._wf(init_image="base.png", mask_image="m.png", grow_mask=12,
+                     grow_mask_by=4, mask_channel="green", denoise=0.9)
+        cfg, _ = visual.manifest_from_workflow(g)
+        self.assertEqual(cfg["init_image"], "base.png")
+        self.assertEqual(cfg["mask"], "m.png")
+        self.assertEqual(cfg["grow_mask"], 12)
+        self.assertEqual(cfg["grow_mask_by"], 4)
+        self.assertEqual(cfg["mask_channel"], "green")
+        self.assertIn("遮罩擴張", dict(visual.format_run_fields(cfg)))
+
+    def test_inpaint_and_character_lock_together(self):
+        """「重畫成定裝角色」＝ inpaint ＋ IPAdapter 同時用（白襪鎖不住的正解）。"""
+        g = self._wf(init_image="base.png", mask_image="m.png",
+                     ref_image="mascot_blackcat_ref.png")
+        self.assertEqual(g["15"]["class_type"], "VAEEncodeForInpaint")
+        self.assertEqual(g["3"]["inputs"]["model"], ["18", 0])         # 仍走 IPAdapter
+        self.assertEqual(g["3"]["inputs"]["latent_image"], ["15", 0])
+
+
 class TestAudioQC(unittest.TestCase):
     """qc.judge 是純函式（量測與判定分開），用合成量測值驗判定（不需 ffmpeg）。"""
 

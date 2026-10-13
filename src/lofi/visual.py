@@ -26,6 +26,9 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
   # 鎖角色（IPAdapter）：參考圖放 ComfyUI/input/，--weight 是主控旋鈕（0.6 場景自由／0.75 特徵硬）
   ./scripts/lofi visual --ref mascot_blackcat_ref.png --weight 0.6 --kind ds \
       --slug sit-window --size 832x1216 --steps 28 --cfg 6.5 --write-caption
+  # 局部重繪（inpaint）：只改遮罩區（白＝重畫），其餘保留原圖
+  ./scripts/lofi visual --init-image sc10_01_room.png --mask cat-area.png \
+      --run-id fix01 --slug fix-white-socks --prompt "…black cat with white socks…"
 
 前置：ComfyUI 需執行中，且對應 checkpoint 已在 models/checkpoints。
 預設 checkpoint：DreamShaperXL-v1.0-Alpha2.safetensors（SDXL，半寫實插畫；見 models/README.md）。
@@ -332,8 +335,25 @@ def manifest_from_workflow(wf):
     for n in of("IPAdapterUnifiedLoader"):
         cfg.setdefault("preset", n.get("inputs", {}).get("preset", ""))
 
+    # 局部重繪（inpaint）：從 VAEEncodeForInpaint 的接線精準追出起點圖／遮罩／擴張值
+    for n in of("VAEEncodeForInpaint"):
+        s = n.get("inputs", {})
+        cfg.setdefault("grow_mask_by", s.get("grow_mask_by"))
+        px = source(s.get("pixels"))
+        if px and px.get("class_type") == "LoadImage":
+            cfg.setdefault("init_image", px.get("inputs", {}).get("image", ""))
+        mk = source(s.get("mask"))
+        if mk and mk.get("class_type") == "GrowMask":
+            cfg.setdefault("grow_mask", mk.get("inputs", {}).get("expand"))
+            mk = source(mk.get("inputs", {}).get("mask"))
+        if mk and mk.get("class_type") == "ImageToMask":
+            cfg.setdefault("mask_channel", mk.get("inputs", {}).get("channel"))
+            mk = source(mk.get("inputs", {}).get("image"))
+        if mk and mk.get("class_type") == "LoadImage":
+            cfg.setdefault("mask", mk.get("inputs", {}).get("image", ""))
+
     loads = [n.get("inputs", {}).get("image", "") for n in of("LoadImage")]
-    if loads and not ipa:                      # img2img / 局部重繪的起點圖與遮罩
+    if loads and not ipa:                      # img2img（無遮罩）的起點圖；舊 workflow 的遮罩後備
         cfg.setdefault("init_image", loads[0])
         if len(loads) > 1:
             cfg.setdefault("mask", loads[1])
@@ -375,6 +395,7 @@ _FIELD_LABELS = {
     "sampler": "取樣器", "scheduler": "排程", "clip_skip": "clip skip",
     "denoise": "重繪強度", "upscale": "放大模型", "upscale_out": "放大後尺寸",
     "init_image": "起點圖", "mask": "遮罩", "grow": "遮罩擴張",
+    "grow_mask": "遮罩擴張", "grow_mask_by": "遮罩擴張(latent)", "mask_channel": "遮罩通道",
     "ref": "參考圖", "ref_image": "參考圖", "weight": "IPAdapter 權重",
     "weight_type": "權重型別", "preset": "IPAdapter preset",
     "embeds_scaling": "embeds 縮放", "start": "權重起點", "end": "權重終點",
@@ -383,6 +404,7 @@ _FIELD_LABELS = {
 _FIELD_ORDER = ("ckpt", "unet", "clip", "clip_type", "vae", "lora", "lora_weight",
                 "size", "steps", "cfg", "shift", "sampler", "scheduler", "clip_skip",
                 "denoise", "upscale", "upscale_out", "init_image", "mask", "grow",
+                "grow_mask", "grow_mask_by", "mask_channel",
                 "ref", "ref_image", "weight", "weight_type", "preset",
                 "embeds_scaling", "start", "end", "license", "source")
 
@@ -453,6 +475,7 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
                  upscale_model="", up_out=None, clip_skip=0,
                  sampler="dpmpp_2m", scheduler="karras",
                  init_image="", denoise=1.0,
+                 mask_image="", grow_mask=8, grow_mask_by=6, mask_channel="red",
                  ref_image="", ipa_weight=0.6, ipa_weight_type="linear",
                  ipa_preset="PLUS (high strength)", ipa_embeds_scaling="K+V",
                  ipa_start=0.0, ipa_end=1.0):
@@ -463,8 +486,20 @@ def build_prompt(pos, neg, w, h, seed, steps, cfg, prefix, ckpt=IMAGE_CKPT,
     # 起點：img2img 用參考圖經 VAE 編碼（denoise < 1 才有效果）；否則從空 latent 開始
     if init_image:
         g["14"] = {"class_type": "LoadImage", "inputs": {"image": init_image}}
-        g["15"] = {"class_type": "VAEEncode",
-                   "inputs": {"pixels": ["14", 0], "vae": ["4", 2]}}
+        if mask_image:
+            # 局部重繪：遮罩區（白）重畫，其餘保留原圖（VAEEncodeForInpaint 會蓋掉遮罩區）
+            g["19"] = {"class_type": "LoadImage", "inputs": {"image": mask_image}}
+            g["20"] = {"class_type": "ImageToMask",
+                       "inputs": {"image": ["19", 0], "channel": mask_channel}}
+            g["21"] = {"class_type": "GrowMask",
+                       "inputs": {"mask": ["20", 0], "expand": grow_mask,
+                                  "tapered_corners": True}}
+            g["15"] = {"class_type": "VAEEncodeForInpaint",
+                       "inputs": {"pixels": ["14", 0], "vae": ["4", 2],
+                                  "mask": ["21", 0], "grow_mask_by": grow_mask_by}}
+        else:
+            g["15"] = {"class_type": "VAEEncode",
+                       "inputs": {"pixels": ["14", 0], "vae": ["4", 2]}}
         latent_src = ["15", 0]
     else:
         g["5"] = {"class_type": "EmptyLatentImage",
@@ -621,6 +656,14 @@ def main():
                     help="img2img 起點圖（檔名需在 ComfyUI/input/），搭配 --denoise < 1；此時 --size 會被忽略")
     ap.add_argument("--denoise", type=float, default=1.0,
                     help="重繪強度：1.0=完全重畫；0.5~0.7=大改；0.3~0.45=小幅改動保留構圖")
+    ap.add_argument("--mask", default="",
+                    help="局部重繪遮罩（檔名在 ComfyUI/input/；黑底、要重畫的區域塗白，尺寸同 --init-image）")
+    ap.add_argument("--grow-mask", type=int, default=8,
+                    help="遮罩先外擴幾個像素（避免重繪區與原圖之間出現接縫）")
+    ap.add_argument("--grow-mask-by", type=int, default=6,
+                    help="VAE 編碼前再擴的 latent 像素（inpaint 接縫補償）")
+    ap.add_argument("--mask-channel", default="red",
+                    help="遮罩取哪個通道（red / green / blue / alpha）")
     ap.add_argument("--ref", default="",
                     help="IPAdapter 參考圖（檔名需在 ComfyUI/input/）：鎖角色/風格；給了就走 SDXL + IPAdapter")
     ap.add_argument("--weight", type=float, default=0.6,
@@ -674,6 +717,9 @@ def main():
         except ValueError:
             sys.exit("--upscale-out 格式應為 寬x高，例如 1536x1024")
 
+    if args.mask and not args.init_image:
+        sys.exit("--mask 要搭配 --init-image（遮罩是「這張圖的哪一塊要重畫」）")
+
     if not args.dry_run:
         comfy.require_online(args.url)
         media.require_free(VIS_DIR, MIN_FREE_GB, "內接碟 assets/visuals")
@@ -705,9 +751,16 @@ def main():
             "preset": args.preset, "embeds_scaling": args.embeds_scaling,
             "start": args.start, "end": args.end,
         })
+    if args.mask:     # 局部重繪的遮罩設定
+        config.update({
+            "mask": args.mask, "grow_mask": args.grow_mask,
+            "grow_mask_by": args.grow_mask_by, "mask_channel": args.mask_channel,
+        })
     tool = "sdxl-ipadapter" if args.ref else "lofi.visual"   # 與 guess_tool() 反推的一致
-    print_run_header(f"lofi.visual（ComfyUI + SDXL{' + IPAdapter 鎖角色' if args.ref else ''}）",
-                     run_id, out_dir, config, count=args.count)
+    mode = (" + IPAdapter 鎖角色" if args.ref else
+            " + 局部重繪" if args.mask else
+            " + img2img" if args.init_image else "")
+    print_run_header(f"lofi.visual（ComfyUI + SDXL{mode}）", run_id, out_dir, config, count=args.count)
     if args.dry_run:
         print(f"（dry-run，未實際生成）prompt：{args.prompt[:80]}…")
         return
@@ -726,6 +779,8 @@ def main():
                     upscale_model=args.upscale, up_out=up_out,
                     clip_skip=args.clip_skip, sampler=args.sampler, scheduler=args.scheduler,
                     init_image=args.init_image, denoise=args.denoise,
+                    mask_image=args.mask, grow_mask=args.grow_mask,
+                    grow_mask_by=args.grow_mask_by, mask_channel=args.mask_channel,
                     ref_image=args.ref, ipa_weight=args.weight, ipa_weight_type=args.weight_type,
                     ipa_preset=args.preset, ipa_embeds_scaling=args.embeds_scaling,
                     ipa_start=args.start, ipa_end=args.end),

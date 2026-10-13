@@ -237,6 +237,22 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 - `manifest.json` 的 `tool` 自動記成 `sdxl-ipadapter`，`config` 多記 `ref`/`weight`/`weight_type`/`preset`/`embeds_scaling`/`start`/`end`（這樣回頭才看得出這批是用哪張參考圖、多重鎖的）。
 - 生成會取 `logs/.gpu.lock` 互斥鎖：音樂生成跑著時會直接中止（保護 16GB RAM）。
 
+#### 局部重繪（inpaint：`--init-image` + `--mask`）
+
+只重畫圖的某一塊、其餘保留原圖——把生成場景「換成定裝角色」或補小特徵（例：白襪）用這個：
+
+```bash
+# 遮罩＝黑底、要重畫的區域塗白，尺寸與起點圖相同；兩張都放 ~/ComfyUI/input/
+./scripts/lofi visual --init-image sc10_01_room.png --mask cat-area.png \
+  --run-id fix01 --slug fix-white-socks --prompt "…black cat with white socks…"
+```
+
+- **接縫旋鈕**：`--grow-mask 8`（遮罩先外擴像素）、`--grow-mask-by 6`（VAE 編碼前再擴的 latent 像素）。重繪區邊緣出現一圈髒縫就往上加。
+- 可與 `--ref` **併用**（＝「這塊重畫成定裝角色」）：`--mask` 決定重畫哪裡，`--ref` 決定畫成誰。這是白襪在純 IPAdapter 下鎖不住時的正解。
+- 只給 `--init-image`、不給 `--mask` 就是一般 **img2img**：`--denoise 0.3~0.45` 小幅改、`0.5~0.7` 大改、`1.0` 等於只受起點圖的構圖限制。
+- 衍生檔的 slug 用保留字首 `fix-`（後處理）／`mask-`（遮罩），一眼看出不是原始生成圖。
+- `--mask` 沒搭 `--init-image` 會直接報錯中止（遮罩必須相對於某張圖）。
+
 **建議加 AI 放大**（768×512 直接升到 1080p 會軟糊）：
 
 ```bash
