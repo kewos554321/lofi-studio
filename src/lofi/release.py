@@ -31,6 +31,7 @@ import argparse
 import csv
 import io as _io
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -48,6 +49,11 @@ SCHEMA_VERSION = 1
 COVER_SIZE = 3000
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 LOSSLESS_EXTS = (".flac", ".wav", ".aiff", ".aif")   # 無損母帶可接受的容器
+
+# 執行緒上限與 niceness：不設時 ffmpeg 會吃滿所有核心，在背景生成時會明顯搶 CPU。
+# 可用 `--threads/--nice` 或環境變數 LOFI_THREADS／LOFI_NICE 指定（比照 make_long_lofi.sh 的 THREADS/NICE）。
+_THREADS = int(os.environ.get("LOFI_THREADS", "0") or 0)
+_NICE = int(os.environ.get("LOFI_NICE", "0") or 0)
 # 衍生檔的保留字首（見 docs/NAMING.md）：不適合當封面
 DERIVED_PREFIXES = ("anim-", "cmp-", "mask-", "fix-")
 
@@ -214,33 +220,75 @@ def find_run_dir(style, run):
     return hits[0]
 
 
-def load_run(style, run, limit=0, offset=0, title_overrides=None):
+def _select_tracks(rows, tokens):
+    """依選擇器挑曲目：1-based 序號、`track_id`、或檔名片段（可混用）。"""
+    picked = []
+    for tok in tokens:
+        t = (tok or "").strip()
+        if not t:
+            continue
+        hit = None
+        if t.isdigit() and 1 <= int(t) <= len(rows):
+            hit = rows[int(t) - 1]
+        if hit is None:
+            for r in rows:
+                if t == (r["sidecar"].get("track_id") or "") or t in r["audio"].stem:
+                    hit = r
+                    break
+        if hit is None:
+            sys.exit(f"--tracks 找不到「{t}」（可用 plan 印出的序號、track_id 或檔名片段）")
+        if hit not in picked:
+            picked.append(hit)
+    if not picked:
+        sys.exit("--tracks 沒有選到任何曲目")
+    return picked
+
+
+def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, min_score=None):
     """回傳 [{audio, sidecar, ...}]，依檔名順序（即生成順序）。
 
-    - `limit`/`offset`：只取一段（一個 run 可能有 30+ 首，整張專輯太長）。
-    - `title_overrides`：{來源檔 relpath: 曲名}。用來「保住人工改過的曲名」：
-      重跑時優先用既有 release.json 的曲名，不會被 sidecar 的 mood 蓋回去。
+    選曲優先序：
+      1. `tracks`（明確指定序號／track_id／檔名片段）→ 忽略下面兩者
+      2. `offset` + `limit`（取連續一段；一個 run 可能有 30+ 首，整張專輯太長）
+      3. `min_score`（只留自動品檢分數 ≥ N 的；沒有品檢紀錄的一律排除）
+    曲名去重與編號在最後做，所以重跑結果穩定。
     """
     d = find_run_dir(style, run)
     audios = sorted(p for p in d.iterdir() if p.is_file() and cat.is_audio(p))
-    if offset:
-        audios = audios[offset:]
-    if limit:
-        audios = audios[:limit]
     if not audios:
-        sys.exit(f"{cat.relpath(d)} 裡沒有可用的音檔（檢查 --limit/--offset）")
+        sys.exit(f"{cat.relpath(d)} 裡沒有可用的音檔")
+
+    title_overrides = title_overrides or {}
     rows = []
     for a in audios:
         sc = cat.load_sidecar(a) or {}
         dur = (sc.get("gen") or {}).get("duration") or media.ffprobe_duration(a)
-        prev = (title_overrides or {}).get(cat.relpath(a))
+        prev = title_overrides.get(cat.relpath(a))
         rows.append({
             "audio": a, "sidecar": sc,
             "title": prev or track_title(a, sc),
             "mood": sc.get("mood", ""), "key": sc.get("key", ""), "bpm": sc.get("bpm", ""),
             "duration": dur, "style": sc.get("style", style),
+            "score": (sc.get("auto_qc") or {}).get("score"),
+            "flags": (sc.get("auto_qc") or {}).get("flags") or [],
             "master_src": find_lossless_master(a, sc, style, run),
         })
+
+    if tracks:
+        rows = _select_tracks(rows, tracks)
+    else:
+        if offset:
+            rows = rows[offset:]
+        if limit:
+            rows = rows[:limit]
+        if min_score is not None:
+            before = len(rows)
+            rows = [r for r in rows if r["score"] is not None and r["score"] >= min_score]
+            if not rows:
+                sys.exit(f"--min-score {min_score} 之下沒有任何曲目（原本 {before} 首）")
+
+    if not rows:
+        sys.exit(f"{cat.relpath(d)} 裡沒有可用的音檔（檢查 --tracks/--limit/--offset/--min-score）")
     titles = unique_titles([r["title"] for r in rows])
     for i, (r, t) in enumerate(zip(rows, titles), 1):
         r["title"] = t
@@ -305,7 +353,12 @@ def license_gate(rows, allow_unknown):
 
 
 def probe_wh(path):
-    """回傳 (width, height)；量不到回 (None, None)。"""
+    """回傳 (width, height)；量不到回 (None, None)。
+
+    ⚠️ 只檢查 returncode 不夠：ffprobe 對壞掉的圖會回 **returncode 0** 並在 stdout 印
+    `0x0`（錯誤只出現在 stderr），所以要**再檢查數值 > 0**，否則壞圖會被當成合法尺寸
+    ——正是 AGENTS.md 說的「假通過」。
+    """
     rc, out, _ = media.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)])
@@ -313,9 +366,10 @@ def probe_wh(path):
         return None, None
     try:
         w, h = out.strip().splitlines()[0].split("x")[:2]
-        return int(w), int(h)
+        w, h = int(w), int(h)
     except (ValueError, IndexError):
         return None, None
+    return (w, h) if w > 0 and h > 0 else (None, None)
 
 
 def probe_audio_sr(path):
@@ -433,13 +487,28 @@ def pick_cover(visual_run=None):
     return rest[0][3]
 
 
+def _run_ff(args):
+    """執行 ffmpeg，套用執行緒上限與 niceness（與背景工作共存用）。
+
+    `--threads` 是關鍵：不設時 ffmpeg 會吃滿所有核心，在生成中一併跑會明顯搶 CPU。
+    """
+    if _NICE:
+        try:
+            os.nice(_NICE)
+        except (AttributeError, OSError):
+            pass
+    if _THREADS:
+        args = args[:1] + ["-threads", str(_THREADS)] + args[1:]
+    return media.run(args)
+
+
 def master_track(src, dst, *, lufs, tp, fmt="wav", metadata=None):
     """兩段式 loudnorm 正規化（量測 → 套用）；量測失敗則退回單段動態模式。
 
     回傳實際套用的參數 dict（含 fallback 旗標），供 release.json 記錄來源。
     """
     common = f"loudnorm=I={lufs:g}:TP={tp:g}:LRA=11"
-    rc, _, err = media.run(
+    rc, _, err = _run_ff(
         ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src),
          "-af", f"{common}:print_format=json", "-f", "null", "-"])
     meas = parse_loudnorm_json(err) if rc == 0 else None
@@ -467,7 +536,7 @@ def master_track(src, dst, *, lufs, tp, fmt="wav", metadata=None):
         if v not in (None, ""):
             cmd += ["-metadata", f"{k}={v}"]
     cmd.append(str(dst))
-    rc, _, err = media.run(cmd)
+    rc, _, err = _run_ff(cmd)
     if rc != 0:
         sys.exit(f"母帶處理失敗：{src.name}\n{err.strip()[:400]}")
 
@@ -484,7 +553,7 @@ def make_cover(src, dst, size=COVER_SIZE):
         sys.exit(f"讀不到圖片尺寸：{src}")
     side = min(w, h)
     x, y = (w - side) // 2, (h - side) // 2
-    rc, _, err = media.run(
+    rc, _, err = _run_ff(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
          "-vf", f"crop={side}:{side}:{x}:{y},scale={size}:{size}:flags=lanczos",
          "-q:v", "2", str(dst)])
@@ -515,11 +584,35 @@ def print_header(rec, n, dest, cover_src, cover_dst):
     else:
         print("  封面：⚠️  找不到場景圖（用 --cover 指定）")
     print(f"  輸出：{_rel(dest)}")
+    if _THREADS or _NICE:
+        print(f"  資源：threads={_THREADS or '不限'}　nice={_NICE or 0}"
+              f"（跑其他工作時可調低）")
     print(line)
 
 
+def _parse_tracks(s):
+    """`--tracks` 字串 → 選擇器清單（支援逗號與空白分隔）。"""
+    return [t.strip() for t in re.split(r"[,\s]+", s or "") if t.strip()]
+
+
+def find_orphans(audio_dir, expected, exts=("*.wav", "*.flac")):
+    """回傳 `audio/` 裡**不屬於這張專輯**的檔（改過曲名、或前次中斷留下的殘留）。
+
+    為什麼需要：`CHECKLIST.md` 叫使用者「上傳 audio/ 全部」，多一個檔就是多傳一首重複的歌。
+    為什麼不信「上一次 release.json 記錄的路徑」：改過曲名、或前一次中斷，都會留下對不到的檔
+    （踩過：15 個檔裡 3 個是孤兒）。
+    """
+    want = {str(n) for n in expected}
+    return [f for pat in exts for f in sorted(Path(audio_dir).glob(pat))
+            if f.name not in want]
+
+
 def cmd_plan(args):
-    d, rows = load_run(args.style, args.run, limit=args.limit, offset=args.offset)
+    # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
+    prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
+    d, rows = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
+                       title_overrides={k: v["title"] for k, v in prior.items()},
+                       tracks=_parse_tracks(args.tracks), min_score=args.min_score)
     cover = Path(args.cover) if args.cover else pick_cover(args.visual_run)
     print(f"來源：{cat.relpath(d)}（取 {len(rows)} 首"
           + (f"，offset {args.offset}" if args.offset else "")
@@ -589,7 +682,8 @@ def cmd_package(args):
     dest = RELEASES_DIR / args.run
     prior = load_prior_tracks(dest / "release.json")
     d, rows = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
-                       title_overrides={k: v["title"] for k, v in prior.items()})
+                       title_overrides={k: v["title"] for k, v in prior.items()},
+                       tracks=_parse_tracks(args.tracks), min_score=args.min_score)
     artist = args.artist or config.RELEASE_ARTIST
     album = args.album or mm.prettify(rows[0]["style"] or args.run)
 
@@ -629,26 +723,33 @@ def cmd_package(args):
     for r in rows:
         stem = f"{r['no']:02d}_{slugify(r['title']) or ('track' + str(r['no']))}"
         out = audio_dir / f"{stem}.{rec['format']}"
+        source = r["master_src"] or r["audio"]
+        r["audio_out"] = out
         if out.exists() and not args.force:
             print(f"[{r['no']:>2}] 已存在，略過：{out.name}")
-            r["audio_out"] = out
-            r["master"] = {"mode": "reuse", "lufs": rec["master"]["lufs"], "tp": rec["master"]["tp"]}
+            # 與新算的母帶保持同樣的欄位形狀（否則 release.json 每筆長得不一样）
+            r["master"] = {"mode": "reuse", "lufs": rec["master"]["lufs"],
+                           "tp": rec["master"]["tp"], "format": rec["format"],
+                           "lossless": bool(r["master_src"]), "source": _rel(source),
+                           "measured_in_lufs": None}
             continue
         print(f"[{r['no']:>2}] {r['title']} → {out.name}", flush=True)
-        source = r["master_src"] or r["audio"]
         r["master"] = master_track(
             source, out, lufs=rec["master"]["lufs"], tp=rec["master"]["tp"], fmt=rec["format"],
             metadata={"title": r["title"], "artist": artist, "album": album,
                       "track": f"{r['no']}/{len(rows)}", "genre": rec["genre"] or ""})
         r["master"]["lossless"] = bool(r["master_src"])
         r["master"]["source"] = _rel(source)
-        # 改過曲名 → 舊母帶是孤兒檔，刪掉（否則上架時會多看到一首不存在的歌）
-        old = (prior.get(cat.relpath(r["audio"])) or {}).get("audio")
-        if old:
-            oldp = ROOT / old
-            if oldp != out and oldp.exists() and oldp.parent == audio_dir:
-                oldp.unlink()
-                print(f"       ↳ 刪除改名前舊檔 {oldp.name}")
+
+    # 1b) 對帳：audio/ 裡不屬於這張專輯的檔一律刪掉（改過名、或前次中斷的殘留）。
+    #      理由見 find_orphans()。
+    expected = {r["audio_out"].name for r in rows}
+    orphans = find_orphans(audio_dir, expected)
+    for f in orphans:
+        f.unlink()
+        print(f"   ↳ 清掉孤兒檔 {f.name}")
+    if orphans:
+        print(f"   （共清掉 {len(orphans)} 個不屬於本專輯的檔）")
         r["audio_out"] = out
 
     # 2) 封面
@@ -697,6 +798,14 @@ def main():
                        help="從指定 visuals run（例如 sc01）挑封面")
         p.add_argument("--limit", type=int, default=0, help="只取前 N 首（0=全部）")
         p.add_argument("--offset", type=int, default=0, help="從第幾首開始（0-based）")
+        p.add_argument("--tracks", default="",
+                       help="只取指定曲目（序號／track_id／檔名片段，逗號分隔）。優先用 plan 看序號")
+        p.add_argument("--min-score", type=int, default=None, dest="min_score",
+                       help="只留自動品檢分數 ≥ N 的（沒有品檢紀錄的一律排除）")
+        p.add_argument("--threads", type=int, default=_THREADS,
+                       help="ffmpeg 執行緒上限（0=不限制）。跑其他工作時建議 2–4；也可設 LOFI_THREADS")
+        p.add_argument("--nice", type=int, default=_NICE, dest="nice",
+                       help="niceness（越高越讓 CPU 給別人）。也可設 LOFI_NICE")
 
     p1 = sub.add_parser("plan", help="只看會產出什麼（不寫檔）")
     add_common(p1)
@@ -717,6 +826,8 @@ def main():
     p2.set_defaults(func=cmd_package)
 
     args = ap.parse_args()
+    global _THREADS, _NICE
+    _THREADS, _NICE = args.threads, args.nice
     args.func(args)
 
 
