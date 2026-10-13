@@ -67,6 +67,20 @@ MASTER_LUFS = float(_env("LOFI_MASTER_LUFS", "-14"))
 MASTER_TP = float(_env("LOFI_MASTER_TP", "-1"))
 
 
+# ── 自動品檢（qc）政策 ─────────────────────────────────────────────────
+# 哪些 flag 是「**母帶步驟修不掉**」的，因此應該擋掉。
+# 依據（2026-10 全庫 126 首實測）：只出現 3 種 flag——
+#   hot_true_peak 110 次 → release 的 loudnorm(-1 dBTP) 修得掉（實測產出後 12/12 pass）
+#   loudness_out_of_range  5 次 → loudnorm(-14 LUFS) 修得掉
+#   wide_dynamics          3 次 → 修不掉（響度會被拉平，但曲子本身忽大忽小聽得出來）
+# 所以**不要用「score 100」當門檻**（那只剩 11/126 = 9%），改用這份黑名單（可用 123/126）。
+# 空字串代表「不過濾」；也用 LOFI_QC_BLOCKING_FLAGS 覆寫。
+QC_BLOCKING_FLAGS = tuple(
+    f.strip() for f in
+    _env("LOFI_QC_BLOCKING_FLAGS", "wide_dynamics,truncated,silent,clipped").split(",")
+    if f.strip())
+
+
 # ── 模型授權登錄（商用合規）────────────────────────────────────────────
 # 換模型前先查這裡；commercial: True=可商用 / False=禁止商用 / None=未知。
 # source 為官方頁面（授權以該頁最新標示為準）。詳見 docs/LICENSING.md。
@@ -190,6 +204,7 @@ def as_dict():
         "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
         "release_label": RELEASE_LABEL or "（無）",
         "master_target": f"{MASTER_LUFS:g} LUFS / {MASTER_TP:g} dBTP",
+        "qc_blocking_flags": ", ".join(QC_BLOCKING_FLAGS) or "（不過濾）",
     }
 
 

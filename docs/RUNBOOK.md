@@ -521,6 +521,12 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - **封面一律是主角（黑貓 Moni）**：`release` 會讀各 run 的 `manifest.json` 逐檔 prompt，只挑「黑貓」的圖，
   **排除橘虎斑的 `sc01/sc02/sc06`**；判別條件在 `prompts/character/moni.json` 的 `cover_match`。
   找不到主角圖會警告並要你用 `--cover` 指定。要換封面：`--cover <圖檔>` 或 `--visual-run <run>`。
+- **選曲自動套品檢政策**：`--exclude-flags`（預設 `config.QC_BLOCKING_FLAGS` = `wide_dynamics,truncated,silent,clipped`）
+  只擋「**母帶修不掉**」的 flag。`hot_true_peak`／`loudness_out_of_range` **放行**——`release` 的 loudnorm
+  一定修得掉（實測：原始 warn ×30 的森林鋼琴，產出後 **12/12 pass**）。
+  > **不要用 `--min-score 100`**：全庫 126 首只剩 11 首（9%），而丟掉的理由是產線自己會修的。
+  > 用這份黑名單則可用 **123/126**，只有 3 首 `wide_dynamics` 被擋。
+  > 沒有品檢紀錄的曲目一律排除（量測不到不可假通過）；硬要收用 `--exclude-flags ''`。
 - **商用守門**：比照 `generate`/`visual`，模型授權未知／禁止商用的批會 **fail-closed**（`--allow-unknown-license` 可略過）。
 - **可中斷續跑**：已存在的母帶會略過（`--force` 重做），所以改一首歌名只需重算那一首。
 - **跑其他工作時請限流**：`release` 的母帶是 ffmpeg loudnorm（**純 CPU、不碰 GPU**），

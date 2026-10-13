@@ -244,13 +244,15 @@ def _select_tracks(rows, tokens):
     return picked
 
 
-def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, min_score=None):
-    """回傳 [{audio, sidecar, ...}]，依檔名順序（即生成順序）。
+def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, min_score=None,
+             blocking=None):
+    """回傳 (來源目錄, [{...}], 被品檢排除的 [(row, 原因)])，曲目依檔名順序（即生成順序）。
 
     選曲優先序：
       1. `tracks`（明確指定序號／track_id／檔名片段）→ 忽略下面兩者
       2. `offset` + `limit`（取連續一段；一個 run 可能有 30+ 首，整張專輯太長）
       3. `min_score`（只留自動品檢分數 ≥ N 的；沒有品檢紀錄的一律排除）
+    最後一律套 `blocking`（品檢 flag 黑名單）。
     曲名去重與編號在最後做，所以重跑結果穩定。
     """
     d = find_run_dir(style, run)
@@ -271,6 +273,7 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
             "duration": dur, "style": sc.get("style", style),
             "score": (sc.get("auto_qc") or {}).get("score"),
             "flags": (sc.get("auto_qc") or {}).get("flags") or [],
+            "verdict": (sc.get("auto_qc") or {}).get("verdict"),
             "master_src": find_lossless_master(a, sc, style, run),
         })
 
@@ -287,13 +290,18 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
             if not rows:
                 sys.exit(f"--min-score {min_score} 之下沒有任何曲目（原本 {before} 首）")
 
+    rows, dropped = flag_filter(rows, blocking)
+
     if not rows:
-        sys.exit(f"{cat.relpath(d)} 裡沒有可用的音檔（檢查 --tracks/--limit/--offset/--min-score）")
+        sys.exit(f"{cat.relpath(d)} 裡沒有可用的音檔"
+                 f"（檢查 --tracks/--limit/--offset/--min-score/--exclude-flags）"
+                 + (f"\n  被品檢排除 {len(dropped)} 首；要硬用請加 --exclude-flags ''（空字串＝不過濾）"
+                    if dropped else ""))
     titles = unique_titles([r["title"] for r in rows])
     for i, (r, t) in enumerate(zip(rows, titles), 1):
         r["title"] = t
         r["no"] = i
-    return d, rows
+    return d, rows, dropped
 
 
 def load_prior_tracks(release_json):
@@ -590,9 +598,50 @@ def print_header(rec, n, dest, cover_src, cover_dst):
     print(line)
 
 
+def flag_filter(rows, blocking):
+    """依「母帶修不掉」的 flag 黑名單過濾曲目。回傳 (保留, 被排除的 [(row, 原因)])。
+
+    為什麼不用 score 當門檻：全庫實測 126 首只有 3 種 flag，其中 2 種（`hot_true_peak` 110 次、
+    `loudness_out_of_range` 5 次）是 release 的 loudnorm 一定修得掉的；用「score 100」會把
+    112 首沒問題的歌判成不可用。
+
+    `blocking` 為空 = 不過濾。**沒有品檢紀錄的一律排除**（AGENTS：量測不到不可假通過），
+    但要靠 `blocking` 非空才會做——否則沒跑過 qc 的 run 會直接全滅。
+    """
+    if not blocking:
+        return list(rows), []
+    block = set(blocking)
+    kept, dropped = [], []
+    for r in rows:
+        if r.get("verdict") is None:
+            dropped.append((r, "沒有品檢紀錄"))
+            continue
+        hit = sorted(set(r.get("flags") or []) & block)
+        dropped.append((r, "、".join(hit))) if hit else kept.append(r)
+    return kept, dropped
+
+
 def _parse_tracks(s):
     """`--tracks` 字串 → 選擇器清單（支援逗號與空白分隔）。"""
     return [t.strip() for t in re.split(r"[,\s]+", s or "") if t.strip()]
+
+
+def _parse_flags(s):
+    """`--exclude-flags` 字串 → flag 集合（空字串＝不過濾）。"""
+    return tuple(f.strip() for f in re.split(r"[,\s]+", s or "") if f.strip())
+
+
+def report_excluded(dropped):
+    """把被品檢排除的曲目理由印出來（分類統計 + 一例）。"""
+    if not dropped:
+        return
+    reasons = {}
+    for _r, why in dropped:
+        reasons[why] = reasons.get(why, 0) + 1
+    summary = "、".join(f"{w} ×{n}" for w, n in sorted(reasons.items(), key=lambda x: -x[1]))
+    print(f"  ⚠️  品檢排除 {len(dropped)} 首（{summary}）"
+          f"；硬要收請加 --exclude-flags ''")
+    print(f"     例：{dropped[0][0]['audio'].stem}（{dropped[0][1]}）")
 
 
 def find_orphans(audio_dir, expected, exts=("*.wav", "*.flac")):
@@ -610,13 +659,15 @@ def find_orphans(audio_dir, expected, exts=("*.wav", "*.flac")):
 def cmd_plan(args):
     # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
     prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
-    d, rows = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
-                       title_overrides={k: v["title"] for k, v in prior.items()},
-                       tracks=_parse_tracks(args.tracks), min_score=args.min_score)
+    d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
+                                title_overrides={k: v["title"] for k, v in prior.items()},
+                                tracks=_parse_tracks(args.tracks), min_score=args.min_score,
+                                blocking=_parse_flags(args.exclude_flags))
     cover = Path(args.cover) if args.cover else pick_cover(args.visual_run)
     print(f"來源：{cat.relpath(d)}（取 {len(rows)} 首"
           + (f"，offset {args.offset}" if args.offset else "")
           + (f"，limit {args.limit}" if args.limit else "") + "）")
+    report_excluded(dropped)
     print(f"封面：{cat.relpath(cover) if cover else '⚠️ 找不到（--cover 或 --visual-run）'}")
     print(f"母帶來源：{describe_master_source(rows)}")
     print()
@@ -681,9 +732,10 @@ def cmd_package(args):
 
     dest = RELEASES_DIR / args.run
     prior = load_prior_tracks(dest / "release.json")
-    d, rows = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
-                       title_overrides={k: v["title"] for k, v in prior.items()},
-                       tracks=_parse_tracks(args.tracks), min_score=args.min_score)
+    d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
+                                title_overrides={k: v["title"] for k, v in prior.items()},
+                                tracks=_parse_tracks(args.tracks), min_score=args.min_score,
+                                blocking=_parse_flags(args.exclude_flags))
     artist = args.artist or config.RELEASE_ARTIST
     album = args.album or mm.prettify(rows[0]["style"] or args.run)
 
@@ -709,11 +761,14 @@ def cmd_package(args):
         "created_at": cat.now_iso(),
         "credits": [],
         "tracks": [],
+        "excluded": [],
         "notes": [],
     }
 
     print_header(rec, len(rows), dest, cover_src, cover_dst)
     license_gate(rows, args.allow_unknown_license)
+    report_excluded(dropped)
+    rec["excluded"] = [{"track": r["audio"].stem, "reason": why} for r, why in dropped]
 
     if not rows[0]["sidecar"]:
         rec["notes"].append("這批 sidecar 為空 → 曲名/調性可能不準，上架前請人工確認")
@@ -802,6 +857,10 @@ def main():
                        help="只取指定曲目（序號／track_id／檔名片段，逗號分隔）。優先用 plan 看序號")
         p.add_argument("--min-score", type=int, default=None, dest="min_score",
                        help="只留自動品檢分數 ≥ N 的（沒有品檢紀錄的一律排除）")
+        p.add_argument("--exclude-flags", default=",".join(config.QC_BLOCKING_FLAGS),
+                       dest="exclude_flags",
+                       help="品檢擋掉的 flag（母帶修不掉的才擋；空字串＝不過濾）"
+                            "。預設見 config.QC_BLOCKING_FLAGS 與 docs/RUNBOOK.md §8.2")
         p.add_argument("--threads", type=int, default=_THREADS,
                        help="ffmpeg 執行緒上限（0=不限制）。跑其他工作時建議 2–4；也可設 LOFI_THREADS")
         p.add_argument("--nice", type=int, default=_NICE, dest="nice",

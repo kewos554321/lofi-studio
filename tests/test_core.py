@@ -1160,6 +1160,26 @@ class TestRelease(unittest.TestCase):
             self.assertEqual(got, ["01_old-name.wav", "03_old-pt2.wav"])
             self.assertEqual(release.find_orphans(d, ["01_keep.wav", "02_keep.wav", "01_old-name.wav", "03_old-pt2.wav"]), [])
 
+    def test_flag_filter(self):
+        """品檢政策：只擋母帶修不掉的 flag；沒品檢紀錄的不可假通過。"""
+        rows = [{"verdict": "warn", "flags": ["wide_dynamics"], "audio": Path("a.mp3")},
+                {"verdict": "warn", "flags": ["hot_true_peak"], "audio": Path("b.mp3")},
+                {"verdict": "pass", "flags": [], "audio": Path("c.mp3")},
+                {"verdict": None, "flags": [], "audio": Path("d.mp3")}]
+        kept, dropped = release.flag_filter(rows, ("wide_dynamics", "truncated"))
+        self.assertEqual([r["audio"].name for r in kept], ["b.mp3", "c.mp3"])
+        self.assertEqual([why for _r, why in dropped], ["wide_dynamics", "沒有品檢紀錄"])
+        # 空 = 不過濾（連沒品檢紀錄的都留，方便硬跑）
+        kept2, dropped2 = release.flag_filter(rows, ())
+        self.assertEqual(len(kept2), 4)
+        self.assertEqual(dropped2, [])
+
+    def test_qc_policy_only_blocks_unfixable_flags(self):
+        """hot_true_peak／loudness_out_of_range 是母帶修得掉的，不可列為擋掉。"""
+        self.assertIn("wide_dynamics", config.QC_BLOCKING_FLAGS)
+        self.assertNotIn("hot_true_peak", config.QC_BLOCKING_FLAGS)
+        self.assertNotIn("loudness_out_of_range", config.QC_BLOCKING_FLAGS)
+
     def test_character_record_exists(self):
         ch = release.load_character("moni")
         self.assertIsNotNone(ch, "prompts/character/moni.json 應該存在")
