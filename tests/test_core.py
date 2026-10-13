@@ -1097,6 +1097,69 @@ class TestRelease(unittest.TestCase):
         self.assertEqual(release.character_score("", ch), -1)
         self.assertEqual(release.character_score("black cat", None), -1)   # 沒有角色檔 → 不認
 
+    def test_visual_lora_node_wiring(self):
+        """--lora 要插入 LoraLoader，且 model 與 clip 都要接到它後面。"""
+        g = visual.build_prompt("p", "n", 832, 1216, 1, 28, 6.5, "x",
+                                lora="moni.safetensors", lora_weight=0.8)
+        self.assertEqual(g["22"]["class_type"], "LoraLoader")
+        self.assertEqual(g["22"]["inputs"]["lora_name"], "moni.safetensors")
+        self.assertEqual(g["22"]["inputs"]["strength_model"], 0.8)
+        self.assertEqual(g["22"]["inputs"]["strength_clip"], 0.8)
+        self.assertEqual(g["22"]["inputs"]["model"], ["4", 0])   # 來源是 checkpoint
+        self.assertEqual(g["6"]["inputs"]["clip"], ["22", 1])    # 文字編碼吃 LoRA 後的 clip
+        self.assertEqual(g["3"]["inputs"]["model"], ["22", 0])   # 取樣器吃 LoRA 後的 model
+
+    def test_visual_without_lora_is_unchanged(self):
+        g = visual.build_prompt("p", "n", 832, 1216, 1, 28, 6.5, "x")
+        self.assertNotIn("22", g)
+        self.assertEqual(g["6"]["inputs"]["clip"], ["4", 1])
+        self.assertEqual(g["3"]["inputs"]["model"], ["4", 0])
+
+    def test_visual_lora_before_ipadapter(self):
+        """順序：checkpoint → LoRA → IPAdapter（IPAdapter 要吃到 LoRA 的 model）。"""
+        g = visual.build_prompt("p", "n", 832, 1216, 1, 28, 6.5, "x",
+                                lora="m.safetensors", ref_image="ref.png")
+        self.assertEqual(g["16"]["inputs"]["model"], ["22", 0])
+        self.assertEqual(g["3"]["inputs"]["model"], ["18", 0])
+
+    def test_kohya_toml_matches_dataset(self):
+        t = character.build_kohya_toml("moni", "moni", repeats=10, epochs=10,
+                                       resolution="832,1216",
+                                       base_model="DreamShaperXL-v1.0-Alpha2.safetensors")
+        self.assertIn('resolution = "832,1216"', t)      # 對齊資料集原尺寸，不要 1024 方圖
+        self.assertIn("num_repeats = 10", t)
+        self.assertIn("max_train_epochs = 10", t)
+        self.assertIn("10_moni", t)
+        self.assertIn("DreamShaperXL-v1.0-Alpha2.safetensors", t)
+        self.assertIn("sdxl = true", t)
+
+    def test_release_threads_and_nice_plumbing(self):
+        """--threads 要插進 ffmpeg 指令（避免吃滿核心）；nice 不應炸掉。"""
+        captured = {}
+        orig_run, orig_t, orig_n = media.run, release._THREADS, release._NICE
+        media.run = lambda cmd: (captured.__setitem__("cmd", cmd), (0, "", ""))[1]
+        release._THREADS, release._NICE = 4, 0
+        try:
+            release._run_ff(["ffmpeg", "-i", "x", "y"])
+        finally:
+            media.run, release._THREADS, release._NICE = orig_run, orig_t, orig_n
+        self.assertEqual(captured["cmd"], ["ffmpeg", "-threads", "4", "-i", "x", "y"])
+
+    def test_find_orphans(self):
+        """audio/ 裡不屬於本專輯的檔（改過曲名／前次中斷的殘留）要被找出來清掉。
+
+        踩過的實例：15 個檔裡有 3 個孤兒，而 CHECKLIST 叫使用者「上傳 audio/ 全部」
+        → 會多傳 3 首重複的歌。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            for n in ("01_keep.wav", "02_keep.wav", "01_old-name.wav", "03_old-pt2.wav"):
+                (d / n).write_bytes(b"x")
+            (d / "cover.jpg").write_bytes(b"x")          # 非音檔，不該被當孤兒
+            got = [f.name for f in release.find_orphans(d, ["01_keep.wav", "02_keep.wav"])]
+            self.assertEqual(got, ["01_old-name.wav", "03_old-pt2.wav"])
+            self.assertEqual(release.find_orphans(d, ["01_keep.wav", "02_keep.wav", "01_old-name.wav", "03_old-pt2.wav"]), [])
+
     def test_character_record_exists(self):
         ch = release.load_character("moni")
         self.assertIsNotNone(ch, "prompts/character/moni.json 應該存在")
