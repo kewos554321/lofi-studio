@@ -2,6 +2,18 @@
 
 本檔供 Claude Code / OpenCode 等 agent 快速上手。**先讀這裡再看程式。**
 
+## 文件定位（改動時只更新該更新的那份）
+
+| 文件 | 定位 | 什麼該放這裡 |
+|---|---|---|
+| `README.md` | 上手 | 前置、最小可行流程、指令總覽（**參數一律指向 `--help`，不手抄**） |
+| `docs/RUNBOOK.md` | 操作手冊 | 逐步流程、疑難排解、維運細節 |
+| `AGENTS.md`（本檔） | agent 速查 | 架構、不變的約定、踩過的坑 |
+| `docs/RECIPES.md` | 配方 | 量產用的錨定參數／成品配置 |
+| `docs/VISUAL_NAMING.md` | 規則 | 視覺檔名/資料夾命名 |
+
+> 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
+
 ## 專案是什麼
 
 本機（Mac M4 / 16GB）AI **lofi 音樂 → 長片影片**的產線，最終上傳 YouTube 頻道 **Drifted LoFi**。
@@ -68,6 +80,7 @@ python3 -m unittest discover -s tests -v
 
 - **可追溯**：任何生成都必須寫 sidecar + `catalog/tracks.jsonl`（prompt/seed/params）；圖片寫在該批 `assets/visuals/<kind><NN>/manifest.json`。沒記錄等於沒做。**紀錄是本機檔、不進版控**——git 只收 `catalog/*.jsonl`（音樂的事件流）。
   manifest 是「**一個 run 一份**」：該批固定的模型/尺寸/steps/cfg/negative… 放 `config`（所有圖共用，只寫一次），逐檔會變的 `prompt`/`seed` 列在 `images`。同一個 run 再跑只會**併寫**（新檔 append、舊檔就地更新），不會蓋掉既有紀錄；改某張的 prompt 就改 `images` 裡那一筆。寫入用 `visual.update_manifest()`，不要自己開檔覆寫。
+  `tracks.jsonl` 每筆是**精簡事件**（`catalog.summarize_event()`：只記發生什麼、帶 `schema_version`，**不含整包快照或 fingerprint**）——完整狀態在 sidecar。要避免事件流被撐大，別改成整包寫入。
 - **執行資訊要清楚**：任何生成前先用 `visual.print_run_header()` 印出工具、run-id、**哪個模型在跑**、參數與輸出路徑（逐張輸出也帶著模型短標籤），別讓 log 只剩下看不懂的進度行。
 - **生成互斥**：`generate`/`visual`/`cinemagraph` 取同一把鎖（`logs/.gpu.lock`），第二個程序會直接中止並印出持有者（避免 ACE-Step + SDXL 同時跑爆 RAM）。要排隊設 `LOFI_LOCK_WAIT=秒`；硬要同時跑設 `LOFI_NO_LOCK=1`。新模組若也吃 GPU/RAM，請照樣用 `from lofi.lock import gpu_lock`。
 - **設定集中**：模型檔名／ComfyUI 位址不要硬編散落，一律經 `src/lofi/config.py`（可用 `LOFI_*` 環境變數覆寫）。換模型只改一處，也可用 `lofi config` 查目前值。

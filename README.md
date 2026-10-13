@@ -269,33 +269,24 @@ python3 scripts/make_cinemagraph.py assets/visuals/sc07/sc07_01_window.png outpu
 
 ## 腳本參數速查
 
-> 下表 Python 指令請用 `./scripts/lofi <x>`（`<x>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload` / `config`）。`python3 scripts/<x>.py` 為相容 shim。`scripts/*.sh` 仍為 bash。
+> **各指令的完整參數以 `--help` 為準**（由 argparse 產生，改參數不必改文件）：
+> `./scripts/lofi <cmd> --help`、shell 腳本 `./scripts/<x>.sh --help`。
+> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload` / `config`；`python3 scripts/<x>.py` 為相容 shim。
 
-| 腳本 | 用法 |
-|---|---|
-| `build_long_mix.sh` | `OUTPUT CROSSFADE_SECONDS TRACK1 TRACK2 ...`（lofi 建議 6–10 秒淡入） |
-| `make_visual_loop.sh` | `INPUT_IMAGE OUTPUT.mp4 [DURATION=15] [FPS=30]` |
-| `make_cinemagraph.py` | `IMAGE OUT.mp4 [--duration 15] [--fps 30] [--check-loop] [--zoom .02] [--drift .004] [--temp .02] [--glow .55] [--flicker 0] [--carlight 0] [--steam 0] [--drops 0] [--dust .5] [--sway .012] [--curtain-sway 0] [--sheen .22] [--rain 0]` + 各分區 `--window/--lamp/--plant/--curtain-region/--steam-pos/--drop-region/--dust-region/--sheen-region`（強度設 0 即關；`--zoom 0 --drift 0` = 嚴格局部；完整參數見 `--help`） |
-| `generate_visual.py` | `[--count N] [--size 768x512] [--prompt P] [--negative N] [--ckpt NAME] [--upscale MODEL] [--upscale-out WxH] [--dry-run]` |
-| `render_video.sh` | `VISUAL_LOOP AUDIO OUTPUT.mp4 [FPS=30] [CRF=20]` |
-| `make_long_lofi.sh` | `[--generate \| --image PATH] [--minutes 10] [--loop 20] [--tracks ...] [--xfade 8] [--vbitrate 9] [--episode NAME] [--cg-args "..."] [--no-video-fade] [--keep-temp] [--out PATH]`（低負載：短 loop + `-c copy` 複製成長片，硬體編碼；`--episode` 一集一包） |
-| `make_episode.sh` | `--style NAME [--stage all\|music\|image\|video\|upload\|cleanup] [--episode NAME] [--minutes 30] [--count N] [--limit N] [--tracks ...] [--images N] [--image PATH] [--privacy private] [--archive DIR] [--no-upload] [--no-cleanup] [--smoke] [--dry-run]`（五段產線：音樂→圖片→影片→上傳→整理，可一條龍或分段測試；`--smoke` 小測試到上傳前） |
-| `archive_episode.sh` | `--episode NAME [--dest DIR] [--keep-visual] [--dry-run]`（封存到外接 archive/ 並清中間檔） |
-| `yt_upload.py` | `--episode NAME [--privacy private\|unlisted\|public] [--video PATH] [--dry-run]`（上傳到 YouTube；需 Google 憑證，見「自動上傳設定」） |
-| `separate_stems.sh` | `INPUT [four\|vocals] [OUTDIR]` |
-| `download_p2_models.sh` | `[--ace\|--sd\|all]`（下載到 `~/ComfyUI/models`） |
-| `launch_comfyui.sh` | 啟動 ComfyUI（MPS + fallback） |
-| `batch_generate.py` | `[--csv PATH] [--limit N] [--offset N] [--run-id NAME] [--no-resume] [--duration 120] [--seed N] [--sleep S] [--clean-raw] [--no-catalog] [--no-qc] [--dry-run]`（生成後自動寫入目錄+品檢；檔名含 run-id、可續傳） |
-| `batch_run.sh` | `--csv PATH [--chunk N] [--sleep S] [--rest S] [--total N] [--run-id NAME] [--clean-raw] [--gen-args "..."]`（量產 runner：分塊+log+續傳） |
-| `library.py` | `build \| query [--tag T] [--style S] [--verdict V] [--min-score N] \| summary \| tag --auto \| set-status keep ...`（SQLite 圖書館+自動標籤） |
-| `expand_style.py` | `--style NAME [--count 20] [--seed N] [--out PATH] [--dry-run]` |
-| `backfill_catalog.py` | `[--dry-run] [--force]`（把既有音檔補進目錄） |
-| `auto_qc.py` | `[FILE...] [--all] [--force] [--dedupe] [--index] [--json] [--set KEY=VAL]`（自動品檢） |
-| `visual_qc.py` | `[FILE...] [--all] [--force] [--no-write] [--expect WxH] [--json] [--set KEY=VAL]`（場景圖品檢：黑圖/純色/灰圖/壞檔） |
-| `make_meta.py` | `--video PATH --style NAME [--tracks ...] [--xfade N] [--tracklist JSON] [--title T] [--print]`（產生上片資訊） |
-| `upload_status.py` | `[--ready] [--json] [--min-duration S] [--mark-uploaded STEM] [--mark-scheduled STEM] [--url URL]`（上片佇列） |
-| `disk_report.sh` | （無參數）內接/外接容量、各目錄大小、可清理殘留一覽 |
-| `cleanup_outputs.sh` | `[--keep N] [--older-than DAYS] [--archive DIR] [--stems] [--apply]`（**預設只預覽**） |
+最常用的幾個：
+
+| 指令 | 用途 | 範例 |
+|---|---|---|
+| `lofi generate` | 批次生成音樂（ComfyUI） | `./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01` |
+| `lofi qc` | 音樂自動品檢 | `./scripts/lofi qc --all --index` |
+| `lofi library` | SQLite 圖書館 / 標籤 | `./scripts/lofi library build && ./scripts/lofi library summary` |
+| `lofi visual` | 生場景圖 | `./scripts/lofi visual --count 3 --size 768x512` |
+| `lofi visual-qc` | 場景圖品檢 | `./scripts/lofi visual-qc --all --force` |
+| `lofi meta` | 上片資訊 | `./scripts/lofi meta --video output/episodes/rl01/video.mp4 --style rainy_lofi` |
+| `lofi upload` | 上傳 YouTube | `./scripts/lofi upload --episode rl01` |
+| `lofi config` | 看集中設定（模型/位址） | `./scripts/lofi config` |
+
+產品線 shell 腳本（`make_episode` / `make_long_lofi` / `build_long_mix` / `render_video` / `archive_episode` / `cleanup_outputs` / `disk_report` / `separate_stems` / `launch_comfyui` / `download_p2_models` / `batch_run`）用各自的 `--help` 看用法；逐段流程見下方與 `docs/RUNBOOK.md`。
 
 ## P2：生成音樂（ACE-Step 1.5）與視覺（SDXL）
 

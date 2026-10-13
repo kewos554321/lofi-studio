@@ -25,6 +25,22 @@ python3 -m compileall -q src/lofi || { echo "  ❌ 編譯失敗"; fail=1; }
 echo "==> unittest"
 python3 -m unittest discover -s tests || { echo "  ❌ 測試失敗"; fail=1; }
 
+echo "==> README 子命令存在性"
+if python3 - "$ROOT" <<'PY'
+import re, sys, pathlib
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root / "src"))
+from lofi import cli
+readme = (root / "README.md").read_text(encoding="utf-8")
+used = set(re.findall(r"\./scripts/lofi ([a-z][a-z-]*)", readme))
+missing = sorted(used - set(cli.MODULES))
+if missing:
+    print("  ❌ README 提到不存在的子命令:", ", ".join(missing))
+    sys.exit(1)
+print(f"  ✅ README 提到的 {len(used)} 個子命令都存在")
+PY
+then :; else echo "  ❌ README 指令檢查失敗"; fail=1; fi
+
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck: scripts/*.sh"
   shellcheck scripts/*.sh || { echo "  ❌ shellcheck 有問題"; fail=1; }
