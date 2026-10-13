@@ -747,5 +747,75 @@ class TestWorkflowAssembly(unittest.TestCase):
             "x, 80 BPM, C major, instrumental")
 
 
+class TestParserFunctions(unittest.TestCase):
+    """把 ffmpeg/ffprobe 的 stderr 解析抽成純函式後，可用合成字串測試（不需真的 ffmpeg）。"""
+
+    def test_parse_ebur128(self):
+        err = ("  Integrated loudness:\n    I:         -14.0 LUFS\n"
+               "  Loudness range:\n    LRA:         6.0 LU\n"
+               "  True peak:\n    Peak:       -1.0 dBFS\n    Peak count:  3\n")
+        r = qc.parse_ebur128(err)
+        self.assertEqual(r["lufs"], -14.0)
+        self.assertEqual(r["lra"], 6.0)
+        self.assertEqual(r["true_peak"], -1.0)
+
+    def test_parse_ebur128_missing(self):
+        r = qc.parse_ebur128("no stats here")
+        self.assertIsNone(r["lufs"])
+        self.assertIsNone(r["true_peak"])
+
+    def test_parse_ebur128_takes_max_peak(self):
+        err = "    Peak:       -3.0 dBFS\n    Peak:       -0.5 dBFS\n"
+        self.assertEqual(qc.parse_ebur128(err)["true_peak"], -0.5)
+
+    def test_measure_ebur128_uses_parser(self):
+        """monkeypatch _run → 不需 ffmpeg 也能驗證解析被接上。"""
+        orig = qc._run
+        qc._run = lambda cmd: "    I:  -14.0 LUFS\n    Peak: -1.0 dBFS\n"
+        try:
+            self.assertEqual(qc.measure_ebur128("x.mp3")["lufs"], -14.0)
+        finally:
+            qc._run = orig
+
+    def test_parse_astats(self):
+        err = ("[Parsed_astats_0 @ 0x0] Overall\n"
+               "    DC offset: 0.000123\n    Peak level dB: -1.50\n"
+               "    RMS level dB: -18.20\n    Flat factor: 0.000\n"
+               "    Zero crossings rate: 0.123\n    Peak count: 5\n")
+        r = qc.parse_astats(err)
+        self.assertEqual(r["rms_db"], -18.20)
+        self.assertEqual(r["peak_db"], -1.50)
+        self.assertAlmostEqual(r["dc_offset"], 0.000123)
+
+    def test_parse_silence_ratio(self):
+        err = "silence_duration: 5\nsilence_duration: 5\n"
+        self.assertAlmostEqual(qc.parse_silence_ratio(err, 100.0), 0.1)
+        self.assertIsNone(qc.parse_silence_ratio(err, None))          # 無時長 → None
+        self.assertEqual(qc.parse_silence_ratio("silence_duration: 500", 100.0), 1.0)
+
+    def test_parse_ffprobe_info(self):
+        r = visual_qc.parse_ffprobe_info("1536,1024,rgb24\n")
+        self.assertEqual((r["width"], r["height"], r["pix_fmt"]), (1536, 1024, "rgb24"))
+        self.assertIsNone(visual_qc.parse_ffprobe_info(""))
+        self.assertIsNone(visual_qc.parse_ffprobe_info("abc"))
+
+    def test_parse_signalstats(self):
+        err = ("[Parsed_metadata_1 @ 0x0] lavfi.signalstats.YMIN=16.0\n"
+               "lavfi.signalstats.YAVG=110.5\nlavfi.signalstats.SATMAX=62.0\n")
+        r = visual_qc.parse_signalstats(err)
+        self.assertEqual(r["ymin"], 16.0)
+        self.assertEqual(r["satmax"], 62.0)
+
+    def test_parse_entropy(self):
+        self.assertEqual(visual_qc.parse_entropy(
+            "lavfi.entropy.normalized_entropy.normal.R=0.888\n"), 0.888)
+        self.assertIsNone(visual_qc.parse_entropy("garbage"))
+
+    def test_parse_duration(self):
+        self.assertEqual(media.parse_duration("120.50\n"), 120.5)
+        self.assertIsNone(media.parse_duration(""))
+        self.assertIsNone(media.parse_duration("N/A"))
+
+
 if __name__ == "__main__":
     unittest.main()

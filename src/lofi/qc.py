@@ -64,10 +64,16 @@ def _run(cmd):
 
 
 def measure_ebur128(path):
-    err = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
-                "-af", "ebur128=peak=true", "-f", "null", "-"])
-    # 結尾的「Integrated loudness / LRA / True peak」summary 行沒有 t: 前綴，
-    # 逐格輸出行則以 [Parsed_ebur128...] 開頭，故用行首錨定只取 summary。
+    return parse_ebur128(_run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+                               "-af", "ebur128=peak=true", "-f", "null", "-"]))
+
+
+def parse_ebur128(err):
+    """解析 ebur128 的 stderr（純函式，方便測試）。
+
+    結尾的「Integrated loudness / LRA / True peak」summary 行沒有 t: 前綴，
+    逐格輸出行則以 [Parsed_ebur128...] 開頭，故用行首錨定只取 summary。
+    """
     i = re.search(r"^\s+I:\s*(-?\d+\.?\d*)\s*LUFS", err, re.M)
     lra = re.search(r"^\s+LRA:\s*(-?\d+\.?\d*)\s*LU", err, re.M)
     peaks = [float(x) for x in re.findall(r"^\s+Peak:\s*(-?\d+\.?\d*)\s*dBFS", err, re.M)]
@@ -83,11 +89,9 @@ def _astats_overall(err):
     return err[idx:] if idx != -1 else err
 
 
-def measure_astats(path, pre_args=(), af=None):
-    cmd = ["ffmpeg", "-hide_banner", "-nostats", *pre_args, "-i", str(path)]
-    chain = (af + "," if af else "") + "astats=metadata=1:reset=0"
-    cmd += ["-af", chain, "-f", "null", "-"]
-    sec = _astats_overall(_run(cmd))
+def parse_astats(stderr):
+    """解析 astats 的 stderr（純函式）。"""
+    sec = _astats_overall(stderr)
 
     def g(name):
         m = re.search(rf"{re.escape(name)}:\s*(-?\d+\.?\d*)", sec)
@@ -103,13 +107,25 @@ def measure_astats(path, pre_args=(), af=None):
     }
 
 
-def measure_silence_ratio(path, duration):
-    err = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
-                "-af", "silencedetect=noise=-50dB:d=1", "-f", "null", "-"])
-    durs = [float(x) for x in re.findall(r"silence_duration:\s*(-?\d+\.?\d*)", err)]
+def measure_astats(path, pre_args=(), af=None):
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", *pre_args, "-i", str(path)]
+    chain = (af + "," if af else "") + "astats=metadata=1:reset=0"
+    cmd += ["-af", chain, "-f", "null", "-"]
+    return parse_astats(_run(cmd))
+
+
+def parse_silence_ratio(stderr, duration):
+    """由 silencedetect 的 stderr 與總時長算靜音比例（純函式）。"""
     if not duration:
         return None
+    durs = [float(x) for x in re.findall(r"silence_duration:\s*(-?\d+\.?\d*)", stderr)]
     return min(1.0, sum(durs) / duration)
+
+
+def measure_silence_ratio(path, duration):
+    return parse_silence_ratio(
+        _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+              "-af", "silencedetect=noise=-50dB:d=1", "-f", "null", "-"]), duration)
 
 
 def _mono_samples(path, sr):

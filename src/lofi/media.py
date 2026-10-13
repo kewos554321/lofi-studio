@@ -25,17 +25,22 @@ def run(cmd):
     return p.returncode, p.stdout, p.stderr
 
 
+def parse_duration(text):
+    """解析 ffprobe 的 duration 字串（純函式）；解不開回 None。"""
+    try:
+        return float((text or "").strip())
+    except ValueError:
+        return None
+
+
 def ffprobe_duration(path):
     """回傳秒數（float）；解不開回 None。"""
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", str(path)],
         capture_output=True, text=True,
-    ).stdout.strip()
-    try:
-        return float(out)
-    except ValueError:
-        return None
+    ).stdout
+    return parse_duration(out)
 
 
 # ----------------------------- 磁碟空間 -----------------------------

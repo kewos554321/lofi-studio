@@ -61,12 +61,16 @@ DEFAULT_THRESHOLDS = {
 # ----------------------------- 底層量測 -----------------------------
 
 def ffprobe_info(path):
-    """回傳 {'width','height','pix_fmt'}；解不開時寬高為 0。"""
-    out = subprocess.run(
+    return parse_ffprobe_info(subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height,pix_fmt", "-of", "csv=p=0", str(path)],
         capture_output=True, text=True,
-    ).stdout.strip()
+    ).stdout)
+
+
+def parse_ffprobe_info(out):
+    """解析 ffprobe csv 輸出（純函式）；解不開回 None。"""
+    out = (out or "").strip()
     if not out:
         return None
     parts = out.split(",")
@@ -88,11 +92,15 @@ def decode_stderr(path):
 
 def signalstats(path):
     """回傳亮度/彩度統計（yuv 有限範圍，Y:16-235、SAT:0-~180）。"""
-    err = subprocess.run(
+    return parse_signalstats(subprocess.run(
         ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
          "-vf", "signalstats,metadata=print", "-frames:v", "1", "-f", "null", "-"],
         capture_output=True, text=True,
-    ).stderr
+    ).stderr)
+
+
+def parse_signalstats(err):
+    """解析 signalstats 的 stderr（純函式）。"""
     keys = ("YMIN", "YLOW", "YAVG", "YHIGH", "YMAX", "SATAVG", "SATMAX")
     vals = {}
     for k in keys:
@@ -104,11 +112,15 @@ def signalstats(path):
 
 def entropy(path):
     """回傳 R 通道的 normalized_entropy（0=純色，照片約 0.7~0.97）。"""
-    err = subprocess.run(
+    return parse_entropy(subprocess.run(
         ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
          "-vf", "format=rgb24,entropy,metadata=print", "-frames:v", "1", "-f", "null", "-"],
         capture_output=True, text=True,
-    ).stderr
+    ).stderr)
+
+
+def parse_entropy(err):
+    """解析 entropy filter 的 stderr（純函式）。"""
     m = re.search(r"lavfi\.entropy\.normalized_entropy\.normal\.R=(-?\d+\.?\d*)", err)
     return float(m.group(1)) if m else None
 
