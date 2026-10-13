@@ -137,7 +137,7 @@ class TestVisualQC(unittest.TestCase):
 
 class TestVisualNaming(unittest.TestCase):
     """命名規則：資料夾 <kind><NN>、檔名 <run-id>_<NN>[_<slug>].<ext>。
-    規則說明見 docs/VISUAL_NAMING.md。"""
+    規則說明見 docs/NAMING.md。"""
 
     def test_output_filename(self):
         self.assertEqual(visual.output_filename("ds02", 7, "walk-side-fireplace"),

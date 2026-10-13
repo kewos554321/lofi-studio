@@ -189,7 +189,7 @@ lofi-studio/
 │   └── auto_qc.py / batch_generate.py / make_meta.py / …  # 相容 shim（實作在 src/lofi，新流程請用 scripts/lofi）
 ├── scratch/                   # 實驗／一次性腳本（不進版控）
 ├── tests/                     # python3 -m unittest discover -s tests -v
-├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、VISUAL_NAMING.md（命名規則）
+├── docs/                      # RUNBOOK.md（手冊）、RECIPES.md（配方）、LICENSING.md（商用授權）、NAMING.md（命名規則）
 ├── AGENTS.md                  # 給 AI coding agent 的專案說明
 ├── pyproject.toml             # 可選：pip install -e . 後有 `lofi` 指令
 ├── prompts/
@@ -483,7 +483,7 @@ lofi visual-qc --json > vqc.json     # 給程式用
 ```bash
 # 預設用 SDXL（DreamShaperXL）；prompt/負向詞已內建 1girl（不會再被 people/face 擋掉）
 ./scripts/lofi visual --count 3 --size 768x512
-# 一批一夾＋命名規則：資料夾 <kind><NN>、檔名 <run-id>_<NN>_<slug>.png（規則見 docs/VISUAL_NAMING.md）
+# 一批一夾＋命名規則：資料夾 <kind><NN>、檔名 <run-id>_<NN>_<slug>.png（規則見 docs/NAMING.md）
 ./scripts/lofi visual --run-id sc07 --slug window --count 3 --size 768x512
 # → assets/visuals/sc07/sc07_01_window.png、sc07_02_window.png…（此例的 run-id＝sc07）
 # manifest.json 一個 run 一份（config 共用 + images 逐檔 prompt/seed）；執行前會先印出「哪顆模型在跑」

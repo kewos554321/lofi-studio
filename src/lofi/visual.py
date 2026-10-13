@@ -4,7 +4,7 @@ generate_visual.py — 用 ComfyUI 生 lofi 場景圖（預設 SDXL；--ckpt 可
 
 產出的圖片放到 assets/visuals/<run-id>/（一批一夾）。命名規則：資料夾 `<kind><NN>`、檔名
 `<run-id>_<NN>[_<slug>].<ext>`（kind：`ref` 主角定裝參考／`ds` 訓練集／`sc` 場景風格測試；
-例 `ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`）。完整規則見 docs/VISUAL_NAMING.md。
+例 `ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`）。完整規則見 docs/NAMING.md。
 夾內 manifest.json 為「一個 run 一份」：
 固定配置（模型/尺寸/steps/cfg…）集中在 config 只寫一次，逐檔會變的 prompt/seed 列在 images，
 所以同一 run 再跑新圖或改某張的 prompt 都只是併寫（update_manifest），不會蓋掉舊紀錄。

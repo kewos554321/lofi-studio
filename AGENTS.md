@@ -11,7 +11,7 @@
 | `AGENTS.md`（本檔） | agent 速查 | 架構、不變的約定、踩過的坑 |
 | `docs/RECIPES.md` | 配方 | 量產用的錨定參數／成品配置 |
 | `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
-| `docs/VISUAL_NAMING.md` | 規則 | 視覺檔名/資料夾命名 |
+| `docs/NAMING.md` | 規則 | 視覺檔名/資料夾命名 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
@@ -89,7 +89,8 @@ python3 -m unittest discover -s tests -v
 - **寫入要原子**：sidecar / manifest / publish / token 等一律用 `lofi.io.atomic_write_*`（同目錄 tmp → `os.replace`），不要直接 `write_text`；append 事件流用 `lofi.io.append_jsonl`（自帶 flock）。讀到壞 JSON 先 `io.quarantine()` 隔離成 `*.corrupt-*`，**不可**當新檔覆蓋。理由：半截檔會被 `load_sidecar→None` 抹掉人工評分/標籤。
 - **生成前查空間**：會寫內接碟的生成流程先 `media.require_free(...)`（門檻 `config.MIN_FREE_GB`／`LOFI_MIN_FREE_GB`）；量測類工具（ffmpeg）先 `media.require("ffmpeg","ffprobe")`，且量測不到時 `qc` 要判 `error`，不可假通過。
 - **唯一命名**：生成檔名／目錄含 run 代號（音樂 `assets/tracks/<style>/<run>/`；圖片 `assets/visuals/<run-id>/`），禁止讓不同批次產生同名檔（會被覆蓋）。
-  圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/VISUAL_NAMING.md`。
+  圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/NAMING.md`。
+  音樂新 run 命名標準：`<run-id>_<NNNN>[_<slug>].mp3`（run-id 不可變、序號固定 4 位；`row_id`/`prompt`/`seed` 放 sidecar）。**`track_id` 記在 sidecar、不從檔名推算**；舊 run 檔名維持原樣不動。通用原則與遷移建議詳見 `docs/NAMING.md`。
 - **只加不刪**：`catalog/tracks.jsonl` 是 append-only 事件流。
 - **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。

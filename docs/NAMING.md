@@ -1,22 +1,86 @@
-# 視覺產物命名規則與對照表
+# 命名規則（Naming）
 
-> 由一次性遷移腳本產生（已移至 `scratch/`，不進版控）。
+產物分成兩大類：**音樂（tracks）** 與 **視覺（visuals）**。共同原則是「**身份唯一、可排序、好讀、不編可變狀態**」。
 
-## 規則
+## 通用原則
 
+1. **ASCII、小寫、無空白**。
+2. **分隔符不可出現在欄位內**（若用 `_` 分隔，欄位本身就不能含 `_`——這點音樂現況有瑕疵，見下）。
+3. **零填滿、固定寬度**的序號（可字串排序）。
+4. **批次前綴（run-id）**：glob 時同批排在一起，看名知批。
+5. **人看的標籤（slug）獨立、可選**，`-` 連接，**不當身份**。
+6. **衍生檔用保留字首**：`anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。
+7. **檔名不放可變狀態**（status、rating、"final"、一直 +1 的 v2…）。
+8. **內容雜湊（sha1）放 metadata**，不放檔名。
+9. **副檔名小寫**、與內容一致。
+10. **身份與檔名脫鉤**：真正的 ID 記在 sidecar/manifest，檔名只是「方便路徑」。
+
+---
+
+## 音樂（tracks）
+
+### 位置
 ```
-資料夾： <kind><NN>                    ref=主角定裝參考 / ds=LoRA 訓練集 / sc=場景風格測試
-檔名　： <run-id>_<NN>[_<slug>].<ext>   例 ds02_07_walk-side-fireplace.png
+assets/tracks/<style>/<run>/<檔名>.mp3
+assets/tracks/<style>/<run>/<檔名>.mp3.json   # sidecar（唯一真相）
 ```
 
-- **run-id 開頭**：同批排在一起，看名字就知道哪批。
-- **NN 兩位數**：照生成順序，一眼看出是第幾張。
-- **slug**：小寫英數短標籤，一眼看出內容。
-- **衍生檔 slug 保留字首**：`anim-`（動畫）、`cmp-`（對照合成）、`mask-`（遮罩）、`fix-`（後處理）。
-- 未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。
-- 例外：五段產線（`make_episode.sh` / `make_long_lofi.sh`）在 `--episode` 有值時，會**直接用 episode 名當 run-id**（例 `assets/visuals/rl01/`），方便一集對一集。
+### 目前檔名（跨時期，兩種都有）
+```
+rainy_lofi/legacy/rainy_lofi_01_00001.mp3                          # <style>_<row:2>_<seq:5>
+coastal_guitar/coastal01/coastal_guitar_01_coastal01_00002.mp3     # <style>_<row:2>_<run>_<seq:5>
+```
 
-## 對照表
+**已知瑕疵**（新 run 應避免）：
+- **分隔符衝突**：`_` 同時當分隔與出現在 `style`（`rainy_lofi`、`cozy_morning_v2`、`rnb_soul`）→ 無法可靠拆欄。
+- **重複**：`style` 在目錄也在檔名；`run`（`coastal01`）在目錄**又**在檔名。
+- **兩個像的數字**：`_01_`（CSV row）vs `_00002`（ComfyUI 序號）。
+- **跨時期不一致**（有 run／沒 run），程式需特判。
+
+### 標準（建議；套用於**新 run**，舊檔不動）
+```
+assets/tracks/<style>/<run>/<run-id>_<NNNN>[_<slug>].mp3
+```
+- `<run-id>`：批次碼，**不可變**（例 `coastal01`）。
+- `<NNNN>`：該批第幾首，**固定 4 位**零填滿（可排序）。
+- `<slug>`：可選短標籤，kebab-case（例 `seaside-afterglow`）。
+- `row_id`／`prompt`／`seed` 等一律放 **sidecar**，不塞檔名。
+- 例：`coastal_guitar/coastal01/coastal01_0001_seaside-afterglow.mp3`
+
+### 身份與 ID（重要）
+`track_id` 現在 = 檔名 stem。**標準做法**：`track_id` 明確記在 sidecar（=`<run-id>_<NNNN>`），**不要從檔名推算**——否則改名會打斷 `publish` 章節、`usage`、git 對應。
+
+---
+
+## 視覺（visuals）
+
+### 位置
+```
+assets/visuals/<kind><NN>/<檔名>.<ext>
+assets/visuals/<kind><NN>/manifest.json      # 一 run 一份（config 共用 + images 逐檔 prompt/seed）
+```
+
+### 規則（現行）
+```
+資料夾： <kind><NN>                     ref=主角定裝參考 / ds=LoRA 訓練集 / sc=場景風格測試
+檔名　： <run-id>_<NN>[_<slug>].<ext>     例 ds02_07_walk-side-fireplace.png
+```
+- **run-id 開頭**：同批排在一起，看名知批。
+- **NN 兩位數**：照生成順序。
+- **slug**：小寫英數短標籤（`-` 連接），一眼看出內容。
+- **衍生檔保留字首**：`anim-`／`cmp-`／`mask-`／`fix-`。
+- 未給 `--run-id` 時工具自動編號（`ref05` 之後給 `ref06`）。
+- 例外：五段產線（`make_episode.sh` / `make_long_lofi.sh`）在 `--episode` 有值時，**直接用 episode 名當 run-id**（例 `assets/visuals/rl01/`），一集對一集。
+
+### 標準補強（建議）
+- **序號位數**：`digits` 目前 2，一個 run 超過 99 張時字串排序會錯（`100` < `98`）→ 新 run 建議改 **3 或 4 位**。
+- 其餘（run-id 前綴、kebab slug、衍生保留字首）**已符合標準**。
+
+---
+
+## 歷史遷移對照（已套用，2026-10；保留備查）
+
+> 由一次性遷移腳本產生（已移至 `scratch/`，不進版控）。下列對照僅為歷史紀錄。
 
 | 新資料夾 | 舊資料夾 | 新檔名 | 舊檔名 |
 |---|---|---|---|
@@ -94,7 +158,7 @@
 
 - 目前的主角定裝參考：`ref04/ref04_01_gold-socks.png`
   （金眼黑貓＋白襪；另複製一份到 `~/ComfyUI/input/mascot_blackcat_ref.png` 供 IPAdapter 使用）
-- `ref05/` 是「眼睛偏大」版，尚未產出。
+- `ref05/` 是「眼睛偏大」版。
 
 ## 命名後各 run 的用途
 
@@ -111,4 +175,3 @@
 - `ds01/`（舊 `lora_ds01`）：manifest 7 筆
 - `ds02/`（舊 `lora_ds02`）：manifest 6 筆
 - `sc06/`（舊 `(根目錄散落)`）：manifest 4 筆
-
