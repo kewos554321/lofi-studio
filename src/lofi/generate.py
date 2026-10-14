@@ -69,7 +69,8 @@ def transcode_to_mp3(src, dst):
 
 
 def build_prompt(tags, bpm, key, duration, seed, prefix,
-                 steps=8, cfg_scale=2.0, temperature=0.85, audio_format="mp3"):
+                 steps=8, cfg_scale=2.0, temperature=0.85, audio_format="mp3",
+                 init_audio="", init_denoise=1.0):
     p = {
         "104": {"class_type": "UNETLoader", "inputs": {"unet_name": MUSIC_UNET, "weight_dtype": "default"}},
         "78":  {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["104", 0], "shift": 3.0}},
@@ -92,6 +93,16 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
         "107": {"class_type": "SaveAudioMP3", "inputs": {
                     "audio": ["18", 0], "filename_prefix": prefix, "quality": "V0"}},
     }
+    if init_audio:
+        # audio2audio：拿參考音檔（需在 ComfyUI/input/）的 latent 當起點。
+        # denoise 越低＝越保留參考（旋律輪廓清楚）；越高＝越自由（只留情緒與節奏骨架）。
+        # 版權注意：參考受保護的旋律時「像不像」是程度問題，建議搭配移調與高 denoise；
+        # 完整參數記在 sidecar 的 gen.init_audio / gen.init_denoise（衍生來源可追溯）。
+        p["110"] = {"class_type": "LoadAudio", "inputs": {"audio": init_audio}}
+        p["111"] = {"class_type": "VAEEncodeAudio",
+                    "inputs": {"audio": ["110", 0], "vae": ["106", 0]}}
+        p["3"]["inputs"]["latent_image"] = ["111", 0]
+        p["3"]["inputs"]["denoise"] = float(init_denoise)
     if audio_format == "flac":
         # 無損母帶：改用 SaveAudio 存 FLAC（同一條管線，只換存檔節點）。
         # 用途：串流發行的母帶來源；見 docs/DISTRIBUTION.md §6-3。
@@ -132,6 +143,9 @@ def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None):
             "format": getattr(args, "format", "mp3"),
             "model_license": model_license(MUSIC_UNET)["license"],
             "model_source": model_license(MUSIC_UNET)["source"],
+            # 衍生來源（audio2audio）：留空代表純文字生成
+            "init_audio": getattr(args, "init_audio", "") or None,
+            "init_denoise": getattr(args, "init_denoise", None) if getattr(args, "init_audio", "") else None,
         },
         "status": "unreviewed",
         "tags": [],
@@ -167,6 +181,11 @@ def main():
                     help="複製到 assets/tracks 後刪除 ComfyUI 原始輸出（省硬碟）")
     ap.add_argument("--format", default="mp3", choices=["mp3", "flac"],
                     help="輸出格式：mp3（預設，省空間）或 flac（無損母帶，供串流發行；見 docs/DISTRIBUTION.md）")
+    ap.add_argument("--init-audio", default="", dest="init_audio",
+                    help="audio2audio 參考音檔（檔名需在 ComfyUI/input/）：旋律會受它影響。"
+                         "版權提醒：參考受保護的旋律時，成品仍可能有衍生風險，建議搭移調與高 denoise")
+    ap.add_argument("--init-denoise", type=float, default=0.8, dest="init_denoise",
+                    help="參考音影響度（反指標）：0.3~0.5 旋律明顯跟著走；0.75~0.9 只留情緒與節奏骨架")
     ap.add_argument("--no-catalog", action="store_true",
                     help="不要寫入音樂目錄（sidecar / tracks.jsonl）")
     ap.add_argument("--no-qc", action="store_true",
@@ -247,6 +266,8 @@ def main():
 
             print(f"\n[{i}/{total}] id={rid} | {row.get('mood','')} | {bpm} BPM | {key} | seed={seed}")
             print(f"    {tags[:90]}…")
+            if args.init_audio:
+                print(f"    audio2audio 參考：{args.init_audio}（denoise {args.init_denoise}）")
 
             if args.dry_run:
                 continue
@@ -255,7 +276,8 @@ def main():
                 pid = comfy.submit(args.url, build_prompt(
                     tags, bpm, key, args.duration, seed, prefix,
                     steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature,
-                    audio_format=args.format),
+                    audio_format=args.format,
+                    init_audio=args.init_audio, init_denoise=args.init_denoise),
                     client_id="lofi-batch")
             except urllib.error.HTTPError as e:
                 print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
