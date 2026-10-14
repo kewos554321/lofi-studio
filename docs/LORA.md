@@ -248,7 +248,7 @@ python3 scratch/_tmp_zimage_gguf.py \
     --lora mnxy_probe.safetensors --lora-weight 1.0 \
     --prompt "mnxy, <場景與姿態>. Hand-painted watercolour anime illustration, \
               delicate brush strokes, warm nostalgic colour palette." \
-    --size 832x1216 --kind sc --slug <標籤>
+    --size 1472x832 --kind sc --slug <標籤>        # 16:9，與 1920x1080 影片同比例
 ```
 
 | 參數 | 說明 |

@@ -9,7 +9,8 @@
   LOFI_MUSIC_VAE       audio VAE 檔名
   LOFI_IMAGE_CKPT      場景圖 checkpoint 檔名
   LOFI_ZIMAGE_UNET/CLIP/VAE   Z-Image Turbo（GGUF）模型檔名
-  LOFI_ZIMAGE_LORA      Z-Image 主角 LoRA 檔名（空＝不掛）
+  LOFI_ZIMAGE_LORA      Z-Image 主角 LoRA 檔名（預設 mnxy_probe.safetensors）
+  LOFI_ZIMAGE_TRIGGER   主角 LoRA 的觸發詞（預設 mnxy）
   LOFI_ZIMAGE_LORA_WEIGHT     LoRA 權重（預設 1.0）
   LOFI_ZIMAGE_STYLE     畫風句（會接在 prompt 後面；觸發詞靠它才完整生效）
   LOFI_UPSCALE_MODEL   放大模型檔名
@@ -62,7 +63,9 @@ IMAGE_CKPT = _env("LOFI_IMAGE_CKPT", "DreamShaperXL-v1.0-Alpha2.safetensors")
 ZIMAGE_UNET = _env("LOFI_ZIMAGE_UNET", "z-image-turbo-Q5_K_M.gguf")
 ZIMAGE_CLIP = _env("LOFI_ZIMAGE_CLIP", "Qwen3-4B-Q8_0.gguf")
 ZIMAGE_VAE = _env("LOFI_ZIMAGE_VAE", "ae.safetensors")
-ZIMAGE_LORA = _env("LOFI_ZIMAGE_LORA", "")              # 空＝預設不掛 LoRA
+# 主角 LoRA：預設就掛（頻道主角是 Moni）。要生純場景圖用 --lora ""，或 LOFI_ZIMAGE_LORA 換一顆
+ZIMAGE_LORA = _env("LOFI_ZIMAGE_LORA", "mnxy_probe.safetensors")
+ZIMAGE_TRIGGER = _env("LOFI_ZIMAGE_TRIGGER", "mnxy")    # 主角 LoRA 的觸發詞（見 docs/LORA.md §2）
 ZIMAGE_LORA_WEIGHT = float(_env("LOFI_ZIMAGE_LORA_WEIGHT", "1.0"))
 # 畫風句：z-image 的觸發詞要有它才完全生效（docs/LORA.md §6）→ 集中在這裡，別散落各處
 ZIMAGE_STYLE = _env("LOFI_ZIMAGE_STYLE",
@@ -260,6 +263,7 @@ def as_dict():
         "zimage_clip": ZIMAGE_CLIP,
         "zimage_vae": ZIMAGE_VAE,
         "zimage_lora": ZIMAGE_LORA or "（無；見 LOFI_ZIMAGE_LORA）",
+        "zimage_trigger": ZIMAGE_TRIGGER,
         "zimage_lora_weight": ZIMAGE_LORA_WEIGHT,
         "upscale_model": UPSCALE_MODEL,
         "min_free_gb": MIN_FREE_GB,
@@ -287,6 +291,7 @@ SH_VARS = {
     "LOFI_ZIMAGE_CLIP": ZIMAGE_CLIP,
     "LOFI_ZIMAGE_VAE": ZIMAGE_VAE,
     "LOFI_ZIMAGE_LORA": ZIMAGE_LORA,
+    "LOFI_ZIMAGE_TRIGGER": ZIMAGE_TRIGGER,
     "LOFI_UPSCALE_MODEL": UPSCALE_MODEL,
 }
 

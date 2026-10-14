@@ -298,6 +298,11 @@ lofi visual-qc --json > vqc.json     # 只看結果不寫檔：--no-write
 
 主角 LoRA 是在 **Z-Image Turbo** 上訓練的，**只能走這條**（`lofi visual` 是 SDXL，掛不上）。
 
+> **這也是 `make_episode.sh --stage image` 的預設引擎**：第 2 段預設就用 Z-Image ＋ Moni LoRA
+> （`--size` 預設 `1472x832`＝16:9、放大到 `1920x1080`，所以影片端 scale+crop 不會裁到內容）。
+> 要走舊流程加 `--image-engine sdxl`；換場景用 `--image-prompt "mnxy, <場景>"`；
+> 整段不掛主角用 `--lora ""`。LoRA 由 `config.ZIMAGE_LORA` 決定（預設 `mnxy_probe.safetensors`）。
+
 ```bash
 # 一次性：LoRA 放進 ComfyUI 並登錄授權（config.MODEL_LICENSES；本專案 fail-closed）
 cp output/lora/probe_mnxy/run/mnxy_probe.safetensors ~/ComfyUI/models/loras/
@@ -441,7 +446,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | 段 | 指令本體 | 產物 |
 |---|---|---|
 | `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
-| `image` | `generate_visual`（ComfyUI + SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
+| `image` | `lofi zimage`（**Z-Image Turbo ＋ 主角 LoRA＝Moni**；`--image-engine sdxl` 退回舊 SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
 | `upload` | `yt_upload`（YouTube Data API，預設 private） | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |

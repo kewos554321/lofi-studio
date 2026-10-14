@@ -4,7 +4,7 @@
 #
 # 五段各自獨立、可單獨執行（方便測試）；--stage all（預設）則一條龍跑完。
 #   1) music   展開清單 -> 生成音樂 -> 品檢 -> 圖書館
-#   2) image   ComfyUI + SDXL 生場景圖
+#   2) image   ComfyUI 生場景圖（預設 Z-Image Turbo ＋ 主角 LoRA＝Moni；--image-engine sdxl 走舊流程）
 #   3) video   挑 keeper -> 混音 -> cinemagraph -> 合成影片 -> 上片資訊
 #   4) upload  上傳到 YouTube（上線前自動；需一次性憑證，見 README「自動上傳設定」）
 #   5) cleanup 封存到外接 archive/ 並清中間檔
@@ -30,10 +30,14 @@
 #   --images N                     圖片階段生幾張（預設 1）
 #   --image PATH                   影片沿用既有圖（給了就跳過 image 階段）
 #   --upscale NAME                 生圖放大模型（預設 RealESRGAN_x4plus_anime_6B.pth；未安裝則跳過）
-#   --upscale-out WxH              放大後尺寸（預設生成尺寸×2）
+#   --upscale-out WxH              放大後尺寸（sdxl 預設生成尺寸×2；zimage 預設 1920x1080）
 #   --no-upscale                   關閉生圖放大
 #   --size WxH                     生圖尺寸（預設 768x512）
-#   --ckpt NAME                    生圖 checkpoint（預設 DreamShaperXL-v1.0-Alpha2.safetensors）
+#   --ckpt NAME                    生圖 checkpoint（**只給 sdxl 引擎用**）
+#   --image-engine sdxl|zimage     生圖引擎（預設 zimage＝Z-Image Turbo＋主角 LoRA）
+#   --image-prompt "..."           生圖 prompt（zimage 只寫「場景」，觸發詞與畫風句自動處理）
+#   --lora NAME --lora-weight W    主角 LoRA（預設 mnxy_probe.safetensors／1.0；給空字串＝不掛）
+#                                  想永久改用 LOFI_ZIMAGE_LORA / LOFI_ZIMAGE_LORA_WEIGHT
 #   --seed N                       固定亂數種子（音樂/圖片共用）
 #   --chunk N --sleep N            音樂批次大小 / 散熱秒數（預設 20 / 30）
 #   --xfade N --loop N --fps N --vbitrate N   傳給 make_long_lofi.sh
@@ -66,9 +70,15 @@ IMAGES=1
 IMAGE=""
 UPSCALE="${LOFI_UPSCALE_MODEL:-}"
 UPSCALE_OUT=""
+UPSCALE_OUT_SET=0
 NO_UPSCALE=0
 SIZE="768x512"
 CKPT="${LOFI_IMAGE_CKPT:-}"
+SIZE_SET=0
+ENGINE="${LOFI_IMAGE_ENGINE:-zimage}"                       # 生圖引擎：zimage（Moni）／sdxl
+IMG_PROMPT="${LOFI_IMAGE_PROMPT:-}"                          # 空＝用內建場景（會帶觸發詞）
+LORA="${LOFI_ZIMAGE_LORA-mnxy_probe.safetensors}"            # 主角 LoRA（空字串＝不掛）
+LORA_WEIGHT="${LOFI_ZIMAGE_LORA_WEIGHT:-1.0}"
 SEED=""
 CHUNK=20
 SLEEP=30
@@ -106,9 +116,13 @@ while [ $# -gt 0 ]; do
     --images)  IMAGES="$2"; shift 2;;
     --image)   IMAGE="$2"; shift 2;;
     --upscale) UPSCALE="$2"; shift 2;;
-    --upscale-out) UPSCALE_OUT="$2"; shift 2;;
+    --upscale-out) UPSCALE_OUT="$2"; UPSCALE_OUT_SET=1; shift 2;;
     --no-upscale) NO_UPSCALE=1; shift;;
-    --size)    SIZE="$2"; shift 2;;
+    --size)    SIZE="$2"; SIZE_SET=1; shift 2;;
+    --image-engine) ENGINE="$2"; shift 2;;
+    --image-prompt) IMG_PROMPT="$2"; shift 2;;
+    --lora)    LORA="$2"; shift 2;;
+    --lora-weight) LORA_WEIGHT="$2"; shift 2;;
     --ckpt)    CKPT="$2"; shift 2;;
     --seed)    SEED="$2"; shift 2;;
     --chunk)   CHUNK="$2"; shift 2;;
@@ -131,6 +145,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$STYLE" ] || { echo "錯誤: 需要 --style（見 prompts/styles/）" >&2; exit 1; }
+case "$ENGINE" in sdxl|zimage) ;; *) echo "錯誤: --image-engine 只能是 sdxl 或 zimage（給的是 ${ENGINE}）" >&2; exit 1;; esac
 if [ -z "$EPISODE" ]; then
   if [ "$SMOKE" = 1 ]; then EPISODE="${STYLE}-smoke"; else EPISODE="${STYLE}-$(date +%m%d-%H%M)"; fi
 fi
@@ -187,6 +202,12 @@ stage_image() {
     return 0
   fi
   need_comfy
+  # zimage 引擎的尺寸預設：16:9 原生尺寸（影片端 scale+crop 到 1920x1080 時不裁掉內容），
+  # 放大後直接等於影片解析度，cinemagraph 也在 1080p 跑（與舊 SDXL 流程的 1536x1024 同量級）。
+  if [ "$ENGINE" = "zimage" ]; then
+    [ "$SIZE_SET" = 1 ] || SIZE="1472x832"
+    if [ "$UPSCALE_OUT_SET" = 0 ]; then UPSCALE_OUT="1920x1080"; fi
+  fi
   local sargs=()
   if [ -n "$SEED" ]; then sargs=(--seed "$SEED"); fi
   local uargs=()
@@ -199,9 +220,30 @@ stage_image() {
       echo "  （未安裝放大模型 ${UPSCALE}；跳過。可跑 ./scripts/download_p2_models.sh --upscale）"
     fi
   fi
-  run ./scripts/lofi visual --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
-      --prefix "$EPISODE" --run-id "$RUN_ID" --clean-raw \
-      "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
+  if [ "$ENGINE" = "zimage" ]; then
+    # Z-Image Turbo ＋ 主角 LoRA：prompt 只寫場景，觸發詞與畫風句由 lofi zimage 處理
+    local pargs=()
+    if [ -n "$IMG_PROMPT" ]; then
+      pargs=(--prompt "$IMG_PROMPT")
+    else
+      pargs=(--prompt "${LOFI_ZIMAGE_TRIGGER:-mnxy}, sitting in a cosy corner of a cafe with a warm drink, looking at the viewer")
+    fi
+    local largs=()
+    if [ -n "$LORA" ]; then
+      largs=(--lora "$LORA" --lora-weight "$LORA_WEIGHT")
+      echo "  主角 LoRA: ${LORA}（強度 ${LORA_WEIGHT}）"
+    else
+      echo "  （未掛 LoRA：這批不會有主角 Moni）"
+    fi
+    run ./scripts/lofi zimage --count "$IMAGES" --size "$SIZE" \
+        --prefix "$EPISODE" --run-id "$RUN_ID" --clean-raw \
+        "${pargs[@]}" "${largs[@]+"${largs[@]}"}" \
+        "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
+  else
+    run ./scripts/lofi visual --count "$IMAGES" --size "$SIZE" --ckpt "$CKPT" \
+        --prefix "$EPISODE" --run-id "$RUN_ID" --clean-raw \
+        "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
+  fi
   echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json；ComfyUI 原檔已刪）"
 }
 

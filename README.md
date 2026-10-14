@@ -127,6 +127,8 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ```bash
 # 一條龍（五段全跑）：1 小時一集
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40
+#   第 2 段生圖預設就是 Z-Image Turbo ＋ 主角 LoRA（Moni）：1472x832（16:9）→ 放大 1920x1080
+#   退回舊 SDXL 流程 --image-engine sdxl；換場景 --image-prompt "mnxy, <場景>"
 
 # 分段單獨跑（測試用）——每段產物就是下一段的輸入，可任意從中段接續
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20   # 只生音樂

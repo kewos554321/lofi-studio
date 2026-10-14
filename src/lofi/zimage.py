@@ -13,9 +13,9 @@
 （`config` 記模型與 `lora`/`lora_weight`，`images` 記逐檔 prompt/seed）。命名見 docs/NAMING.md。
 
 用法:
-  lofi zimage --prompt "mnxy, sitting on a bench, seaside sunset" --kind sc --slug seaside
-  lofi zimage --lora mnxy_probe.safetensors --lora-weight 1.0 --prompt "mnxy, …"   # 掛主角 LoRA
-  lofi zimage --count 3 --slug desk                       # 同 prompt、三顆隨機 seed
+  lofi zimage --prompt "mnxy, sitting on a bench, seaside sunset" --kind sc --slug seaside   # 1472x832 (16:9)
+  lofi zimage --count 3 --slug desk                       # 同 prompt、三顆隨機 seed（模型只載入一次）
+  lofi zimage --lora "" --prompt "…"                      # 不掛主角 LoRA（純場景圖）
   lofi zimage --init-image base.png --mask area.png --denoise 0.85 --prompt "…"    # 局部重繪
   lofi zimage --upscale RealESRGAN_x4plus_anime_6B.pth --prompt "…"
   lofi zimage --dry-run                                   # 只印設定與授權檢查
@@ -116,7 +116,8 @@ def main():
                     help="畫風句（接在 prompt 後面；空字串＝不加）。預設取自 config.ZIMAGE_STYLE，"
                          "少了它觸發詞只綁得住物種、花色會飄（docs/LORA.md §6）")
     ap.add_argument("--count", type=int, default=1)
-    ap.add_argument("--size", default="832x1216")
+    ap.add_argument("--size", default="1472x832",
+                    help="寬x高（預設 1472x832＝16:9，與 1920x1080 影片同比例）")
     ap.add_argument("--steps", type=int, default=8)
     ap.add_argument("--cfg", type=float, default=1.0)
     ap.add_argument("--shift", type=float, default=3.0)
@@ -132,7 +133,8 @@ def main():
     ap.add_argument("--run-id", default="",
                     help="批次代號＝資料夾名，建議 <kind><NN>（例 cv01）；未給則自動 <kind><NN>")
     ap.add_argument("--lora", default=ZIMAGE_LORA,
-                    help="LoRA 檔名（放 ComfyUI/models/loras/），例：mnxy_probe.safetensors")
+                    help="主角 LoRA（放 ComfyUI/models/loras/）。預設取自 config.ZIMAGE_LORA；"
+                         "給空字串＝不掛（純場景圖）")
     ap.add_argument("--lora-weight", type=float, default=ZIMAGE_LORA_WEIGHT, dest="lora_weight",
                     help="LoRA 權重（預設 1.0；實測 1.0 就是在模型上）")
     ap.add_argument("--init-image", default="", help="局部重繪的基準圖（需在 ComfyUI/input/）")
