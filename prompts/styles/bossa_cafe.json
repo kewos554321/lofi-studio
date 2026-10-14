@@ -1,0 +1,27 @@
+{
+  "name": "bossa_cafe",
+  "version": 1,
+  "description": "咖啡廳 Bossa Nova lofi：尼龍弦吉他撥奏、輕刷鼓與沙鈴、柔軟低音提琴，午后咖啡館的慵懶陽光。參考「Cafe Bossa / Afternoon at the Veranda」。",
+  "backbone": "lofi bossa nova, nylon-string guitar, soft brushed drums, warm tape saturation, gentle vinyl crackle, mellow, instrumental",
+  "closing": "sunny, breezy, cosy, sophisticated, low fidelity texture",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients, no heavy distortion, no loud brass",
+  "duration": 120,
+  "bpm_range": [68, 86],
+  "keys": ["C major", "F major", "Bb major", "G major", "D minor", "A minor"],
+  "instruments": [
+    "nylon-string guitar bossa rhythm, soft brushed drums, upright bass",
+    "classical guitar plucks, light shaker, soft rimshot drums",
+    "bossa nova guitar chords, soft kick, warm upright bass",
+    "fingerpicked nylon guitar, gentle brushed snare, mellow bass, soft flute melody",
+    "warm guitar arpeggio, light cajon, deep soft bass",
+    "mellow guitar comping, soft shaker, brushed drums, rhodes accents"
+  ],
+  "moods": [
+    "afternoon coffee at the cafe",
+    "sunlit cafe veranda",
+    "bossa afternoon",
+    "slow coffee sipping",
+    "warm cafe corner",
+    "breeze through the window"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "bossa_quartet",
+  "version": 1,
+  "description": "咖啡廳 Bossa Nova lofi（爵士四重奏編制）：尼龍弦吉他、爵士鋼琴、低音提琴、刷鼓，午后咖啡館的慵懶陽光。鼓刻意壓輕（刷鼓為主、無 kick 重擊）。",
+  "backbone": "lofi bossa nova, jazz quartet, nylon-string guitar, soft jazz piano, upright bass, brushed drums, warm tape saturation, gentle vinyl crackle, mellow, instrumental",
+  "closing": "sunny, breezy, cosy, sophisticated, low fidelity texture, drums low in the mix",
+  "negative": "no vocals, no EDM drop, no harsh synths, no loud transients, no heavy drums, no loud kick drum, no hard snare, no drum machine, no loud brass",
+  "duration": 120,
+  "bpm_range": [68, 84],
+  "keys": ["C major", "F major", "Bb major", "G major", "D minor", "A minor"],
+  "instruments": [
+    "nylon-string guitar bossa rhythm, soft jazz piano, upright bass, brushed drums",
+    "classical guitar plucks, rhodes chords, walking upright bass, light brushes",
+    "bossa nova guitar chords, jazz piano voicings, deep upright bass, soft brushed snare",
+    "fingerpicked nylon guitar, mellow piano, upright bass, light shaker instead of drums",
+    "warm guitar comping, piano accents, soft bass, brushed drums very low in the mix",
+    "bossa guitar arpeggio, soft flute melody, upright bass, gentle brushes"
+  ],
+  "moods": [
+    "afternoon coffee at the cafe",
+    "sunlit cafe veranda",
+    "bossa afternoon",
+    "slow coffee sipping",
+    "warm cafe corner",
+    "quartet at the cafe"
+  ]
+}
