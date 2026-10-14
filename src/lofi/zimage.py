@@ -106,6 +106,22 @@ def build(pos, w, h, seed, steps, cfg, prefix, shift=3.0,
     return g
 
 
+def compose_prompt(prompt, style=""):
+    """把畫風句接在 prompt 後面（缺標點就補句點）。
+
+    z-image 的觸發詞要有畫風句才完整生效（docs/LORA.md §6）：少了它只綁得住物種、花色會飄。
+    """
+    prompt = (prompt or "").strip()
+    style = (style or "").strip()
+    if not style:
+        return prompt
+    if not prompt:
+        return style
+    if prompt.endswith((".", "!", "?", "。")):
+        return f"{prompt} {style}"
+    return f"{prompt}. {style}"
+
+
 def main():
     ap = argparse.ArgumentParser(prog="lofi zimage",
                                  description="Z-Image Turbo（GGUF）生場景圖——主角 LoRA 的產線路徑")
@@ -167,10 +183,7 @@ def main():
     if args.mask and not args.init_image:
         sys.exit("--mask 要搭配 --init-image（遮罩是「這張圖的哪一塊要重畫」）")
 
-    prompt = args.prompt.strip()
-    if args.style:
-        st = args.style.strip()
-        prompt = f"{prompt} {st}" if prompt.endswith((".", "!", "?", "。")) else f"{prompt}. {st}"
+    prompt = compose_prompt(args.prompt, args.style)
     if args.lora and args.style.strip().lower()[:20] not in prompt.lower():
         print("  ⚠️  prompt 沒帶畫風句：觸發詞只會綁住物種，花色可能飄（docs/LORA.md §6）")
 

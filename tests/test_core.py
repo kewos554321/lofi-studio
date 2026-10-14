@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,7 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lofi import (backfill, catalog, character, config, expand, generate,  # noqa: E402
-                  gumroad, io, library, media, meta, qc, release, upload, visual, visual_qc)
+                  gumroad, io, library, media, meta, qc, release, upload, visual,
+                  visual_qc, zimage)
 
 
 def _png_with_prompt(path, workflow):
@@ -1640,6 +1642,144 @@ class TestGumroad(unittest.TestCase):
         for tag in ("<h3>", "<ul>", "<ol>", "<li>", "<p>"):
             self.assertNotIn(tag, listing["long"])         # 純文字版不該有標籤
         self.assertIn("02  <C>", listing["long"])           # 純文字不 escape（原文照登）
+
+
+class TestZImageWorkflow(unittest.TestCase):
+    """Z-Image Turbo（GGUF）的節點圖：LoRA 只掛 DiT、放大鏈、inpaint 分支。"""
+
+    def _g(self, **kw):
+        base = dict(unet="U.gguf", clip="C.gguf", vae="V.safetensors")
+        base.update(kw)
+        return zimage.build("mnxy, test", 1472, 832, 42, 8, 1.0, "pre", **base)
+
+    def test_default_graph_is_txt2img(self):
+        g = self._g()
+        self.assertEqual(g["1"]["inputs"]["unet_name"], "U.gguf")
+        self.assertEqual(g["2"]["inputs"], {"clip_name": "C.gguf", "type": "lumina2"})
+        self.assertNotIn("19", g)                                  # 沒給 LoRA 就不插節點
+        self.assertEqual(g["4"]["inputs"]["model"], ["1", 0])      # 直連 UNet
+        self.assertEqual(g["7"]["inputs"]["width"], 1472)
+        self.assertEqual(g["7"]["inputs"]["height"], 832)
+        ks = g["8"]["inputs"]
+        self.assertEqual((ks["model"], ks["positive"], ks["negative"]), (["4", 0], ["5", 0], ["6", 0]))
+        self.assertEqual(ks["latent_image"], ["7", 0])             # 空 latent
+        self.assertEqual((ks["seed"], ks["steps"], ks["cfg"]), (42, 8, 1.0))
+        self.assertEqual(g["10"]["inputs"]["images"], ["9", 0])
+        self.assertEqual(g["10"]["inputs"]["filename_prefix"], "pre")
+
+    def test_lora_is_model_only_and_feeds_sampling(self):
+        g = self._g(lora="L.safetensors", lora_weight=0.8)
+        self.assertEqual(g["19"]["class_type"], "LoraLoaderModelOnly")   # 不是 LoraLoader
+        self.assertEqual(g["19"]["inputs"]["lora_name"], "L.safetensors")
+        self.assertEqual(g["19"]["inputs"]["strength_model"], 0.8)
+        self.assertNotIn("strength_clip", g["19"]["inputs"])   # z-image LoRA 沒有文字編碼器模組
+        self.assertEqual(g["19"]["inputs"]["model"], ["1", 0])
+        self.assertEqual(g["4"]["inputs"]["model"], ["19", 0])  # 取樣設定吃 LoRA 的輸出
+        self.assertEqual(g["8"]["inputs"]["model"], ["4", 0])   # → txt2img／inpaint 兩條路都吃到
+
+    def test_upscale_chain_defaults_to_2x(self):
+        g = self._g(upscale_model="UP.pth")
+        self.assertEqual(g["16"]["inputs"]["model_name"], "UP.pth")
+        self.assertEqual(g["17"]["inputs"]["image"], ["9", 0])
+        self.assertEqual(g["18"]["inputs"]["image"], ["17", 0])
+        self.assertEqual(g["18"]["inputs"]["width"], 1472 * 2)
+        self.assertEqual(g["18"]["inputs"]["height"], 832 * 2)
+        self.assertEqual(g["10"]["inputs"]["images"], ["18", 0])
+
+    def test_upscale_explicit_size(self):
+        g = self._g(upscale_model="UP.pth", up_out=(3000, 3000))
+        self.assertEqual((g["18"]["inputs"]["width"], g["18"]["inputs"]["height"]), (3000, 3000))
+
+    def test_inpaint_branch_replaces_latent(self):
+        g = self._g(init_image="base.png", mask_image="m.png", denoise=0.85)
+        for n in ("11", "12", "13", "14", "15"):
+            self.assertIn(n, g)
+        self.assertEqual(g["8"]["inputs"]["latent_image"], ["15", 0])
+        self.assertEqual(g["8"]["inputs"]["denoise"], 0.85)
+        self.assertNotIn("7", g)                                  # 不再用空 latent
+
+    def test_compose_prompt_appends_style(self):
+        self.assertEqual(zimage.compose_prompt("a cat", "watercolour"), "a cat. watercolour")
+        self.assertEqual(zimage.compose_prompt("a cat.", "watercolour"), "a cat. watercolour")
+        self.assertEqual(zimage.compose_prompt("a cat!", "watercolour"), "a cat! watercolour")
+        self.assertEqual(zimage.compose_prompt("a cat", ""), "a cat")      # 不給畫風句
+        self.assertEqual(zimage.compose_prompt("  a cat  ", "  "), "a cat")
+        self.assertEqual(zimage.compose_prompt("", "watercolour"), "watercolour")
+
+
+class TestZImageConfig(unittest.TestCase):
+    """z-image 產線的設定接線（模型檔名集中在 config，shell 由 `lofi config --sh` 取得）。"""
+
+    def test_settings_exist(self):
+        for k in ("ZIMAGE_UNET", "ZIMAGE_CLIP", "ZIMAGE_VAE", "ZIMAGE_LORA",
+                  "ZIMAGE_LORA_WEIGHT", "ZIMAGE_STYLE", "ZIMAGE_TRIGGER"):
+            self.assertTrue(hasattr(config, k), k)
+            self.assertTrue(str(getattr(config, k)).strip(), k)
+        self.assertIsInstance(config.ZIMAGE_LORA_WEIGHT, float)
+        self.assertIn("1472x832", zimage.__doc__ or "" + "" ) or None   # 文件有寫 16:9 預設
+
+    def test_shell_export_and_display_include_zimage(self):
+        for k in ("LOFI_ZIMAGE_UNET", "LOFI_ZIMAGE_CLIP", "LOFI_ZIMAGE_VAE",
+                  "LOFI_ZIMAGE_LORA", "LOFI_ZIMAGE_TRIGGER"):
+            self.assertIn(k, config.SH_VARS)
+        d = config.as_dict()
+        for k in ("zimage_unet", "zimage_clip", "zimage_vae", "zimage_lora", "zimage_trigger"):
+            self.assertIn(k, d)
+
+    def test_protagonist_lora_is_registered_for_commercial_use(self):
+        """fail-closed 授權守門：預設主角 LoRA 必須已登錄且可商用，否則產線會被擋。"""
+        info = config.model_license("mnxy_probe.safetensors")
+        self.assertTrue(info["commercial"])
+        self.assertNotEqual(info["license"], config.UNKNOWN_LICENSE["license"])
+
+
+class TestMakeEpisodeImageEngine(unittest.TestCase):
+    """第 2 段生圖的預設引擎＝z-image ＋ 主角 LoRA（回歸測試：別退回 SDXL-only）。"""
+
+    SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "make_episode.sh"
+    UPSCALE = Path.home() / "ComfyUI" / "models" / "upscale_models" / "RealESRGAN_x4plus_anime_6B.pth"
+
+    def _dry(self, *args):
+        out = subprocess.run(["bash", str(self.SCRIPT), "--style", "cozy_morning",
+                              "--stage", "image", "--episode", "t01", "--dry-run", *args],
+                             capture_output=True, text=True, timeout=180)
+        self.assertEqual(out.returncode, 0, (out.stderr or out.stdout)[-500:])
+        return out.stdout
+
+    def test_default_engine_is_zimage_with_moni_lora(self):
+        s = self._dry("--no-upscale")
+        self.assertIn("lofi zimage", s)
+        self.assertNotIn("lofi visual", s)
+        self.assertIn("--lora mnxy_probe.safetensors", s)
+        self.assertIn("--size 1472x832", s)          # 16:9：影片端 scale+crop 不裁內容
+
+    def test_upscale_out_defaults_to_1080p(self):
+        if not self.UPSCALE.exists():
+            self.skipTest("未安裝放大模型（download_p2_models.sh --upscale）")
+        self.assertIn("--upscale-out 1920x1080", self._dry())
+
+    def test_sdxl_engine_still_available(self):
+        s = self._dry("--image-engine", "sdxl", "--no-upscale")
+        self.assertIn("lofi visual", s)
+        self.assertIn("--ckpt DreamShaperXL-v1.0-Alpha2.safetensors", s)
+        self.assertNotIn("lofi zimage", s)
+
+    def test_lora_can_be_disabled(self):
+        s = self._dry("--lora", "", "--no-upscale")
+        self.assertIn("lofi zimage", s)
+        self.assertNotIn("--lora", s)
+        self.assertIn("不會有主角", s)
+
+    def test_image_prompt_override(self):
+        self.assertIn("--prompt mnxy, in a bamboo grove",
+                      self._dry("--image-prompt", "mnxy, in a bamboo grove", "--no-upscale"))
+
+    def test_unknown_engine_is_rejected(self):
+        out = subprocess.run(["bash", str(self.SCRIPT), "--style", "cozy_morning",
+                              "--stage", "image", "--image-engine", "foo", "--dry-run"],
+                             capture_output=True, text=True, timeout=180)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("--image-engine", out.stderr + out.stdout)
 
 
 if __name__ == "__main__":
