@@ -242,15 +242,17 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 - 生成會取 `logs/.gpu.lock` 互斥鎖：音樂生成跑著時會直接中止（保護 16GB RAM）。
 - **鎖角色：LoRA 是正解**。IPAdapter 只注入 CLIP 特徵、不搬像素，白襪這種小面積特徵鎖不牢；
   定裝與訓練流程見 [`LORA.md`](LORA.md)（本機只生資料集，訓練在 RunPod）。
-  訓好後用 `lofi visual --lora moni.safetensors --lora-weight 0.8`（workflow 會接成 checkpoint → LoRA → IPAdapter）。
+  訓好後用 `lofi zimage --lora mnxy_probe.safetensors --lora-weight 1.0`（**z-image 的 LoRA 只能走這條**；
+  `lofi visual --lora` 是 SDXL 流程，架構不同掛不上——見 [`LORA.md`](LORA.md) §6）。
   ⚠️ **定裝以 `prompts/character/moni.json` 為唯一來源**（純黑毛＋琥珀金眼＋四腳白襪）。
 - **訓練前先跑** `./scripts/lofi character check`：檢查訓練集（a）每張有沒有字幕、
   （b）字幕是否與定裝一致、（c）負向詞是否對抗錯誤特徵、（d）張數是否夠（建議 ≥20）。
   它把「manifest 記了但磁碟沒有」視為**正常的人工剔除**（不報錯），只報留下來那些圖的問題。
-- **要訓 LoRA 請走 [`LORA.md`](LORA.md)**：本機 16GB 不可能訓練（推論都只剩 6.5GB 餘裕），
-  流程是「本機生資料集 → `character caption` 補觸發詞 → `character export` → RunPod(kohya_ss) 訓練 →
-  下載 `*.safetensors` 到 `~/ComfyUI/models/loras/` → 登錄授權 → `lofi visual --lora`」。
-  ⚠️ 字幕**一定要有觸發詞**（`moni`），否則模型會把「黑貓」這個通用概念學進去。
+- **要訓 LoRA 請走 [`LORA.md`](LORA.md)**：本機 16GB 不可能訓練，訓練在 RunPod（**AI Toolkit**——
+  kohya／sd-scripts **不支援 Z-Image**）。流程是「本機生資料集 → 寫**觸發詞承載角色**的字幕 →
+  打包上 pod 訓練 → 下載並驗 sha256 → 放 `~/ComfyUI/models/loras/` → 登錄授權 → `lofi zimage --lora`」。
+  ⚠️ **字幕寫法才是成敗關鍵**：角色只能由觸發詞承載，**不可以**再用底座聽得懂的詞描述角色——
+  否則 LoRA 永遠學不會綁定（v1 就是這樣失敗的，見 `LORA.md` §2）。
   > ⚠️ **白襪 vs 金襪未確認**：`ref04_01_gold-socks.png` 檔名是「金襪」，但該圖 prompt、`ds03` 字幕
   > （`clearly white paws`／`white socks on all four feet`）與負向詞（`all black paws, black feet`）**全部指向白襪**。
   > 若定裝要改成金襪，`ds` 系列的訓練字幕與負向詞必須同步改，否則 LoRA 會學成白襪。
@@ -291,6 +293,33 @@ lofi visual-qc --json > vqc.json     # 只看結果不寫檔：--no-write
 > warn = 尺寸不符／近灰／對比過低。結果寫進圖片旁側錄 `<image>.png.json` 的 `visual_qc`，並 append 到
 > `catalog/visuals.jsonl`。**只抓「整張爛掉」**；人臉融化、多手多腳這類內容崩壞需模型，暫不處理。
 > 反覆出現黑圖時，改 ComfyUI 啟動參數把 VAE 走 fp32（`main.py --force-fp16 --fp32-vae`）通常就解了。
+
+#### 主角 Moni 的封面（Z-Image Turbo GGUF ＋ LoRA）
+
+主角 LoRA 是在 **Z-Image Turbo** 上訓練的，**只能走這條**（`lofi visual` 是 SDXL，掛不上）。
+
+```bash
+# 一次性：LoRA 放進 ComfyUI 並登錄授權（config.MODEL_LICENSES；本專案 fail-closed）
+cp output/lora/probe_mnxy/run/mnxy_probe.safetensors ~/ComfyUI/models/loras/
+
+# 生封面：prompt 含觸發詞；畫風句由 --style 自動接上（來自 config.ZIMAGE_STYLE）
+./scripts/lofi zimage --lora mnxy_probe.safetensors --lora-weight 1.0 \
+  --prompt "mnxy, sitting on a wooden bench on a seaside promenade at sunset" \
+  --size 832x1216 --kind sc --slug seaside
+```
+
+| 參數 | 說明 |
+|---|---|
+| `--lora` / `--lora-weight` | 主角 LoRA 與強度（**1.0 就是在模型上**）|
+| `--style` | 畫風句（預設 `config.ZIMAGE_STYLE`；**關掉會讓花色飄，別關**）|
+| `--dry-run` | 只印設定與授權檢查（授權檢查先跑，乾跑就能知道會不會被擋）|
+| `--init-image` / `--mask` | 局部重繪（與 `lofi visual` 同一套遮罩規矩）|
+
+- **prompt 規矩**：一定要含觸發詞，並帶畫風句。少了畫風句，觸發詞只綁得住「是貓」，
+  花色會掉（實測會變寫實乳牛貓）——見 [`LORA.md`](LORA.md) §6。
+- 不給 `--lora` 就是純 Z-Image 場景圖（無主角），拿來做對照組很方便。
+- 一張約 **4 分鐘**（832×1216、8 步、MPS）；`manifest.json` 會記 `lora` / `lora_weight`。
+- 模型檔名集中在 `config.py`：`LOFI_ZIMAGE_UNET`／`CLIP`／`VAE`／`LORA`／`LORA_WEIGHT`／`STYLE`。
 
 ### 6.2 做局部微動循環（Cinemagraph）
 

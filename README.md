@@ -253,6 +253,9 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi visual --count 3 --size 768x512
 ./scripts/lofi visual --list                         # 批次總表（用途/時間/模型/張數）
 ./scripts/lofi visual-qc --all --force               # 圖片品檢（黑圖/純色/灰圖/壞檔）
+./scripts/lofi zimage --lora mnxy_probe.safetensors --lora-weight 1.0 \
+    --prompt "mnxy, sitting on a wooden bench on a seaside promenade at sunset" \
+    --kind sc --slug seaside                          # 主角 Moni 封面（Z-Image Turbo）
 ./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4   # 需 numpy（.venv）
 ./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
 ./scripts/lofi config --licenses                      # 看模型授權登錄
@@ -311,7 +314,7 @@ cd ai-music/lofi-studio
 
 > **各指令的完整參數以 `--help` 為準**（由 argparse 產生，改參數不必改文件）：
 > `./scripts/lofi <cmd> --help`、shell 腳本 `./scripts/<x>.sh --help`。
-> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `cinemagraph` / `upload` / `config`；`python3 scripts/<x>.py` 為相容 shim。
+> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `zimage` / `cinemagraph` / `upload` / `config`；`python3 scripts/<x>.py` 為相容 shim。
 
 最常用的幾個：
 
@@ -322,6 +325,7 @@ cd ai-music/lofi-studio
 | `lofi library` | SQLite 圖書館 / 標籤 | `./scripts/lofi library build && ./scripts/lofi library summary` |
 | `lofi visual` | 生場景圖 | `./scripts/lofi visual --count 3 --size 768x512` |
 | `lofi visual-qc` | 場景圖品檢 | `./scripts/lofi visual-qc --all --force` |
+| `lofi zimage` | 生主角 Moni 封面（Z-Image Turbo GGUF＋LoRA） | `./scripts/lofi zimage --lora mnxy_probe.safetensors --prompt "mnxy, …" --kind sc` |
 | `lofi meta` | 上片資訊 | `./scripts/lofi meta --video output/episodes/rl01/video.mp4 --style rainy_lofi` |
 | `lofi upload` | 上傳 YouTube | `./scripts/lofi upload --episode rl01` |
 | `lofi config` | 看集中設定（模型/位址） | `./scripts/lofi config` |

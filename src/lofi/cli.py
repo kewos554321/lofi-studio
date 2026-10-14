@@ -12,6 +12,7 @@
   lofi expand    [expand_style 參數]
   lofi visual    [generate_visual 參數]
   lofi visual-qc [visual_qc 參數]（圖片品檢：黑圖/純色/灰圖/壞檔）
+  lofi zimage    [zimage 參數]（Z-Image Turbo GGUF；主角 LoRA 的產線路徑）
   lofi cinemagraph [make_cinemagraph 參數]（需 numpy，用 .venv）
   lofi upload    [yt_upload 參數]（需 Google 套件＋憑證，用 .venv）
   lofi release   plan | package（把生成 run 包成上架包；串流/商店，見 docs/DISTRIBUTION.md）
@@ -36,6 +37,7 @@ MODULES = {
     "expand":      ("lofi.expand",      "展開風格曲目清單（CSV）"),
     "visual":      ("lofi.visual",      "用 ComfyUI 生場景圖"),
     "visual-qc":   ("lofi.visual_qc",   "場景圖自動品檢（黑圖/純色/灰圖/壞檔）"),
+    "zimage":      ("lofi.zimage",      "Z-Image Turbo（GGUF）生場景圖（主角 LoRA 產線路徑）"),
     "cinemagraph": ("lofi.cinemagraph", "靜圖 -> 無縫循環局部微動（需 numpy）"),
     "upload":      ("lofi.upload",      "上傳成片到 YouTube（上線前自動；需 Google 套件/憑證）"),
     "config":      ("lofi.config",      "顯示集中設定（模型檔名 / ComfyUI 位址）"),

@@ -8,6 +8,10 @@
   LOFI_MUSIC_CLIP1/2   兩個 text encoder 檔名
   LOFI_MUSIC_VAE       audio VAE 檔名
   LOFI_IMAGE_CKPT      場景圖 checkpoint 檔名
+  LOFI_ZIMAGE_UNET/CLIP/VAE   Z-Image Turbo（GGUF）模型檔名
+  LOFI_ZIMAGE_LORA      Z-Image 主角 LoRA 檔名（空＝不掛）
+  LOFI_ZIMAGE_LORA_WEIGHT     LoRA 權重（預設 1.0）
+  LOFI_ZIMAGE_STYLE     畫風句（會接在 prompt 後面；觸發詞靠它才完整生效）
   LOFI_UPSCALE_MODEL   放大模型檔名
   LOFI_RELEASE_ARTIST  音樂 artist 名義（預設 Moni on the Journey）
   LOFI_RELEASE_SONGWRITER   作詞作曲真名（DistroKid 原創曲必填）
@@ -53,6 +57,17 @@ MUSIC_VAE = _env("LOFI_MUSIC_VAE", "ace_1.5_vae.safetensors")
 
 # ── 圖片：場景圖 checkpoint／放大模型 ─────────────────────────────────
 IMAGE_CKPT = _env("LOFI_IMAGE_CKPT", "DreamShaperXL-v1.0-Alpha2.safetensors")
+
+# Z-Image Turbo（GGUF）：主角 LoRA 的產線路徑（見 docs/LORA.md）
+ZIMAGE_UNET = _env("LOFI_ZIMAGE_UNET", "z-image-turbo-Q5_K_M.gguf")
+ZIMAGE_CLIP = _env("LOFI_ZIMAGE_CLIP", "Qwen3-4B-Q8_0.gguf")
+ZIMAGE_VAE = _env("LOFI_ZIMAGE_VAE", "ae.safetensors")
+ZIMAGE_LORA = _env("LOFI_ZIMAGE_LORA", "")              # 空＝預設不掛 LoRA
+ZIMAGE_LORA_WEIGHT = float(_env("LOFI_ZIMAGE_LORA_WEIGHT", "1.0"))
+# 畫風句：z-image 的觸發詞要有它才完全生效（docs/LORA.md §6）→ 集中在這裡，別散落各處
+ZIMAGE_STYLE = _env("LOFI_ZIMAGE_STYLE",
+                    "Hand-painted watercolour anime illustration, delicate brush strokes, "
+                    "warm nostalgic colour palette.")
 UPSCALE_MODEL = _env("LOFI_UPSCALE_MODEL", "RealESRGAN_x4plus_anime_6B.pth")
 
 # IPAdapter 鎖角色用的輔助模型（`visual --ref`；PLUS 系列 preset 對應這兩支）。
@@ -156,6 +171,10 @@ MODEL_LICENSES = {
     "ae.safetensors": {
         "license": "Apache-2.0", "commercial": True,
         "source": "https://github.com/Tongyi-MAI/Z-Image（VAE）"},
+    # 主角 LoRA（本專案自訓；流程與限制見 docs/LORA.md）
+    "mnxy_probe.safetensors": {
+        "license": "自訓 LoRA（基底 Z-Image Turbo）", "commercial": True,
+        "source": "本專案自產（見 prompts/character/moni.json）"},
     # 放大
     "RealESRGAN_x4plus_anime_6B.pth": {
         "license": "BSD-3-Clause", "commercial": True,
@@ -237,6 +256,11 @@ def as_dict():
         "music_clip2": MUSIC_CLIP2,
         "music_vae": MUSIC_VAE,
         "image_ckpt": IMAGE_CKPT,
+        "zimage_unet": ZIMAGE_UNET,
+        "zimage_clip": ZIMAGE_CLIP,
+        "zimage_vae": ZIMAGE_VAE,
+        "zimage_lora": ZIMAGE_LORA or "（無；見 LOFI_ZIMAGE_LORA）",
+        "zimage_lora_weight": ZIMAGE_LORA_WEIGHT,
         "upscale_model": UPSCALE_MODEL,
         "min_free_gb": MIN_FREE_GB,
         "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
@@ -259,6 +283,10 @@ SH_VARS = {
     "LOFI_COMFY_URL": COMFY_URL,
     "LOFI_COMFY_ROOT": str(COMFY_ROOT),
     "LOFI_IMAGE_CKPT": IMAGE_CKPT,
+    "LOFI_ZIMAGE_UNET": ZIMAGE_UNET,
+    "LOFI_ZIMAGE_CLIP": ZIMAGE_CLIP,
+    "LOFI_ZIMAGE_VAE": ZIMAGE_VAE,
+    "LOFI_ZIMAGE_LORA": ZIMAGE_LORA,
     "LOFI_UPSCALE_MODEL": UPSCALE_MODEL,
 }
 
@@ -266,7 +294,10 @@ SH_VARS = {
 def print_licenses():
     """列出授權登錄 + 目前產線用到的模型狀態（商用合規）。"""
     cur = {"music_unet": MUSIC_UNET, "music_clip1": MUSIC_CLIP1, "music_clip2": MUSIC_CLIP2,
-           "music_vae": MUSIC_VAE, "image_ckpt": IMAGE_CKPT, "upscale_model": UPSCALE_MODEL}
+           "music_vae": MUSIC_VAE, "image_ckpt": IMAGE_CKPT, "upscale_model": UPSCALE_MODEL,
+           "zimage_unet": ZIMAGE_UNET, "zimage_clip": ZIMAGE_CLIP, "zimage_vae": ZIMAGE_VAE}
+    if ZIMAGE_LORA:
+        cur["zimage_lora"] = ZIMAGE_LORA
     print("◆ 目前產線模型")
     for role, name in cur.items():
         info = model_license(name)

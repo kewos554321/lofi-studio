@@ -13,7 +13,7 @@
 | `docs/LICENSING.md` | 合規 | 模型授權矩陣、商用守門、換模型 SOP |
 | `docs/NAMING.md` | 規則 | 檔名/資料夾命名（音樂 + 視覺）與通用原則 |
 | `docs/DISTRIBUTION.md` | 變現 | 多平台上架地圖、自動化天花板、release 上架包規劃 |
-| `docs/LORA.md` | 訓練 | 主角 LoRA 的雲端訓練流程（RunPod + kohya_ss）與疑難排解 |
+| `docs/LORA.md` | 訓練 | 主角 LoRA 的雲端訓練流程（RunPod + AI Toolkit / Z-Image Turbo）與疑難排解 |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
