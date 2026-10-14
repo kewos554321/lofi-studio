@@ -24,15 +24,15 @@
     "features": ["white paw", "white sock", "amber eye"]
   },
   "caption_check": {
-    "require_tags": ["moni", "black cat", "white paws", "white socks", "amber eye"],
-    "forbid_tags": ["black paws", "black feet", "orange", "tabby"],
+    "require_tags": ["moni", "black cat", "white sock", "amber eye"],
+    "forbid_tags": ["black paws", "black feet", "orange tabby", "tabby"],
     "negative_should_contain": ["black paws", "black feet"]
   },
   "reference_image": "mascot_blackcat_ref.png",
   "lora": {
     "target": "moni",
     "status": "訓練中",
-    "dataset_runs": ["ds03", "ds04", "ds05", "ds06"],
+    "dataset_runs": ["ds07", "ds08", "ds09"],
     "min_images": 20,
     "trigger": "moni",
     "note": "白襪是小面積特徵，IPAdapter 鎖不牢（見 docs/RUNBOOK.md §6.1），必須靠 LoRA。下限 20 張是經驗值，低於就不要開訓。字幕一律前置 trigger token，否則會把『黑貓』這個通用概念學進去。"
