@@ -200,10 +200,14 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 若日後真的要疊字，唯一不破壞約定的路是**在 ComfyUI 端生圖時就帶文字**（模型不一定可靠），
 否則就得引入 Pillow 到 `.venv` 並在 AGENTS.md 說明理由。**預設不做。**
 
-### 6-2. artist / label 名稱 → **決定：`Moni on the Journey`**（與 YouTube 頻道分開，走廠牌家族）
+### 6-2. artist / label 名稱 → **決定：`Moni on the Journey`**（頻道、串流、商店**同名**）
 
-頻道 `Drifted LoFi`（影片）／音樂 `Moni on the Journey`（串流），形成 `[X] LoFi` 的廠牌家族聯想，
-主角是**黑貓**，每張專輯＝牠旅程的一站。名稱放 `config.RELEASE_ARTIST`（`LOFI_RELEASE_ARTIST` 可覆寫）。
+**頻道、串流藝人、商店全部使用同一個名字 `Moni on the Journey`**（2026-10 頻道由舊名 `Drifted LoFi` 改名統一，
+不再走「`[X] LoFi` 廠牌家族」的雙品牌路線）。主角是**黑貓**，每張專輯＝牠旅程的一站。
+名稱放 `config.RELEASE_ARTIST`（`LOFI_RELEASE_ARTIST` 可覆寫）。
+
+> ⚠️ **字串要完全一致（含大小寫與拼字）**：平台以這個字串建藝人頁，改一個字母就等於換一個藝人。
+> 常見誤打：`journery`（多一個 r，2026-10 實際發生在 YouTube 頻道名上）、`Moni's Journey`（舊名，帶撇號）。
 
 定案依據（2026-10 實查 Apple Music ＋ MusicBrainz）：
 
@@ -218,6 +222,10 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 > 新名沒有撇號，這個坑消失。改名後已重新查核：Apple Music 無真實撞名（僅模糊比對）、MusicBrainz 0 筆。
 
 可用 handle：`monionthejourney.bandcamp.com` ✅（導向 `/signup?new_domain=` = 可申請）、`monionthejourney.com` ✅、`@monionthejourney` ✅
+
+**頻道文案存在 `prompts/youtube/_channel.json`**：頻道名/舊名、handle、tagline、中英文頻道描述、
+頻道關鍵字、banner 路徑與規格，以及**給 Gumroad reviewer 的業務描述**（中英）。檔案裡的 `channel`
+必須與 `config.RELEASE_ARTIST` 完全相同——這條由 `tests/test_core.py` 把關，避免品牌字串漂移。
 （舊名 `@monisjourney` 反而已被佔用）。
 
 - ⚠️ 全專案字串保持一致（`config.RELEASE_ARTIST`／`prompts/character/moni.json` 的 `artist`／文件）；

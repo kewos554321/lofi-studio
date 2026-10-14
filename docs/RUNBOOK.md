@@ -465,8 +465,11 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 ./scripts/lofi publish --mark-uploaded xxx --url https://youtu.be/...
 ```
 
-- metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）。
+- metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）；
+  頻道層的文案（頻道描述/關鍵字/業務描述）在 `prompts/youtube/_channel.json`。
 - 章節時間戳是 YouTube 需要的「策展痕跡」，務必帶上。
+- **描述尾段會自動帶 AI 揭露與模型授權**（`meta.build_credits_block()`，由 sidecar 的模型彙整）：
+  這樣「授權清單隨每次發行附上」在 YouTube 也成立（不再只有 Gumroad 的下載包有）。沒有模型紀錄時不加水段。
 - `make_long_lofi.sh --style <name>` 會在渲染後自動產生上片資訊。
 
 ### 8.2 YouTube 以外的出路（上架包）
@@ -514,7 +517,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | `CHECKLIST.md` | DSP／Bandcamp／stock／Gumroad 各平台的上架步驟 |
 
 - **artist 名義**：已定案為 **`Moni on the Journey`**（`config.RELEASE_ARTIST`，可用 `LOFI_RELEASE_ARTIST` 或 `--artist` 覆寫）。
-  刻意與 YouTube 頻道名（Drifted LoFi）分開，走「廠牌家族」路線；單字名在 Apple Music／MusicBrainz 全部撞名，見 DISTRIBUTION §6-2。
+  **與 YouTube 頻道同名**（2026-10 頻道由 `Drifted LoFi` 改名統一）；單字名在 Apple Music／MusicBrainz 全部撞名，見 DISTRIBUTION §6-2。
   （2026-10 由舊名 `Moni's Journey` 改名；新名無撇號，原本的直／彎引號問題消失。）
 - **曲名重複自動去重**：sidecar 的 `mood` 會重複，同名者自動加 `(pt. N)`。
   想改名字：編輯 `release.json` 的 `tracks[].title` 再**重跑**（會沿用你改過的曲名，並清掉改名前留下的舊母帶）。

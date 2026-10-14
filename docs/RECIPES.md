@@ -221,7 +221,7 @@ TRACKS=$(./scripts/lofi library query --style "$STYLE" --status keep --limit 32 
 | `rainy_lofi` | 64–82 | 雨夜讀書 | ✅ | 雨夜窗前 |
 | `cozy_morning` | 74–88 | 暖陽晨間 | ✅ | 早晨書桌 |
 | `tokyo_night` | 72–84 | 東京夜景 | ✅ | 城市夜景 |
-| `dusk_jazz` | 62–78 | 黃昏爵士（參考 Drifted LoFi） | ✅ | 夜晚書桌／lounge |
+| `dusk_jazz` | 62–78 | 黃昏爵士（比照本頻道既有影片） | ✅ | 夜晚書桌／lounge |
 | `coastal_guitar` | 66–82 | 海岸木吉他 | ✅ | 海岸黃昏 |
 | `forest_piano` | 60–76 | 森林黃昏鋼琴 | ✅ | 森林黃昏 |
 | `jazzhop_lounge` | 60–74 | 煙霧 lounge | — | 酒吧夜景 |

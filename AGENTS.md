@@ -19,7 +19,8 @@
 
 ## 專案是什麼
 
-本機（Mac M4 / 16GB）AI **lofi 音樂 → 長片影片**的產線，最終上傳 YouTube 頻道 **Drifted LoFi**。
+本機（Mac M4 / 16GB）AI **lofi 音樂 → 長片影片**的產線，最終上傳 YouTube 頻道 **Moni on the Journey**
+（2026-10 由舊名 `Drifted LoFi` 改名：**頻道名與音樂藝名統一**，見 `docs/DISTRIBUTION.md` §6-2）。
 ComfyUI + ACE-Step 生音樂、SDXL 生場景圖、ffmpeg 做視覺循環與合成。沒有伺服器、沒有雲端。
 
 ## 架構（重點）

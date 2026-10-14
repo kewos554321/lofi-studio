@@ -66,8 +66,8 @@ MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
 
 
 # ── 發行（release / 上架包）─────────────────────────────────────────────
-# 串流上架用的 artist 名義：**刻意與 YouTube 頻道名（Drifted LoFi）分開**，
-# 走「廠牌家族」路線（頻道 = Drifted LoFi／音樂 = Moni on the Journey），見 docs/DISTRIBUTION.md §6-2。
+# 音樂 artist 名義：**與 YouTube 頻道同名**（2026-10 頻道由 `Drifted LoFi` 改名，
+# 頻道／串流／商店都用這一個字串，避免同一個作品被當成兩個品牌），見 docs/DISTRIBUTION.md §6-2。
 # 定案依據（2026-10 實查）：單字名（Sumi/Hoshi/Ember/Nori/Kage/Marlow/Bramble…）在
 # Apple Music 與 MusicBrainz **全部撞名**；`Moni on the Journey` 兩邊零撞名，
 # 且把主角（黑貓的旅程）寫進品牌。可用 handle：`monionthejourney.bandcamp.com`、`@monionthejourney`、`monionthejourney.com`。

@@ -114,7 +114,8 @@ def get_credentials(client_secret, token_path):
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            print("首次授權：將開啟瀏覽器，請用『Drifted LoFi』那個 Google 帳號登入並同意。", flush=True)
+            print("首次授權：將開啟瀏覽器，請用『Moni on the Journey』頻道那個 Google 帳號登入並同意。",
+                  flush=True)
             flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), SCOPES)
             creds = flow.run_local_server(port=0)
         Path(token_path).parent.mkdir(parents=True, exist_ok=True)

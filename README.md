@@ -708,9 +708,9 @@ rm -rf ~/ComfyUI/models && ln -s /Volumes/WJ_SATA/lofi-studio/models ~/ComfyUI/m
 
 > 上傳時記得勾 YouTube 的 **AI 揭露**（紀錄中 `ai_disclosure: true`）。
 
-## 參考頻道風格（Drifted LoFi）
+## 風格參考影片（本頻道既有作品）
 
-比照參考影片新增三個可直接生成的風格骨架，音樂 prompt 與上片 metadata 都齊了：
+比照本頻道既有影片新增三個可直接生成的風格骨架，音樂 prompt 與上片 metadata 都齊了：
 
 | 風格 (`prompts/styles/`) | 對應參考影片 | 特色 |
 |---|---|---|
