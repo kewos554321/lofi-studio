@@ -1086,12 +1086,20 @@ class TestRelease(unittest.TestCase):
         self.assertIsNone(release.parse_loudnorm_json("no json here"))
 
     def test_build_tracklist_csv(self):
+        """`File` 欄要是**交付 ZIP 內**的路徑，不是產線內部的來源路徑（買家找不到那個檔）。"""
         csv_text = release.build_tracklist_csv([{
             "no": 1, "title": "A", "artist": "X", "duration": 125,
-            "key": "G major", "bpm": 70, "mood": "m", "file": "f.mp3"}])
+            "key": "G major", "bpm": 70, "mood": "m",
+            "audio": "output/releases/r1/audio/01_a.wav",
+            "file": "assets/tracks/forest_piano/forest-1hr-01/x_00001.mp3"}])
         self.assertTrue(csv_text.startswith("No,Title,Artist,Duration"))
         self.assertIn("02:05", csv_text)                 # 125s 格式化
         self.assertIn("G major", csv_text)
+        self.assertIn("audio/01_a.wav", csv_text)
+        self.assertNotIn("assets/tracks", csv_text)      # 不可洩漏內部來源路徑
+        # 只有來源路徑時（舊紀錄）就照原樣，不亂編
+        only_src = release.build_tracklist_csv([{"no": 1, "title": "A", "file": "x.mp3"}])
+        self.assertIn("x.mp3", only_src)
 
     def test_summarize_release_event_drops_empty(self):
         ev = release.summarize_release_event(

@@ -156,13 +156,19 @@ def _f(v, default=0.0):
 
 
 def build_tracklist_csv(rows):
-    """rows: [{no,title,duration,key,bpm,mood,file,isrc}] → CSV 字串（含表頭）。"""
+    """rows: [{no,title,artist,duration,key,bpm,mood,audio|file}] → CSV 字串（含表頭）。
+
+    `File` 欄放**交付 ZIP 內的相對路徑**（`audio/NN_slug.wav`），**不是**產線內部的來源路徑。
+    `tracklist.csv` 會被打包進交付 ZIP；給買家 `assets/tracks/...` 他們解壓後根本找不到
+    （而且等於把內部目錄結構送出去）。
+    """
     buf = _io.StringIO()
     w = csv.writer(buf)
     w.writerow(["No", "Title", "Artist", "Duration", "Key", "BPM", "Mood", "ISRC(new)", "File"])
     for r in rows:
+        rel = f"audio/{Path(str(r['audio'])).name}" if r.get("audio") else str(r.get("file") or "")
         w.writerow([r["no"], r["title"], r.get("artist", ""), mm.fmt_ts(r.get("duration") or 0),
-                    r.get("key", ""), r.get("bpm", ""), r.get("mood", ""), "", r.get("file", "")])
+                    r.get("key", ""), r.get("bpm", ""), r.get("mood", ""), "", rel])
     return buf.getvalue()
 
 
