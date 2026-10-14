@@ -1,0 +1,33 @@
+{
+  "channel": "Moni on the Journey",
+  "old_name": "Drifted LoFi",
+  "renamed_at": "2026-10",
+  "handle": "@monionthejourney",
+  "tagline": "soft instrumental lofi for quiet hours",
+  "url": "",
+  "business_description_en": "Moni on the Journey is an independent instrumental lofi project — one small black cat's journey told in sound. I produce, edit and master the music myself and sell it as digital album downloads (24-bit WAV), and the listeners who find it through my YouTube channel, where I publish free long-form mixes, buy it through Gumroad checkout. I own all rights to the music and artwork I sell. (Music and artwork are created with AI models licensed for commercial use; the complete model and licence list ships with every release.)",
+  "business_description_zh": "《Moni on the Journey》是一個獨立的器樂 lofi 企劃——用聲音說一隻小黑貓的旅程。音樂由我製作、編修與母帶處理，並以數位專輯下載（24-bit WAV）的形式販售；聽眾透過我的 YouTube 頻道找到這些音樂（我在那裡發布免費的長版混音），並透過 Gumroad 結帳購買。我擁有我所販售之音樂與插畫的全部權利。（音樂與插畫皆以可商用的 AI 模型製作；完整的模型與授權清單隨每次發行附上。）",
+  "description_en": "Moni on the Journey follows one small black cat, and the places it stops to rest.\n\nIt begins on a city windowsill, where rain taps and streetlights hum. Further down the road there's a forest at golden hour, a bus stop at midnight, a desk lamp at 2 a.m. Each album is one more stop on that walk — a season, a weather, a place worth slowing down for.\n\nEvery melody is a small room you can walk into: felt piano, warm pads, vinyl crackle and soft percussion, shaped and mastered until the light in it feels right. Made to keep you company while you work late, study early, or let an afternoon drift past.\n\nWe believe music is more than sound — it's a companion on the road.\n\n(Music and artwork are created with AI models licensed for commercial use; the full model and licence list ships with every release.)\n\nWherever today finds you, you don't have to walk it alone. Welcome aboard 🐾🎧",
+  "description_zh": "《Moni on the Journey》跟著一隻小黑貓，以及牠停下來休息的每一個地方。\n\n故事從城市的窗台開始——雨敲著玻璃，路燈低鳴。再往前走，有黃金時刻的森林、午夜的公車站、凌晨兩點的桌燈。每一張專輯都是那趟旅程的下一站：一個季節、一種天氣、一個值得慢下來的地方。\n\n每一段旋律都是一個可以走進去的小房間：毛氈鋼琴、溫暖的 pad、黑膠雜訊與輕柔打擊，被一遍遍修到光線剛好的樣子。陪你加班、早起讀書，或讓一個下午慢慢流過。\n\n我們相信音樂不只是聲音——它是路上的同伴。\n\n（音樂與插圖皆以可商用的 AI 模型製作；完整的模型與授權清單隨每次發行附上。）\n\n無論今天你在哪裡，這段路你不必一個人走。歡迎上車。",
+  "keywords": [
+    "lofi", "lofi hip hop", "lo-fi", "study beats", "chill beats",
+    "instrumental beats", "relaxing music", "focus music", "sleep music",
+    "ambient piano", "lofi mix", "study music", "calm music",
+    "background music", "lofi radio", "chillhop", "jazzhop",
+    "forest lofi", "rain lofi", "cozy lofi"
+  ],
+  "banner": "assets/visuals/sc18/sc18_04_fix-banner-channel-2560x1440.png",
+  "banner_spec": {
+    "size": "2560x1440",
+    "safe_area": "1546x423",
+    "max_mb": 6,
+    "formats": "PNG, JPG, GIF",
+    "text_overlay": "none"
+  },
+  "notes": [
+    "描述只提到「AI 與授權」一次，而且放在括號裡：故事段落刻意不提 AI（題材是貓的旅程，不是工具）。",
+    "同一句話在 DistroKid 的 AI Credits（release.json 的 ai_credits）與 Gumroad 的 NOTES 段落都有對應，三處一致才不會被平台認為隱匿。",
+    "頻道名必須與 config.RELEASE_ARTIST 完全相同（含大小寫）：平台以字串建藝人頁。這條由 tests/test_core.py 把關。",
+    "踩過的坑：2026-10 改名時打成 journery（多一個 r）且全小寫；YouTube 90 天只能改 3 次，改前先貼上 config 的值核對。"
+  ]
+}

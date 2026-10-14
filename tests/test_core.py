@@ -867,6 +867,43 @@ class TestWorkflowAssembly(unittest.TestCase):
         self.assertEqual(backfill.parse_name("lofi_rainy_night_00001"), ("lofi_rainy_night", None))
         self.assertEqual(backfill.parse_name("garbage"), (None, None))
 
+    def test_channel_record_matches_artist_string(self):
+        """頻道名必須與 config.RELEASE_ARTIST **完全相同**（含大小寫）。
+
+        平台以這個字串建藝人頁，一個字母不同就等於換一個品牌
+        （實際踩過：改成 `journery` 少/多一個 r、全小寫）。
+        """
+        p = Path(__file__).resolve().parent.parent / "prompts" / "youtube" / "_channel.json"
+        self.assertTrue(p.exists(), "prompts/youtube/_channel.json 應該存在")
+        ch = json.loads(p.read_text(encoding="utf-8"))
+        self.assertEqual(ch["channel"], config.RELEASE_ARTIST)
+        self.assertEqual(ch["old_name"], "Drifted LoFi")
+        for key in ("description_en", "description_zh", "business_description_en",
+                    "business_description_zh", "keywords", "banner"):
+            self.assertTrue(ch.get(key), f"_channel.json 缺 {key}")
+        # 描述要能放進 YouTube（上限 1000 字元）
+        self.assertLessEqual(len(ch["description_en"]), 1000)
+        # 故事段落不得提 AI（揭露只在括號那行）
+        self.assertNotIn("AI", ch["description_en"].split("(Music and artwork")[0])
+
+    def test_build_credits_block_and_description(self):
+        """YouTube 描述要有 AI 揭露＋模型授權（不能只留在本機 JSON）。"""
+        credits = [{"model": "acestep_v1.5_turbo.safetensors", "license": "MIT",
+                    "source": "https://x"}]
+        block = meta.build_credits_block(credits)
+        self.assertIn("AI disclosure & licences", " ".join(block))
+        self.assertTrue(any("acestep_v1.5_turbo.safetensors (MIT)" in ln for ln in block))
+        self.assertEqual(meta.build_credits_block([]), [])          # 沒 credits 就不加
+
+        cfg = {"emoji": "🍂", "intro": "hi", "features": ["a"], "hashtags": ["#lofi"],
+               "genre_phrase": "lofi"}
+        with_c = meta.build_description(cfg, 120, [], credits)
+        without = meta.build_description(cfg, 120, [], [])
+        self.assertIn("AI disclosure & licences", with_c)
+        self.assertIn("ace_step", with_c.replace("acestep", "ace_step"))
+        self.assertNotIn("AI disclosure", without)
+        self.assertTrue(with_c.rstrip().endswith("#lofi"))           # 授權在 hashtags「之前」
+
     def test_meta_stable_index_and_dominant(self):
         self.assertEqual(meta.stable_index("x", 0), 0)
         self.assertIn(meta.stable_index("abc", 5), range(5))

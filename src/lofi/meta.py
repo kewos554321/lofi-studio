@@ -201,7 +201,25 @@ def load_tracklist(path):
 
 # ----------------------- 文字組裝 -----------------------
 
-def build_description(cfg, duration, chapters):
+def build_credits_block(credits):
+    """YouTube 描述用的 AI 揭露＋模型授權（商用 provenance）。回傳行清單。
+
+    為什麼要放進**描述**而不是只留在本機 JSON：DistroKid／Gumroad 都要 AI 揭露，
+    YouTube 也要求「變造或合成內容」揭露；而 `docs/LICENSING.md` 說 provenance 是賣點
+    ——查不到等於沒有。少了這段，頻道描述那句「授權清單隨每次發行附上」就只在商店成立。
+    """
+    if not credits:
+        return []
+    out = ["—", "", "🎛 AI disclosure & licences",
+           "Music and artwork are created with AI models licensed for commercial use."]
+    for c in credits:
+        model = str(c.get("model") or "").split("/")[-1]
+        out.append(f"- {model} ({c.get('license')})")
+    out += ["", "The full model and licence list ships with every album release."]
+    return out
+
+
+def build_description(cfg, duration, chapters, credits=None):
     features = cfg.get("features") or []
     lines = []
     lines.append(f"{cfg.get('emoji','')} {cfg.get('intro','')}".strip())
@@ -242,6 +260,10 @@ def build_description(cfg, duration, chapters):
         lines.append("Tracklist")
         for ch in chapters:
             lines.append(f"{ch['time']} {ch['title']}")
+
+    if credits:
+        lines.append("")
+        lines.extend(build_credits_block(credits))
 
     if cfg.get("hashtags"):
         lines.append("")
@@ -302,15 +324,15 @@ def main():
         desc = dp[stable_index(stem + "d", len(dp))]
         title = f"{phrase} | {desc}"
 
-    description = build_description(cfg, duration, chapters)
-
-    # 商用 provenance：彙整用到的音樂模型（授權/來源）
+    # 商用 provenance：彙整用到的音樂模型（授權/來源）；**先算**，才能一起寫進描述
     credits = {}
     for t in tl:
         c = track_model_credit(t.get("file"))
         if c:
             credits[(c["model"], c["license"], c["source"])] = c
     credits = sorted(credits.values(), key=lambda x: x["model"])
+
+    description = build_description(cfg, duration, chapters, credits)
 
     record = {
         "video": cat.relpath(video),
