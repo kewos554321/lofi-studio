@@ -58,6 +58,7 @@ prompts/character/  # 主角定裝與品牌資料（moni.json：設計/LoRA 方�
 assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整個 assets/ 不進版控，紀錄看 catalog/tracks.jsonl）
                                # ★ 內接只留工作用 mp3；無損母帶在 output/masters/（外接，--format flac）
 assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifest.json（一 run 一份：config 共用 + images 逐檔 prompt/seed；不進版控）
+assets/refs/                    # 參考素材（人物照片、哼唱錄音、轉檔）—不進版控，且不在任何工具掃描路徑
 catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
 output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包；masters/<style>/<run>/ 為無損母帶（FLAC）
