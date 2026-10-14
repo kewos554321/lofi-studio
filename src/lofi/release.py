@@ -199,22 +199,45 @@ def build_listing(rec, tags=None, price_usd=None):
     """上架文案（Gumroad 的 summary/description、Bandcamp 的描述共用）＋ tags／定價。
 
     `tags` 有給就沿用（仍會過 `clean_tags`）；沒給就由 genre/style/專輯名推。
+
+    ⚠️ **一律英文**：這是給商店／買家看的（Gumroad、DistroKid、Bandcamp 都是英文店面），
+    本專案的內部中文說明在 `CHECKLIST.md`。故事段落刻意**不提 AI**，揭露只在 NOTES。
     """
     album = rec.get("album") or rec.get("run") or ""
     artist = rec.get("artist") or ""
-    n = len(rec.get("tracks") or [])
+    tracks = rec.get("tracks") or []
+    n = len(tracks)
     dur = rec.get("total_duration") or 0
     genre = rec.get("genre") or "Lo-fi"
-    short = f"{n} 首 {genre} 器樂曲，全長約 {max(1, round(dur / 60))} 分鐘：〈{album}〉— {artist}。"
+    fmt = (rec.get("format") or "wav").upper()
+    master = rec.get("master") or {}
+    minutes = max(1, round(dur / 60))
+    short = (f'{n} tracks of instrumental {genre}, about {minutes} minutes — '
+             f'"{album}" by {artist}.')
     scope = (rec.get("ai_credits") or {}).get("scope") or "none"
     body = [
-        f"〈{album}〉是 {artist} 的 {genre} 器樂專輯：{n} 首曲目、全長 {mm.fmt_ts(dur)}。",
-        "全部為器樂演奏、無人聲，適合讀書、工作、睡眠與放鬆時播放。",
-        "每首皆以 -14 LUFS / -1 dBTP 正規化母帶，可直接上串流與商店；封面為 3000×3000 方圖。",
+        f'"{album}" is a {genre} instrumental album by {artist} — '
+        f'{n} tracks, {mm.fmt_ts(dur)}.',
+        "All instrumental, no vocals: felt piano, warm pads, vinyl crackle and soft "
+        "percussion, made for studying, working, reading or falling asleep.",
+        "◆ WHAT YOU GET",
+        f"- {n} tracks in {fmt}, {mm.fmt_ts(dur)}\n"
+        f"- Album cover, {COVER_SIZE} × {COVER_SIZE} px\n"
+        "- Tracklist\n"
+        "- Liner notes listing every model and licence used\n"
+        "Delivered as one .zip download. The files are yours to keep.",
     ]
+    if tracks:
+        rows = []
+        for i, t in enumerate(tracks, 1):
+            rows.append(f"{int(t.get('no') or i):02d}  {t.get('title') or ''}")
+        body.append("◆ TRACKLIST\n" + "\n".join(rows))
+    notes = [f"- Mastered to {_f(master.get('lufs'), -14):g} LUFS / "
+             f"{_f(master.get('tp'), -1):g} dBTP — the level streaming services target."]
     if scope != "none":
-        body.append("本作部分或全部音訊由 AI 生成（ACE-Step），封面由 AI 生成（SDXL）；"
-                    "所用模型授權明細見包內 credits.txt。")
+        notes.append("- Music and artwork are created with AI models licensed for commercial "
+                     "use; the complete model and licence list ships with the download.")
+    body.append("◆ NOTES\n" + "\n".join(notes))
     return {
         "short": short,
         "long": "\n\n".join(body),
@@ -1181,9 +1204,14 @@ def main():
                     help="允許授權未登錄的模型（商用前請先確認，見 docs/LICENSING.md）")
     p2.set_defaults(func=cmd_package)
 
+    # Gumroad（唯一有 API 的商店）由獨立模組處理，掛在同一個 `lofi release` 子命令底下
+    from lofi import gumroad
+    gumroad.add_parser(sub)
+
     args = ap.parse_args()
     global _THREADS, _NICE
-    _THREADS, _NICE = args.threads, args.nice
+    _THREADS = getattr(args, "threads", _THREADS)
+    _NICE = getattr(args, "nice", _NICE)
     args.func(args)
 
 

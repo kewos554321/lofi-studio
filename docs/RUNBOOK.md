@@ -556,6 +556,39 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
   註：它**不取 GPU 鎖**——那不是 GPU 工作，沒必要互相阻擋。
 - 每次產出 append 一筆事件到 `catalog/releases.jsonl`（append-only）。
 
+### 8.3 Gumroad（唯一有 API、可全自動上架的商店）
+
+DSP 商沒有公開 API，**Gumroad 有**（API v2），所以這條路可以真的自動化。
+它消費 `release package` 的產物，不需要額外準備素材。
+
+```bash
+# 憑證（不進版控）：環境變數優先，其次 .secrets/gumroad_token.txt
+printf '%s' 'YOUR_TOKEN' > .secrets/gumroad_token.txt && chmod 600 .secrets/gumroad_token.txt
+export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
+
+./scripts/lofi release gumroad --run forest-1hr-01 --dry-run   # 只印會送出的參數
+./scripts/lofi release gumroad --run forest-1hr-01             # 建立/更新 draft ＋上傳檔案與封面
+./scripts/lofi release gumroad --run forest-1hr-01 --publish   # 檢查完再發佈
+./scripts/lofi release gumroad --run forest-1hr-01 --no-upload # 只更新文案/價格
+./scripts/lofi release gumroad --run forest-1hr-01 --price 5   # 指定售價（0＝pay-what-you-want）
+```
+
+實作與踩過的坑（`src/lofi/gumroad.py`）：
+
+| 坑 | 說明 |
+|---|---|
+| **HTTP 200 不代表成功** | Gumroad 幾乎什麼都回 200，成敗在 body 的 `success` 欄位 → 程式一律讀 `success`（讀狀態碼會把失敗當成功） |
+| **建立一定是 draft** | `POST /v2/products` 只建 draft，發佈要另外 `PUT .../enable` |
+| **封面／縮圖只能後補** | `/covers`、`/thumbnail` 端點，建立商品時帶不進去 |
+| **列表一頁只回 10 筆** | 其餘在 `next_page_url` → 判斷「是否已上架」必須翻頁，否則會重複建立商品 |
+| **檔案要 multipart 上傳** | `POST /files/presign`（要 `filename`/`content_type`/`file_size`）→ 逐 part PUT（收 ETag）→ `POST /files/complete`（要 `upload_id`/`key`/`parts`）→ 把回傳 URL 放進 `files[][url]` |
+| **發佈會被帳號狀態擋** | 沒完成 payout settings 或 email 未確認 → 只停 draft 並回 `warning`（程式照實印，不假裝成功） |
+| **封面／縮圖 API 吃不到** | `/covers` 只收**公開可讀**的圖片 URL 或 `signed_blob_id`（ActiveStorage 簽章 id）。我們的 presign 是私有 S3（GET 會 403）也拿不到 signed id → **封面與縮圖要在 dashboard 手動上傳**（一張 10 秒）；若有公開圖床可用 `--cover-url` |
+
+- 商品 id／URL 會 append 一筆 `event="gumroad"` 到 `catalog/releases.jsonl`（append-only）。
+- 重複跑**不會重複建立**：先用 `custom_permalink` 比對既有商品，有的話走更新。
+- ⚠️ 上架文案（`release.json` 的 `listing`）**一律英文**（Gumroad/DSP 是英文店面）；中文說明在 `CHECKLIST.md`。
+
 ---
 
 ## 9. 每週產出節奏（建議）

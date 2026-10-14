@@ -235,6 +235,20 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 | `lora` | LoRA 方向與訓練集 run（`ds03`–`ds05`） |
 | `journey` | 「每張專輯＝牠旅程的一站」的地點 → 專輯名對照 |
 
+#### 頻道視覺（YouTube banner）
+
+| 項目 | 值 |
+|---|---|
+| 規格 | **2560 × 1440**（16:9）、PNG/JPG、**≤ 6 MB** |
+| 安全區 | 中心 **1546 × 423**（手機／電視只顯示這條，重要內容要落在裡面） |
+| 疊字 | **不疊**——YouTube 自己會顯示頻道名與訂閱數（同 §6-1 的封面原則） |
+| 目前成品 | `assets/visuals/sc18/sc18_04_fix-banner-channel-2560x1440.png`（sc18 = banner 候選批；01–03 是備選） |
+
+做法（**AI 生成，不靠拼接**）：z-image GGUF 直接用 ref12 的 canon prompt 逐字生成
+（`scratch/_tmp_zimage_gguf.py`，`--size 1280x720`），再用 RealESRGAN ×4 → lanczos 縮到 2560×1440。
+要真正的「背景延伸」時，同一支腳本支援 `--init-image` ＋ `--mask` 走 inpaint，只重繪被遮住的區域
+（sc17 就是這樣把 ref12 延伸成滿版，接縫在 1:1 下看不出來）。
+
 > ⚠️ **未確認**：`ref04_01_gold-socks.png` 檔名寫「金襪」，但該圖 prompt、`ds03` 字幕
 > （`clearly white paws:1.3` / `white socks on all four feet:1.2`）與負向詞（`all black paws, black feet`）
 > **全部指向白襪**。若定裝其實要金襪，`ds` 系列的訓練字幕與負向詞必須同步改，否則 LoRA 會學成白襪。
@@ -267,7 +281,7 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 |---|---|---|---|
 | **P1** | `lofi release package` ＋ 單曲 metadata ＋ `generate --format flac` | 上架包 | ✅ 已完成 |
 | **P2** | `lofi live`（ffmpeg → RTMP） | 24/7 直播 | ⬜ 下一步 |
-| **P3** | `lofi release gumroad`（API v2 全自動上架）＋ stems 包 | 素材授權 | ⬜（資料層已就緒：`release.json` 的 `listing`＋`LISTING.md`＋`download/*.zip`） |
+| **P3** | `lofi release gumroad`（API v2 全自動上架）＋ stems 包 | 素材授權 | 🚧 Gumroad 段已可用（`src/lofi/gumroad.py`；stems 包 ⬜） |
 | **P4**（選配） | Shorts／Reels 直式衍生 | 短影音 | ⬜ 未選，先列後補 |
 | **P5**（天花板） | label 級 API（DDEX） | 全自動送 DSP | ⬜ 等 P1–P4 跑順再評估 |
 

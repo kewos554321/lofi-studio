@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from lofi import (backfill, catalog, character, config, expand, generate, io,  # noqa: E402
-                  library, media, meta, qc, release, upload, visual, visual_qc)
+from lofi import (backfill, catalog, character, config, expand, generate,  # noqa: E402
+                  gumroad, io, library, media, meta, qc, release, upload, visual, visual_qc)
 
 
 def _png_with_prompt(path, workflow):
@@ -1167,6 +1167,20 @@ class TestRelease(unittest.TestCase):
         self.assertFalse(config.RELEASE_EXPLICIT)                  # 純器樂、無歌詞
         self.assertTrue(config.RELEASE_SONGWRITER, "songwriter 真名要有預設值（DistroKid 必填）")
 
+    def test_build_listing_long_is_english_with_tracklist(self):
+        """上架文案一律英文（商店是英文店面），且含曲目表與 NOTES（AI 揭露只在這裡）。"""
+        rec = self._rec()
+        rec["tracks"] = [{"no": 1, "title": "Leaving the Windowsill"},
+                         {"no": 2, "title": "The First Pines"}]
+        listing = release.build_listing(rec)
+        self.assertIn("◆ WHAT YOU GET", listing["long"])
+        self.assertIn("◆ TRACKLIST", listing["long"])
+        self.assertIn("01  Leaving the Windowsill", listing["long"])
+        self.assertIn("AI models licensed for commercial use", listing["long"])
+        self.assertIn("WAV", listing["long"])
+        self.assertNotIn("器樂", listing["long"])          # 不該再混中文
+        self.assertNotIn("器樂", listing["short"])
+
     def test_masters_subdir_mirrors_tracks(self):
         self.assertEqual(str(catalog.masters_subdir("coastal guitar", "coastal01")),
                          str(catalog.subdir(catalog.MASTERS_DIR, "coastal guitar", "coastal01")))
@@ -1334,6 +1348,146 @@ class TestRelease(unittest.TestCase):
         no_trigger = cap.replace("moni, ", "")
         self.assertTrue(any("moni" in p
                             for p in character.caption_problems(no_trigger, ch["caption_check"])))
+
+
+class TestGumroad(unittest.TestCase):
+    """Gumroad API v2：只測純函式與 payload 組裝（不碰網路）。"""
+
+    def _rec(self, **over):
+        rec = {"run": "forest-1hr-01", "album": "Into the Forest",
+               "artist": "Moni on the Journey", "genre": "Lo-fi", "format": "wav",
+               "master": {"lufs": -14, "tp": -1}, "total_duration": 1440.0,
+               "tracks": [{"no": 1, "title": "A"}],
+               "listing": {"short": "short text", "long": "long text",
+                           "tags": ["lofi", "forest"], "price_usd": 0.0}}
+        rec.update(over)
+        return rec
+
+    def test_permalink_for(self):
+        self.assertEqual(gumroad.permalink_for("Into the Forest"), "into-the-forest")
+        self.assertEqual(gumroad.permalink_for("The Windowsill (pt. 2)"), "the-windowsill-pt-2")
+        self.assertEqual(gumroad.permalink_for(""), "")
+
+    def test_product_name_and_price(self):
+        self.assertEqual(gumroad.product_name(self._rec()),
+                         "Into the Forest — Moni on the Journey")
+        self.assertEqual(gumroad.product_name(self._rec(artist="")), "Into the Forest")
+        self.assertEqual(gumroad.price_cents(self._rec()), (0, "usd"))       # 0＝PWYW
+        self.assertEqual(gumroad.price_cents(self._rec(), 4.5), (450, "usd"))
+        self.assertEqual(gumroad.price_cents(self._rec(listing={"price_usd": 12.5})), (1250, "usd"))
+
+    def test_build_params_shape(self):
+        p = gumroad.build_params(self._rec())
+        self.assertEqual(p["native_type"], "digital")
+        self.assertEqual(p["name"], "Into the Forest — Moni on the Journey")
+        self.assertEqual(p["price"], 0)
+        self.assertEqual(p["price_currency_type"], "usd")
+        self.assertEqual(p["custom_permalink"], "into-the-forest")
+        self.assertEqual(p["custom_summary"], "short text")
+        self.assertEqual(p["description"], "long text")
+        self.assertEqual(p["tags[]"], ["lofi", "forest"])          # list → doseq 的 key
+        self.assertEqual(p["published"], "false")                    # 一律先 draft
+        self.assertNotIn("preview", p)
+
+    def test_build_params_overrides_and_limits(self):
+        p = gumroad.build_params(self._rec(), price=3, permalink="custom-slug",
+                                 tags=[f"t{i}" for i in range(15)])
+        self.assertEqual(p["price"], 300)
+        self.assertEqual(p["custom_permalink"], "custom-slug")
+        self.assertEqual(len(p["tags[]"]), 10)                       # Gumroad 上限 10
+
+    def test_encode_repeats_list_keys(self):
+        body = gumroad._encode({"access_token": "T", "tags[]": ["a", "b"],
+                                "name": "x"}).decode()
+        self.assertIn("tags%5B%5D=a&tags%5B%5D=b", body)             # tags[]=a&tags[]=b
+        self.assertIn("name=x", body)
+
+    def test_find_product_prefers_permalink_then_name(self):
+        prods = [{"id": "1", "name": "Other", "custom_permalink": "other"},
+                 {"id": "2", "name": "Into the Forest — Moni on the Journey",
+                  "custom_permalink": "into-the-forest"}]
+        self.assertEqual(gumroad.find_product("into-the-forest", "", products=prods)["id"], "2")
+        self.assertEqual(
+            gumroad.find_product("", "into the forest — moni on the journey", products=prods)["id"],
+            "2")
+        self.assertIsNone(gumroad.find_product("nope", "", products=prods))
+
+    def test_api_raises_on_success_false(self):
+        """Gumroad 幾乎都回 HTTP 200；成敗在 success 欄位，不可當成功。"""
+        orig = gumroad.raw
+        gumroad.raw = lambda *a, **k: {"success": False, "message": "New products should be created with a price"}
+        try:
+            with self.assertRaises(gumroad.GumroadError):
+                gumroad.api("POST", "/products", {})
+        finally:
+            gumroad.raw = orig
+
+    def test_complete_upload_interleaves_parts(self):
+        """踩過的坑：`parts[][part_number]` 與 `parts[][etag]` 必須**成對交錯**
+        （p1,e1,p2,e2…），Rack 才會併成完整項目；分開寫會被拆成殘缺項目
+        → `PartNumber must be >= 1`。帶索引的 key 也不行（Rack 會變成 hash → 0）。"""
+        seen = {}
+        orig = gumroad.api
+        gumroad.api = lambda m, p, params=None, token=None: (
+            seen.setdefault("params", params), {"file_url": "https://x/y.zip"})[1]
+        try:
+            gumroad.complete_upload("U", "K", [{"part_number": 1, "etag": "e1"},
+                                               {"part_number": 2, "etag": "e2"}])
+        finally:
+            gumroad.api = orig
+        pairs = seen["params"]
+        self.assertIsInstance(pairs, list)                    # 用 list of pairs 保序
+        self.assertEqual(pairs[0], ("upload_id", "U"))
+        self.assertEqual(pairs[2:], [("parts[][part_number]", 1), ("parts[][etag]", "e1"),
+                                     ("parts[][part_number]", 2), ("parts[][etag]", "e2")])
+        body = gumroad._encode(pairs).decode()
+        self.assertIn("parts%5B%5D%5Bpart_number%5D=1&parts%5B%5D%5Betag%5D=e1", body)
+        self.assertNotIn("[0]", body)                         # 不能用帶索引的 key
+
+    def test_pending_cache_roundtrip(self):
+        """parts 上傳後要先落地：complete 失敗才不用重傳整個檔。"""
+        orig_done, orig_pend = gumroad.UPLOAD_CACHE, gumroad.PENDING_CACHE
+        with tempfile.TemporaryDirectory() as td:
+            gumroad.UPLOAD_CACHE = Path(td) / "done.json"
+            gumroad.PENDING_CACHE = Path(td) / "pend.json"
+            f = Path(td) / "a.zip"
+            f.write_bytes(b"payload")
+            try:
+                self.assertEqual(gumroad._pending_get(f), {})
+                gumroad._pending_put(f, {"upload_id": "U", "key": "K", "file_url": "u"},
+                                     [{"part_number": 1, "etag": "e1"}])
+                got = gumroad._pending_get(f)
+                self.assertEqual(got["upload_id"], "U")
+                self.assertEqual(got["parts"], [{"part_number": 1, "etag": "e1"}])
+                gumroad._pending_del(f)
+                self.assertEqual(gumroad._pending_get(f), {})
+            finally:
+                gumroad.UPLOAD_CACHE, gumroad.PENDING_CACHE = orig_done, orig_pend
+
+    def test_encode_accepts_pairs_in_order(self):
+        body = gumroad._encode([("a", 1), ("b", [1, 2]), ("a", 2)]).decode()
+        self.assertEqual(body, "a=1&b=1&b=2&a=2")
+
+    def test_upload_cache_roundtrip(self):
+        """同一份檔案（name+size+mtime）不該重複上傳（母帶 zip 數百 MB）。"""
+        orig = gumroad.UPLOAD_CACHE
+        with tempfile.TemporaryDirectory() as td:
+            gumroad.UPLOAD_CACHE = Path(td) / "up.json"
+            f = Path(td) / "a.zip"
+            f.write_bytes(b"payload")
+            try:
+                self.assertEqual(gumroad._cache_get(f), "")
+                gumroad._cache_put(f, "https://x/a.zip")
+                self.assertEqual(gumroad._cache_get(f), "https://x/a.zip")
+                self.assertIn(gumroad.upload_cache_key(f), gumroad.UPLOAD_CACHE.read_text())
+                f.write_bytes(b"a much longer payload")          # size 變了 → 快取失效
+                self.assertEqual(gumroad._cache_get(f), "")
+            finally:
+                gumroad.UPLOAD_CACHE = orig
+
+    def test_tags_for_and_description_fallback(self):
+        self.assertEqual(gumroad.tags_for(self._rec()), ["lofi", "forest"])
+        self.assertEqual(gumroad.description_for({"album": "A", "artist": "B"}), "A — B")
 
 
 if __name__ == "__main__":

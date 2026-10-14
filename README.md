@@ -97,6 +97,11 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
 #   → audio/*.wav（-14 LUFS 母帶）+ cover_3000x3000.jpg + release.json + tracklist.csv
 #     + LISTING.md（DistroKid／Gumroad 逐欄值）+ credits.txt + download/<album>.zip + CHECKLIST.md
+
+# Gumroad 是唯一「有 API、可全自動上架」的商店（DSP 沒有）
+./scripts/lofi release gumroad --run coastal01 --dry-run   # 先看會送什麼
+./scripts/lofi release gumroad --run coastal01             # 建立 draft + 上傳檔案與封面
+./scripts/lofi release gumroad --run coastal01 --publish    # 檢查完再發佈
 ```
 > DSP（Spotify/Apple…）與 Bandcamp **沒有公開 API**，所以這步產出「上架包＋清單」，上傳仍需手動；
 > `LISTING.md` 把兩個平台上架表單要填的值（genre／explicit／songwriter 真名／AI Credits／tags…）整理成一頁，

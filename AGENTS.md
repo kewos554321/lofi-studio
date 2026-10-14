@@ -46,6 +46,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
   release.py       # 把生成 run 包成上架包（母帶+封面+metadata+清單+LISTING 欄位+交付 ZIP；DSP/Bandcamp 無 API，故只產包）
+  gumroad.py       # 把上架包送到 Gumroad（API v2：建 draft→上傳→封面→enable；唯一可全自動的商店）
   character.py     # 主角定裝（prompts/character/）＋ LoRA 訓練集一致性檢查／字幕／RunPod 打包
 scripts/lofi       # 統一 CLI 入口 wrapper（免安裝；= `python -m lofi.cli`，shell 產線與人都用它）
 scripts/check.sh   # 提交前自檢（compile + unittest；CI 跑同一套）
@@ -78,6 +79,7 @@ docs/RUNBOOK.md     # 操作手冊
 ./scripts/lofi visual --count 3 --size 768x512
 ./scripts/lofi release plan --run coastal01                            # 看某 run 會包成什麼專輯
 ./scripts/lofi release package --run coastal01 --limit 12              # 產出上架包（母帶+封面+清單）
+./scripts/lofi release gumroad --run coastal01                        # 送到 Gumroad（API v2；唯一可全自動的商店）
 ./scripts/lofi character check                                         # LoRA 訓練集一致性（訓練前必跑）
 ./scripts/lofi visual --count 3 --clean-raw               # 生圖後刪 ComfyUI 原檔（省內接碟）
 ./scripts/lofi config                                  # 目前模型檔名／ComfyUI 位址
