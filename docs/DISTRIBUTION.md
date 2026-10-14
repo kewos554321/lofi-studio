@@ -175,11 +175,15 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 |---|---|---|
 | `genre` | `Lo-fi` | `config.RELEASE_GENRE` |
 | `explicit` | `False`（純器樂、無歌詞） | `config.RELEASE_EXPLICIT` |
-| `songwriter` | `WeiChieh Wang`（**真名**，非藝名） | `config.RELEASE_SONGWRITER`／`--songwriter` |
+| `songwriter` | `Wei-Chieh Wang`（護照 `WANG, WEI-CHIEH` 的名在前寫法；**真名**，非藝名） | `config.RELEASE_SONGWRITER`／`--songwriter` |
 | `ai_credits.scope` | `all_audio` | `config.RELEASE_AI_CREDITS` |
 | `ai_credits.persona` | `True`（artist 是 AI 角色） | `config.RELEASE_AI_PERSONA` |
 | `listing.tags` | 由 genre/style/專輯名推得（Gumroad 上限 10） | `release.listing_tags()` |
 | `listing.price_usd` | `0`（名稱你的價錢） | `config.RELEASE_PRICE_USD`／`--price` |
+
+> `songwriter` 是**版權標示**用的真名（DistroKid 會顯示在 credits／歌詞）。
+> 帳號層的 KYC（Stripe／Gumroad 的 payout settings）要另外填**護照上的姓／名**
+> （護照 `WANG, WEI-CHIEH` → Surname `WANG`、Given `WEI-CHIEH`），兩者要對得上以免審查卡住。
 
 ---
 
