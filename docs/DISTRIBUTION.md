@@ -74,7 +74,7 @@ output/releases/coastal01/
 ├── cover_3000x3000.jpg   封面（無文字，見 §6-1）
 ├── download/<album>.zip  交付檔（audio/＋封面＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
 ├── release.json          機器用：album/artist/track 順序/genre/explicit/songwriter/AI credits/ISRC 欄/授權 provenance/母帶參數
-├── tracklist.csv         人用：No, Title, Duration, Key, BPM, Mood, ISRC(new)
+├── tracklist.csv         買家視角：No/Title/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size
 ├── LISTING.md            上架欄位對照：DistroKid／Gumroad 要填的值（複製貼上）＋長版文案/tags
 ├── credits.txt           隨交付檔附上的 AI 揭露與模型授權（賣點，見 §5）
 └── CHECKLIST.md          各平台上架步驟（DSP／Bandcamp／stock／Gumroad 各一段）

@@ -161,20 +161,34 @@ def _f(v, default=0.0):
         return default
 
 
-def build_tracklist_csv(rows):
-    """rows: [{no,title,artist,duration,key,bpm,mood,audio|file}] → CSV 字串（含表頭）。
+TRACKLIST_COLUMNS = ["No", "Title", "Artist", "Album", "Year", "Duration", "Vibe",
+                     "BPM", "Key", "Instrumental", "Explicit", "Format", "File", "Size (MB)"]
 
-    `File` 欄放**交付 ZIP 內的相對路徑**（`audio/NN_slug.wav`），**不是**產線內部的來源路徑。
-    `tracklist.csv` 會被打包進交付 ZIP；給買家 `assets/tracks/...` 他們解壓後根本找不到
-    （而且等於把內部目錄結構送出去）。
+
+def build_tracklist_csv(rows, album="", artist="", year="", audio_format=""):
+    """rows → **買家視角**的曲目表 CSV（含表頭）。
+
+    這份 CSV 會被打包進交付 ZIP，讀者是買家（不是我們、也不是發行商）。所以欄位以
+    「他想知道什麼」為準：拿到什麼檔／多大（`Format`/`File`/`Size`）、什麼味道
+    （`Vibe`＝sidecar 的 mood，本來就是情境描述，買家拿來挑歌很好用）、能不能混
+    （`BPM`/`Key`）、有沒有歌詞或限制級（`Instrumental`/`Explicit`）、哪張專輯哪一年。
+
+    **不放 ISRC**：那是發行商欄位（`release.json` 與 `LISTING.md` 有）。
+    `File` 放**交付 ZIP 內**的相對路徑，不是產線內部的來源路徑。
     """
     buf = _io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["No", "Title", "Artist", "Duration", "Key", "BPM", "Mood", "ISRC(new)", "File"])
+    w.writerow(TRACKLIST_COLUMNS)
     for r in rows:
         rel = f"audio/{Path(str(r['audio'])).name}" if r.get("audio") else str(r.get("file") or "")
-        w.writerow([r["no"], r["title"], r.get("artist", ""), mm.fmt_ts(r.get("duration") or 0),
-                    r.get("key", ""), r.get("bpm", ""), r.get("mood", ""), "", rel])
+        w.writerow([
+            r["no"], r["title"], r.get("artist") or artist, album, year,
+            mm.fmt_ts(r.get("duration") or 0), r.get("mood", ""),
+            r.get("bpm", ""), r.get("key", ""),
+            "Yes" if r.get("instrumental", True) else "No",
+            "Yes" if r.get("explicit") else "No",
+            audio_format, rel, r.get("size_mb", ""),
+        ])
     return buf.getvalue()
 
 
@@ -436,9 +450,18 @@ def build_listing_md(rec):
         f"8. Explicit：{'Yes' if rec.get('explicit') else 'No'}（逐首）",
         f"9. **AI Credits**：選 `{scope}`"
         + ("，並聲明 artist 名是 AI 角色" if scope == "all_audio" else "") + "（2026 起強制）",
-        "10. ISRC：留空 → DistroKid 免費自動配發（`tracklist.csv` 的 `ISRC(new)` 也是空的）",
+        "10. ISRC：留空 → DistroKid 免費自動配發（**買家的 `tracklist.csv` 不含 ISRC**，"
+        "那是發行商欄位）",
         "",
-        "> `tracklist.csv` 有逐首曲名／長度／調性／BPM，照檔名順序排 track number。",
+        "逐首 ISRC（配發後貼回 `release.json` 的 `tracks[].isrc`，下次重跑才會沿用——"
+        "ISRC 跟著錄音一輩子，重發同一批要填舊的，否則平台會當成兩首歌）：",
+        "",
+        "| # | Title | ISRC |",
+        "|---|---|---|",
+    ] + [f"| {int(t.get('no') or i):02d} | {t.get('title') or ''} | {t.get('isrc') or ''} |"
+         for i, t in enumerate(rec.get("tracks") or [], 1)] + [
+        "",
+        "> `tracklist.csv` 是**給買家**的曲目表（曲名／長度／味道／BPM／調性／格式／檔名／大小）。",
         "",
         "## B. Gumroad（有 API v2，第一版仍先手動）",
         "",
@@ -547,7 +570,8 @@ def build_checklist(rec):
         f"7. **AI Credits**（2026 起強制）：`{ai.get('scope') or 'none'}`"
         + ("，並聲明 artist 名是 AI 角色" if ai.get("scope") == "all_audio" else "")
         + "（DistroKid 上傳流程會問；漏填會被平台事後標記）",
-        "8. ISRC 留空 → 由發行商自動配發（`tracklist.csv` 的 `ISRC(new)` 亦留空）",
+        "8. ISRC 留空 → 由發行商自動配發；配發後把號碼填回 `release.json` 的 `tracks[].isrc`"
+        "（見 `LISTING.md` 的逐首 ISRC 表）",
         "9. 選發布日（建議留 2 週給 Spotify 編輯部 pitch 時間）",
         "",
         "## B. Bandcamp（無 API，但單價最高、可賣無損）",
@@ -644,7 +668,7 @@ def _select_tracks(rows, tokens):
 
 
 def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, min_score=None,
-             blocking=None):
+             blocking=None, isrc_overrides=None):
     """回傳 (來源目錄, [{...}], 被品檢排除的 [(row, 原因)])，曲目依檔名順序（即生成順序）。
 
     選曲優先序：
@@ -674,6 +698,9 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
             "flags": (sc.get("auto_qc") or {}).get("flags") or [],
             "verdict": (sc.get("auto_qc") or {}).get("verdict"),
             "master_src": find_lossless_master(a, sc, style, run),
+            # ISRC 只有發行商在乎（不進買家看的 tracklist.csv），但**人工填過的要留住**：
+            # 它跟著錄音一輩子，重跑被清掉就等於下次可能拿到重複的號碼。
+            "isrc": (isrc_overrides or {}).get(cat.relpath(a)),
         })
 
     if tracks:
@@ -721,6 +748,7 @@ def load_prior_tracks(release_json):
             out[t["file"]] = {
                 "title": re.sub(r" \(pt\. \d+\)$", "", str(t["title"])),
                 "audio": t.get("audio") or "",
+                "isrc": t.get("isrc") or "",
             }
     return out
 
@@ -1065,6 +1093,7 @@ def cmd_plan(args):
     prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
+                                isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
                                 tracks=_parse_tracks(args.tracks), min_score=args.min_score,
                                 blocking=_parse_flags(args.exclude_flags))
     cover = Path(args.cover) if args.cover else pick_cover(args.visual_run)
@@ -1138,6 +1167,7 @@ def cmd_package(args):
     prior = load_prior_tracks(dest / "release.json")
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
+                                isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
                                 tracks=_parse_tracks(args.tracks), min_score=args.min_score,
                                 blocking=_parse_flags(args.exclude_flags))
     artist = args.artist or config.RELEASE_ARTIST
@@ -1236,7 +1266,8 @@ def cmd_package(args):
         "duration": round(r["duration"], 1) if r["duration"] else None,
         "file": cat.relpath(r["audio"]), "audio": _rel(r["audio_out"]),
         "lossless": bool(r["master_src"]),
-        "isrc": None, "master": r.get("master"),
+        # 人工填過的 ISRC 要沿用（load_prior_tracks 讀回來）；沒填＝留空，由發行商配發
+        "isrc": r.get("isrc") or None, "master": r.get("master"),
     } for r in rows]
     rec["total_duration"] = round(sum(r["duration"] or 0 for r in rows), 1)
     rec["dir"] = _rel(dest)
@@ -1244,9 +1275,21 @@ def cmd_package(args):
                                    price_usd=args.price)
 
     dest.mkdir(parents=True, exist_ok=True)
-    csv_rows = [{**t, "artist": artist} for t in rec["tracks"]]
+    # 買家視角的曲目表：帶上檔案大小（買家想知道要下載多少）與實測格式
+    audio_fmt = (f"WAV {rec['master'].get('bits')}-bit / "
+                 f"{rec['master'].get('sample_rate', 0) / 1000:g} kHz"
+                 if rec["master"].get("bits") and rec["master"].get("sample_rate")
+                 else (rec.get("format") or "wav").upper())
+    csv_rows = []
+    for t in rec["tracks"]:
+        p = ROOT / t["audio"] if t.get("audio") else None
+        csv_rows.append({**t, "artist": t.get("artist") or artist,
+                         "explicit": rec.get("explicit"),
+                         "size_mb": round(p.stat().st_size / 1e6, 1) if p and p.exists() else ""})
     io.atomic_write_json(dest / "release.json", rec)
-    io.atomic_write_text(dest / "tracklist.csv", build_tracklist_csv(csv_rows))
+    io.atomic_write_text(dest / "tracklist.csv", build_tracklist_csv(
+        csv_rows, album=album, artist=artist,
+        year=str(rec.get("created_at") or "")[:4], audio_format=audio_fmt))
     io.atomic_write_text(dest / "CHECKLIST.md", build_checklist(rec))
     io.atomic_write_text(dest / "LISTING.md", build_listing_md(rec))
     io.atomic_write_text(dest / "credits.txt", build_credits_txt(rec))

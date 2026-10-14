@@ -506,6 +506,9 @@ def cmd_gumroad(args):
         body = enable_product(pid, token)
         print(f"  🚀 已發佈：{body.get('product', {}).get('short_url') or ''}"
               + (f"（warning：{body.get('warning')}）" if body.get("warning") else ""))
+    elif product.get("published"):
+        # 已發佈的商品：更新內容就即時生效，不需要再 --publish（訊息不要誤導）
+        print("  （商品**已在發佈中**：這次的內容更新已生效）")
     else:
         print("  （維持 draft；檢查後加 --publish 發佈）")
 

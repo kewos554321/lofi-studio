@@ -1085,21 +1085,46 @@ class TestRelease(unittest.TestCase):
         self.assertIsNone(release.parse_loudnorm_json(""))
         self.assertIsNone(release.parse_loudnorm_json("no json here"))
 
-    def test_build_tracklist_csv(self):
-        """`File` 欄要是**交付 ZIP 內**的路徑，不是產線內部的來源路徑（買家找不到那個檔）。"""
+    def test_build_tracklist_csv_is_buyer_facing(self):
+        """曲目表是**給買家**的：要看得到拿到什麼檔/多大/什麼味道，且不含發行商欄位。"""
         csv_text = release.build_tracklist_csv([{
             "no": 1, "title": "A", "artist": "X", "duration": 125,
-            "key": "G major", "bpm": 70, "mood": "m",
-            "audio": "output/releases/r1/audio/01_a.wav",
-            "file": "assets/tracks/forest_piano/forest-1hr-01/x_00001.mp3"}])
-        self.assertTrue(csv_text.startswith("No,Title,Artist,Duration"))
+            "key": "G major", "bpm": 70, "mood": "golden hour in the forest",
+            "audio": "output/releases/r1/audio/01_a.wav", "size_mb": 25.4,
+            "explicit": False, "isrc": "TW-ABC-26-00001",
+            "file": "assets/tracks/forest_piano/forest-1hr-01/x_00001.mp3"}],
+            album="Into the Forest", artist="X", year="2026",
+            audio_format="WAV 24-bit / 48 kHz")
+        header = csv_text.splitlines()[0]
+        self.assertEqual(header, ",".join(release.TRACKLIST_COLUMNS))
+        for col in ("No", "Title", "Album", "Duration", "Vibe", "BPM", "Key",
+                    "Instrumental", "Explicit", "Format", "File", "Size (MB)"):
+            self.assertIn(col, header)
+        self.assertNotIn("ISRC", csv_text)               # 發行商欄位，買家不需要
         self.assertIn("02:05", csv_text)                 # 125s 格式化
-        self.assertIn("G major", csv_text)
-        self.assertIn("audio/01_a.wav", csv_text)
+        self.assertIn("audio/01_a.wav", csv_text)        # 交付檔在 ZIP 內的路徑
         self.assertNotIn("assets/tracks", csv_text)      # 不可洩漏內部來源路徑
+        self.assertIn("WAV 24-bit / 48 kHz", csv_text)   # 買家要知道拿到什麼格式
+        self.assertIn("25.4", csv_text)                  # 檔案大小
+        self.assertIn("Into the Forest", csv_text)       # 專輯／年份
+        self.assertIn("golden hour in the forest", csv_text)
+        self.assertIn("Yes,No", csv_text)                # Instrumental=Yes, Explicit=No
         # 只有來源路徑時（舊紀錄）就照原樣，不亂編
         only_src = release.build_tracklist_csv([{"no": 1, "title": "A", "file": "x.mp3"}])
         self.assertIn("x.mp3", only_src)
+
+    def test_isrc_is_preserved_not_wiped(self):
+        """ISRC 跟著錄音一輩子：人工填過的不能被重跑清掉（原本是硬寫 None）。"""
+        with tempfile.TemporaryDirectory() as td:
+            rj = Path(td) / "release.json"
+            rj.write_text(json.dumps({"tracks": [
+                {"file": "assets/tracks/s/r/a.mp3", "title": "A",
+                 "audio": "output/releases/r/audio/01_a.wav", "isrc": "TW-ABC-26-00001"}]}),
+                encoding="utf-8")
+            prior = release.load_prior_tracks(rj)
+            self.assertEqual(prior["assets/tracks/s/r/a.mp3"]["isrc"], "TW-ABC-26-00001")
+        # 沒填的照樣回空字串（＝由發行商配發）
+        self.assertEqual(release.load_prior_tracks("/nonexistent.json"), {})
 
     def test_summarize_release_event_drops_empty(self):
         ev = release.summarize_release_event(

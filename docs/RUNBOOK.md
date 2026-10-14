@@ -511,7 +511,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**） |
 | `download/<album>.zip` | 交付檔（`audio/`＋封面＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個 |
 | `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
-| `tracklist.csv` | 人用：No/Title/Duration/Key/BPM/Mood/ISRC |
+| `tracklist.csv` | **買家視角**的曲目表：No/Title/Artist/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size（不含 ISRC——那是發行商欄位，見 `LISTING.md`） |
 | `LISTING.md` | **上架欄位對照**：DistroKid／Gumroad 要填的值（複製貼上用）＋長版文案與 tags |
 | `credits.txt` | 隨交付檔附上的 AI 揭露與模型授權（商用 provenance） |
 | `CHECKLIST.md` | DSP／Bandcamp／stock／Gumroad 各平台的上架步驟 |
