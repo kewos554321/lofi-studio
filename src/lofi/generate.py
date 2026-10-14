@@ -26,7 +26,7 @@ from lofi import catalog as cat      # 音樂目錄（sidecar + JSONL）
 from lofi import comfy               # ComfyUI API 小客戶端
 from lofi import media               # ffmpeg 工具 + 磁碟空間檢查
 from lofi import qc                  # 生成後自動品檢（可用 --no-qc 關閉）
-from lofi.config import (COMFY_AUDIO_OUT, COMFY_URL, MIN_FREE_GB, MUSIC_CLIP1,
+from lofi.config import (COMFY_AUDIO_OUT, COMFY_OUTPUT, COMFY_URL, MIN_FREE_GB, MUSIC_CLIP1,
                          MUSIC_CLIP2, MUSIC_UNET, MUSIC_VAE, check_commercial,
                          model_license)
 from lofi.lock import gpu_lock
@@ -276,7 +276,13 @@ def main():
 
             audio = res.get("outputs", {}).get("107", {}).get("audio", [])
             for a in audio:
-                src = COMFY_OUT / a.get("subfolder", "") / a["filename"]
+                # ComfyUI 回報的 subfolder 是相對 output/ 根目錄（本管線 prefix 是 audio/<name>）
+                # → 必須用 COMFY_OUTPUT 當底；用 COMFY_AUDIO_OUT 會變成 output/audio/audio/...
+                src = COMFY_OUTPUT / a.get("subfolder", "") / a["filename"]
+                if not src.exists():                      # 後備：prefix 沒帶子夾時檔案在 output/audio/
+                    alt = COMFY_AUDIO_OUT / a["filename"]
+                    if alt.exists():
+                        src = alt
                 if not src.exists():
                     print(f"    ⚠️  找不到輸出檔 {src}")
                     continue
