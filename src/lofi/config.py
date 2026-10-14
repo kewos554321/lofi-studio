@@ -94,6 +94,8 @@ RELEASE_AI_PERSONA = _bool_env("LOFI_RELEASE_AI_PERSONA", True)
 RELEASE_EXPLICIT = _bool_env("LOFI_RELEASE_EXPLICIT", False)
 # Gumroad 定價（USD）；0＝「名稱你的價錢（pay-what-you-want）」，先累積聽眾再看要不要收費。
 RELEASE_PRICE_USD = float(_env("LOFI_RELEASE_PRICE_USD", "0"))
+# 頻道的公開網址：商品描述會放一行導流（免費長版混音），也是廣告與文件引用的唯一來源。
+CHANNEL_URL = _env("LOFI_CHANNEL_URL", "https://www.youtube.com/@monionthejourney")
 
 
 # ── 自動品檢（qc）政策 ─────────────────────────────────────────────────
@@ -236,6 +238,7 @@ def as_dict():
         "release_songwriter": RELEASE_SONGWRITER or "（未填；DistroKid 原創曲必填真名）",
         "release_ai_credits": RELEASE_AI_CREDITS,
         "release_price_usd": RELEASE_PRICE_USD,
+        "channel_url": CHANNEL_URL or "（未設定；見 LOFI_CHANNEL_URL）",
         "master_target": f"{MASTER_LUFS:g} LUFS / {MASTER_TP:g} dBTP",
         "qc_blocking_flags": ", ".join(QC_BLOCKING_FLAGS) or "（不過濾）",
     }

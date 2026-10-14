@@ -271,6 +271,9 @@ def build_listing(rec, tags=None, price_usd=None):
         notes.append("Music and artwork are created with AI models licensed for commercial "
                      "use; the complete model and licence list ships with the download.")
     sections.append({"heading": "NOTES", "items": notes})
+    if config.CHANNEL_URL:                       # 導流：商店的買家多半也是頻道觀眾
+        sections.append({"heading": "LISTEN FREE",
+                         "items": [f"Full-length mixes on YouTube: {config.CHANNEL_URL}"]})
     return {
         "short": short,
         "long": listing_text(lead, sections),      # 純文字：貼進表單／Bandcamp

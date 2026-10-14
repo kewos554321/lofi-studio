@@ -1608,6 +1608,19 @@ class TestGumroad(unittest.TestCase):
         # 沒有 html 時退回純文字
         self.assertEqual(gumroad.description_for(self._rec(listing={"long": "plain"})), "plain")
 
+    def test_listing_links_the_channel(self):
+        """商品描述要放頻道連結導流（免費長版混音）；可由 LOFI_CHANNEL_URL 關掉。"""
+        listing = release.build_listing(self._rec())
+        self.assertIn(config.CHANNEL_URL, listing["long"])
+        self.assertIn("LISTEN FREE", listing["long"])
+        self.assertIn("Listen Free", listing["html"])
+        orig = config.CHANNEL_URL
+        try:
+            config.CHANNEL_URL = ""
+            self.assertNotIn("LISTEN FREE", release.build_listing(self._rec())["long"])
+        finally:
+            config.CHANNEL_URL = orig
+
     def test_listing_html_and_text_shape(self):
         rec = self._rec()
         rec["tracks"] = [{"no": 1, "title": "A & B"}, {"no": 2, "title": "<C>"}]
