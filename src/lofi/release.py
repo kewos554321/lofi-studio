@@ -443,6 +443,9 @@ def build_listing_md(rec):
     zip_name = f"download/{slugify(album) or 'release'}.zip"
     sw = rec.get("songwriter") or ""
     sw_cell = f"`{sw}`" if sw else "⚠️ 未填（DistroKid 原創曲**必填真名**）"
+    dsp = rec.get("dsp") or {}
+    dsp_genre = dsp.get("genre") or rec.get("genre") or ""
+    dsp_sub = dsp.get("subgenre") or ""
     lines = [
         f"# 上架資料：{album} — {artist}",
         "",
@@ -459,7 +462,9 @@ def build_listing_md(rec):
         "|---|---|",
         f"| Album title | `{album}` |",
         f"| Artist | `{artist}` |",
-        f"| Genre | `{rec.get('genre') or ''}` |",
+        f"| Genre（文案／ID3 用） | `{rec.get('genre') or ''}` |",
+        f"| Genre（**表單**用） | `{dsp_genre}`"
+        + (f"　Secondary `{dsp_sub}`" if dsp_sub else "（沒有次類型）") + " |",
         f"| Explicit | {'Yes' if rec.get('explicit') else 'No'} |",
         f"| Songwriter（真名） | {sw_cell}"
         "　← **平台必填欄位**；給買家的 `credits.txt` 會寫成「"
@@ -475,14 +480,19 @@ def build_listing_md(rec):
         "1. 選商店（Services）→ 建議全選；Musician 方案送審即上線，Plus/Ultimate 才能排未來日",
         f"2. Artist/band name：`{artist}`（新名字會佔一個 artist slot）",
         f"3. Album title：`{album}`｜曲數 {n}（＝Album）",
-        f"4. Primary genre：`{rec.get('genre') or ''}`（**上傳後不能改**；次類型可留空）",
+        f"4. Primary genre：`{dsp_genre}`"
+        + (f"　Secondary：`{dsp_sub}`" if dsp_sub else "（次類型可留空）")
+        + f"　⚠️ **不要選 `{rec.get('genre') or 'Lo-fi'}`**——那不是發行商的選項"
+          "（官方 help：選最接近的；鋼琴／ambient 選 Electronic，boom-bap beat 選 Hip-Hop/Rap）",
         f"5. 封面：上傳 `cover_3000x3000.jpg`",
         "6. Artist mapping：全新藝人 → 選「尚無 artist profile」",
         f"7. Songwriter：**原創曲** → 填真名 `{sw or '⚠️ 未填'}`",
         f"8. Explicit：{'Yes' if rec.get('explicit') else 'No'}（逐首）",
         f"9. **AI Credits**：選 `{scope}`"
         + ("，並聲明 artist 名是 AI 角色" if scope == "all_audio" else "") + "（2026 起強制）",
-        "10. ISRC：留空 → DistroKid 免費自動配發（**買家的 `tracklist.csv` 不含 ISRC**，"
+        "10. Language：`English`（**必須與曲名語言一致**，我們的曲名都是英文）",
+        "11. 「這首單曲之前發行過嗎？」→ **No**（這是首發）",
+        "12. ISRC：留空 → DistroKid 免費自動配發（**買家的 `tracklist.csv` 不含 ISRC**，"
         "那是發行商欄位）",
         "",
         "逐首 ISRC（配發後貼回 `release.json` 的 `tracks[].isrc`，下次重跑才會沿用——"
@@ -603,7 +613,8 @@ def build_checklist(rec):
         f"7. **AI Credits**（2026 起強制）：`{ai.get('scope') or 'none'}`"
         + ("，並聲明 artist 名是 AI 角色" if ai.get("scope") == "all_audio" else "")
         + "（DistroKid 上傳流程會問；漏填會被平台事後標記）",
-        "8. ISRC 留空 → 由發行商自動配發；配發後把號碼填回 `release.json` 的 `tracks[].isrc`"
+        f"8. Language = `English`；「之前發行過嗎」= No",
+        "9. ISRC 留空 → 由發行商自動配發；配發後把號碼填回 `release.json` 的 `tracks[].isrc`"
         "（見 `LISTING.md` 的逐首 ISRC 表）",
         "9. 選發布日（建議留 2 週給 Spotify 編輯部 pitch 時間）",
         "",
@@ -1221,6 +1232,8 @@ def cmd_package(args):
         "release_version": SCHEMA_VERSION, "run": args.run, "style": rows[0]["style"],
         "album": album, "artist": artist, "label": args.label or config.RELEASE_LABEL,
         "genre": args.genre, "format": args.format,
+        # 發行商表單用的 genre（Lo-fi 不是 DistroKid 的選項，見 config 的說明）
+        "dsp": {"genre": args.dsp_genre, "subgenre": args.dsp_subgenre},
         "explicit": bool(args.explicit or config.RELEASE_EXPLICIT),
         "songwriter": args.songwriter or config.RELEASE_SONGWRITER,
         "ai_credits": {"scope": args.ai_credits, "persona": config.RELEASE_AI_PERSONA},
@@ -1403,7 +1416,12 @@ def main():
     p2.add_argument("--artist", default="", help="artist 名義（預設 config.RELEASE_ARTIST / LOFI_RELEASE_ARTIST）")
     p2.add_argument("--album", default="", help="專輯名（預設用風格名）")
     p2.add_argument("--label", default="", help="label（預設 config.RELEASE_LABEL）")
-    p2.add_argument("--genre", default=config.RELEASE_GENRE, help="genre（預設 Lo-fi）")
+    p2.add_argument("--genre", default=config.RELEASE_GENRE,
+                    help="描述文案用的 genre（預設 Lo-fi；ID3 與商品文案用）")
+    p2.add_argument("--dsp-genre", default=config.RELEASE_DSP_GENRE, dest="dsp_genre",
+                    help="發行商表單的 primary genre（預設 Electronic；Lo-fi 不在 DistroKid 清單）")
+    p2.add_argument("--dsp-subgenre", default=config.RELEASE_DSP_SUBGENRE, dest="dsp_subgenre",
+                    help="發行商表單的 secondary genre（可留空）")
     p2.add_argument("--songwriter", default="",
                     help="作詞作曲者**真名**（DistroKid 原創曲必填；預設 config.RELEASE_SONGWRITER）")
     p2.add_argument("--ai-credits", default=config.RELEASE_AI_CREDITS, choices=list(AI_CREDIT_SCOPES),

@@ -75,6 +75,13 @@ MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
 RELEASE_ARTIST = _env("LOFI_RELEASE_ARTIST", "Moni on the Journey")
 RELEASE_LABEL = _env("LOFI_RELEASE_LABEL", "")
 RELEASE_GENRE = _env("LOFI_RELEASE_GENRE", "Lo-fi")
+# 發行商表單用的 genre：**「Lo-fi」不是 DistroKid 的選項**（它是描述詞，不是頂層 genre）。
+# 官方 help 說「選最接近的」，社群實測要依節奏型態分流：
+#   鋼琴／ambient／鼓很輕 → Electronic（＋Chill out 之類的子類）
+#   有 boom-bap 鼓的 beat 導向 → Hip-Hop/Rap（＋Alternative）
+# 所以描述文案仍用 `RELEASE_GENRE`（Lo-fi），**表單**用這兩個；可用 `--dsp-genre` 逐張覆寫。
+RELEASE_DSP_GENRE = _env("LOFI_RELEASE_DSP_GENRE", "Electronic")
+RELEASE_DSP_SUBGENRE = _env("LOFI_RELEASE_DSP_SUBGENRE", "")
 # 母帶響度目標：Spotify 建議 -14 LUFS；true peak 留 1 dB 餘裕。
 MASTER_LUFS = float(_env("LOFI_MASTER_LUFS", "-14"))
 MASTER_TP = float(_env("LOFI_MASTER_TP", "-1"))
@@ -235,6 +242,9 @@ def as_dict():
         "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
         "release_label": RELEASE_LABEL or "（無）",
         "release_genre": RELEASE_GENRE,
+        "release_dsp_genre": f"{RELEASE_DSP_GENRE}"
+                             + (f" / {RELEASE_DSP_SUBGENRE}" if RELEASE_DSP_SUBGENRE else "")
+                             + "（表單用；Lo-fi 不是 DistroKid 的選項）",
         "release_songwriter": RELEASE_SONGWRITER or "（未填；DistroKid 原創曲必填真名）",
         "release_ai_credits": RELEASE_AI_CREDITS,
         "release_price_usd": RELEASE_PRICE_USD,
