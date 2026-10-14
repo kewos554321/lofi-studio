@@ -173,9 +173,14 @@ PENDING_CACHE = ROOT / "logs" / ".gumroad-uploads-pending.json"
 
 
 def upload_cache_key(path):
-    """檔案內容指紋：同名同大小同 mtime 才視為同一份（避免重跑時白傳數百 MB）。"""
+    """檔案指紋＝**內容的 sha1**（不只看 mtime）。
+
+    `release package` 每次都會重建交付 ZIP；成員與日期固定，所以內容通常一模一樣、
+    只有 mtime 變。若用 mtime 當指紋，**只改文案／描述也會重傳 390 MB**（實際踩過），
+    所以改成看內容：內容沒變就不重傳。
+    """
     p = Path(path)
-    return f"{p.name}:{p.stat().st_size}:{int(p.stat().st_mtime)}"
+    return f"{p.name}:{cat.sha1_file(p)}"
 
 
 def _cache_get(path):
@@ -343,11 +348,17 @@ def price_cents(rec, override=None):
         return 0, "usd"
 
 
-def description_for(rec):
-    """商品描述＝`listing.long`（英文，見 release.build_listing）；缺了就退回最小版本。"""
-    d = (rec.get("listing") or {}).get("long")
-    if d:
-        return d
+def description_for(rec, fmt="html"):
+    """商品描述。
+
+    **預設送 HTML**（`listing.html`）：Gumroad 的商品頁吃 HTML，標題與清單才會真的排版；
+    純文字只會變成一堆換行。`fmt="text"` 可強制純文字（萬一它的清洗規則擋掉標籤）。
+    """
+    listing = rec.get("listing") or {}
+    if fmt == "html" and listing.get("html"):
+        return listing["html"]
+    if listing.get("long"):
+        return listing["long"]
     return f"{rec.get('album')} — {rec.get('artist')}"
 
 
@@ -357,7 +368,7 @@ def tags_for(rec, override=None):
     return list(t)[:10]
 
 
-def build_params(rec, *, price=None, permalink="", tags=None, publish=False):
+def build_params(rec, *, price=None, permalink="", tags=None, publish=False, desc_format="html"):
     """把 release.json 轉成 POST /v2/products 的參數（純函式）。
 
     只帶「建立時能帶、且我們有值」的欄位；封面與檔案一律建立後再補（API 限制）。
@@ -368,7 +379,7 @@ def build_params(rec, *, price=None, permalink="", tags=None, publish=False):
         "name": product_name(rec),
         "price": cents,
         "price_currency_type": currency,
-        "description": description_for(rec),
+        "description": description_for(rec, desc_format),
         "custom_permalink": permalink or permalink_for(rec.get("album")),
         "custom_summary": (rec.get("listing") or {}).get("short") or "",
         "published": "false" if not publish else "true",   # 一律先 draft，發佈用 enable
@@ -444,7 +455,8 @@ def cmd_gumroad(args):
     token = load_token()
     zip_path, cover = deliverable_paths(args.run)
     params = build_params(rec, price=args.price, permalink=args.permalink,
-                          tags=_parse_tags(args.tags) or None, publish=False)
+                          tags=_parse_tags(args.tags) or None, publish=False,
+                          desc_format="text" if args.text_description else "html")
 
     price_txt = f"US${params['price'] / 100:g}" if params.get("price") else "pay-what-you-want"
     zip_txt = (f"{zip_path.name}（{zip_path.stat().st_size / 1e6:.0f} MB）"
@@ -535,6 +547,8 @@ def add_parser(sub):
                    help="封面圖的**公開可讀** URL（API 不吃私有 S3；沒有就請在 dashboard 手動上傳）")
     p.add_argument("--publish", action="store_true",
                    help="上傳完成後直接發佈（預設只建 draft，讓你檢查）")
+    p.add_argument("--text-description", action="store_true", dest="text_description",
+                   help="商品描述送純文字（預設送 HTML，Gumroad 的標題／清單才會排版）")
     p.set_defaults(func=cmd_gumroad)
     return p
 

@@ -591,9 +591,13 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 | **檔案要 multipart 上傳** | `POST /files/presign`（要 `filename`/`content_type`/`file_size`）→ 逐 part PUT（收 ETag）→ `POST /files/complete`（要 `upload_id`/`key`/`parts`）→ 把回傳 URL 放進 `files[][url]` |
 | **發佈會被帳號狀態擋** | 沒完成 payout settings 或 email 未確認 → 只停 draft 並回 `warning`（程式照實印，不假裝成功） |
 | **封面／縮圖 API 吃不到** | `/covers` 只收**公開可讀**的圖片 URL 或 `signed_blob_id`（ActiveStorage 簽章 id）。我們的 presign 是私有 S3（GET 會 403）也拿不到 signed id → **封面與縮圖要在 dashboard 手動上傳**（一張 10 秒）；若有公開圖床可用 `--cover-url` |
+| **描述要送 HTML** | Gumroad 商品頁吃 HTML：`description` 預設送 `listing.html`（有 `<h3>`／`<ul>`／`<ol>` 才會排版）。純文字會變成一堆換行。要退回純文字用 `--text-description` |
 
 - 商品 id／URL 會 append 一筆 `event="gumroad"` 到 `catalog/releases.jsonl`（append-only）。
 - 重複跑**不會重複建立**：先用 `custom_permalink` 比對既有商品，有的話走更新。
+- **上傳快取看內容（sha1），不是 mtime**：`release package` 每次都會重建交付 ZIP（成員與日期固定 →
+  內容一樣），所以「只改文案／描述」再跑 `release gumroad` **不會重傳數百 MB**（`logs/.gumroad-uploads.json`）。
+- 改**內嵌標籤**（母帶的 ID3）例外——那要 `release package --force` 重算母帶，ZIP 內容才會真的變。
 - ⚠️ 上架文案（`release.json` 的 `listing`）**一律英文**（Gumroad/DSP 是英文店面）；中文說明在 `CHECKLIST.md`。
 
 ---

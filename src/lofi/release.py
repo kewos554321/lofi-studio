@@ -37,6 +37,7 @@ songwriter 真名／AI Credits／封面／ISRC）散在好幾頁。這裡一次�
 """
 import argparse
 import csv
+import html as _html
 import io as _io
 import json
 import os
@@ -248,35 +249,63 @@ def build_listing(rec, tags=None, price_usd=None):
     short = (f'{n} tracks of instrumental {genre}, about {minutes} minutes — '
              f'"{album}" by {artist}.')
     scope = (rec.get("ai_credits") or {}).get("scope") or "none"
-    body = [
-        f'"{album}" is a {genre} instrumental album by {artist} — '
-        f'{n} tracks, {mm.fmt_ts(dur)}.',
-        "All instrumental, no vocals: felt piano, warm pads, vinyl crackle and soft "
-        "percussion, made for studying, working, reading or falling asleep.",
-        "◆ WHAT YOU GET",
-        f"- {n} tracks in {fmt}, {mm.fmt_ts(dur)}\n"
-        f"- Album cover, {COVER_SIZE} × {COVER_SIZE} px\n"
-        "- Tracklist\n"
-        "- Liner notes listing every model and licence used\n"
-        "Delivered as one .zip download. The files are yours to keep.",
-    ]
+    lead = [f'"{album}" is a {genre} instrumental album by {artist} — '
+            f'{n} tracks, {mm.fmt_ts(dur)}.',
+            "All instrumental, no vocals: felt piano, warm pads, vinyl crackle and soft "
+            "percussion, made for studying, working, reading or falling asleep."]
+    sections = [{
+        "heading": "WHAT YOU GET",
+        "items": [f"{n} tracks in {fmt}, {mm.fmt_ts(dur)}",
+                  f"Album cover, {COVER_SIZE} × {COVER_SIZE} px",
+                  "Tracklist",
+                  "Liner notes listing every model and licence used"],
+        "closing": "One .zip download. The files are yours to keep.",
+    }]
     if tracks:
-        rows = []
-        for i, t in enumerate(tracks, 1):
-            rows.append(f"{int(t.get('no') or i):02d}  {t.get('title') or ''}")
-        body.append("◆ TRACKLIST\n" + "\n".join(rows))
-    notes = [f"- Mastered to {_f(master.get('lufs'), -14):g} LUFS / "
+        sections.append({"heading": "TRACKLIST", "ordered": True,
+                         "items": [f"{int(t.get('no') or i):02d}  {t.get('title') or ''}"
+                                   for i, t in enumerate(tracks, 1)]})
+    notes = [f"Mastered to {_f(master.get('lufs'), -14):g} LUFS / "
              f"{_f(master.get('tp'), -1):g} dBTP — the level streaming services target."]
     if scope != "none":
-        notes.append("- Music and artwork are created with AI models licensed for commercial "
+        notes.append("Music and artwork are created with AI models licensed for commercial "
                      "use; the complete model and licence list ships with the download.")
-    body.append("◆ NOTES\n" + "\n".join(notes))
+    sections.append({"heading": "NOTES", "items": notes})
     return {
         "short": short,
-        "long": "\n\n".join(body),
+        "long": listing_text(lead, sections),      # 純文字：貼進表單／Bandcamp
+        "html": listing_html(lead, sections),      # HTML：Gumroad 的商品頁（有標題與清單）
         "tags": clean_tags(tags)[0] if tags else listing_tags(rec),
         "price_usd": config.RELEASE_PRICE_USD if price_usd is None else price_usd,
     }
+
+
+def listing_text(lead, sections):
+    """商品描述的**純文字**版（段落之間空行、清單用 `- `）。"""
+    parts = ["\n".join(lead)]
+    for s in sections:
+        items = "\n".join(i if s.get("ordered") else f"- {i}" for i in s["items"])
+        parts.append(f"{s['heading']}\n{items}")
+        if s.get("closing"):
+            parts.append(s["closing"])
+    return "\n\n".join(parts)
+
+
+def listing_html(lead, sections):
+    """商品描述的 **HTML** 版（Gumroad 的商品頁吃 HTML：標題＋清單才會真的排版）。
+
+    只用最保守的標籤（p/h3/ul/ol/li）並全部 escape——Gumroad 的 editor 會把它存成
+    rich content；標籤愈少愈不容易被它的清洗規則改掉。
+    """
+    esc = _html.escape
+    parts = [f"<p>{esc(p)}</p>" for p in lead]
+    for s in sections:
+        tag = "ol" if s.get("ordered") else "ul"
+        items = "".join(f"<li>{esc(i)}</li>" for i in s["items"])
+        parts.append(f"<h3>{esc(s['heading'].title())}</h3><{tag}>{items}</{tag}>")
+        if s.get("closing"):
+            parts.append(f"<p>{esc(s['closing'])}</p>")
+    return "".join(parts)
 
 
 def probe_audio_format(path):
@@ -474,7 +503,8 @@ def build_listing_md(rec):
         "7. Category（Discover 需要；不要選 Other）＋ 打開 ratings",
         f"8. 內容（Content）：上傳 `{zip_name}`",
         "",
-        "長版描述：",
+        "長版描述（純文字；`lofi release gumroad` 會直接送 **HTML 版**，"
+        "商品頁的標題與清單才會真的排版）：",
         "",
         "```",
         (listing.get("long") or "").strip(),

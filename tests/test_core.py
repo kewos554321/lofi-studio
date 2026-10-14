@@ -1,6 +1,7 @@
 """核心純函式測試。執行： python3 -m unittest discover -s tests -v"""
 import argparse
 import json
+import os
 import struct
 import sys
 import tempfile
@@ -1270,11 +1271,12 @@ class TestRelease(unittest.TestCase):
         rec["tracks"] = [{"no": 1, "title": "Leaving the Windowsill"},
                          {"no": 2, "title": "The First Pines"}]
         listing = release.build_listing(rec)
-        self.assertIn("◆ WHAT YOU GET", listing["long"])
-        self.assertIn("◆ TRACKLIST", listing["long"])
-        self.assertIn("01  Leaving the Windowsill", listing["long"])
+        self.assertIn("WHAT YOU GET\n- 2 tracks", listing["long"])
+        self.assertIn("TRACKLIST\n01  Leaving the Windowsill", listing["long"])
+        self.assertIn("NOTES\n- Mastered to", listing["long"])
         self.assertIn("AI models licensed for commercial use", listing["long"])
         self.assertIn("WAV", listing["long"])
+        self.assertNotIn("◆", listing["long"])             # 已改用區塊標題，不再用 ◆ 符號
         self.assertNotIn("器樂", listing["long"])          # 不該再混中文
         self.assertNotIn("器樂", listing["short"])
 
@@ -1565,8 +1567,20 @@ class TestGumroad(unittest.TestCase):
         body = gumroad._encode([("a", 1), ("b", [1, 2]), ("a", 2)]).decode()
         self.assertEqual(body, "a=1&b=1&b=2&a=2")
 
+    def test_upload_cache_key_is_content_based(self):
+        """指紋要看**內容**，不是 mtime：`release package` 每次重建 ZIP（內容一樣、
+        只有 mtime 變），用 mtime 當指紋會讓只改文案也重傳 390 MB。"""
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "a.zip"
+            f.write_bytes(b"payload")
+            k1 = gumroad.upload_cache_key(f)
+            os.utime(f, (1, 1))                                  # 只動 mtime
+            self.assertEqual(gumroad.upload_cache_key(f), k1, "mtime 不該影響指紋")
+            f.write_bytes(b"different content")
+            self.assertNotEqual(gumroad.upload_cache_key(f), k1)
+
     def test_upload_cache_roundtrip(self):
-        """同一份檔案（name+size+mtime）不該重複上傳（母帶 zip 數百 MB）。"""
+        """同一份內容不該重複上傳（母帶 zip 數百 MB）。"""
         orig = gumroad.UPLOAD_CACHE
         with tempfile.TemporaryDirectory() as td:
             gumroad.UPLOAD_CACHE = Path(td) / "up.json"
@@ -1577,7 +1591,7 @@ class TestGumroad(unittest.TestCase):
                 gumroad._cache_put(f, "https://x/a.zip")
                 self.assertEqual(gumroad._cache_get(f), "https://x/a.zip")
                 self.assertIn(gumroad.upload_cache_key(f), gumroad.UPLOAD_CACHE.read_text())
-                f.write_bytes(b"a much longer payload")          # size 變了 → 快取失效
+                f.write_bytes(b"a much longer payload")          # 內容變了 → 快取失效
                 self.assertEqual(gumroad._cache_get(f), "")
             finally:
                 gumroad.UPLOAD_CACHE = orig
@@ -1585,6 +1599,34 @@ class TestGumroad(unittest.TestCase):
     def test_tags_for_and_description_fallback(self):
         self.assertEqual(gumroad.tags_for(self._rec()), ["lofi", "forest"])
         self.assertEqual(gumroad.description_for({"album": "A", "artist": "B"}), "A — B")
+
+    def test_description_prefers_html_but_can_force_text(self):
+        """Gumroad 商品頁吃 HTML（標題／清單才會排版）；--text-description 可退回純文字。"""
+        rec = self._rec(listing={"long": "plain text", "html": "<p>html</p>"})
+        self.assertEqual(gumroad.description_for(rec), "<p>html</p>")
+        self.assertEqual(gumroad.description_for(rec, "text"), "plain text")
+        # 沒有 html 時退回純文字
+        self.assertEqual(gumroad.description_for(self._rec(listing={"long": "plain"})), "plain")
+
+    def test_listing_html_and_text_shape(self):
+        rec = self._rec()
+        rec["tracks"] = [{"no": 1, "title": "A & B"}, {"no": 2, "title": "<C>"}]
+        listing = release.build_listing(rec)
+        html = listing["html"]
+        self.assertIn("<h3>What You Get</h3>", html)
+        self.assertIn("<h3>Tracklist</h3>", html)
+        self.assertIn("<h3>Notes</h3>", html)
+        self.assertIn("<ol>", html)                       # 曲目用有序清單（會自動編號）
+        self.assertIn("<ul>", html)
+        self.assertIn("<li>01  A &amp; B</li>", html)      # 一定要 escape（含曲目編號）
+        self.assertIn("<li>02  &lt;C&gt;</li>", html)
+        self.assertNotIn("<C>", html)
+        # 純文字版：段落間空行、清單用 "- "
+        self.assertIn("WHAT YOU GET\n- 2 tracks", listing["long"])
+        self.assertIn("\n\n", listing["long"])             # 段落之間要空行
+        for tag in ("<h3>", "<ul>", "<ol>", "<li>", "<p>"):
+            self.assertNotIn(tag, listing["long"])         # 純文字版不該有標籤
+        self.assertIn("02  <C>", listing["long"])           # 純文字不 escape（原文照登）
 
 
 if __name__ == "__main__":
