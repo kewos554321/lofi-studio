@@ -72,9 +72,12 @@
 output/releases/coastal01/
 ├── audio/                01_slow-tide.wav …（-14 LUFS / -1 dBTP，ID3 已填）
 ├── cover_3000x3000.jpg   封面（無文字，見 §6-1）
-├── release.json          機器用：album/artist/track 順序/ISRC 欄/授權 provenance/母帶參數
+├── download/<album>.zip  交付檔（audio/＋封面＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
+├── release.json          機器用：album/artist/track 順序/genre/explicit/songwriter/AI credits/ISRC 欄/授權 provenance/母帶參數
 ├── tracklist.csv         人用：No, Title, Duration, Key, BPM, Mood, ISRC(new)
-└── CHECKLIST.md          各平台上架步驟（DSP／Bandcamp／stock 各一段）
+├── LISTING.md            上架欄位對照：DistroKid／Gumroad 要填的值（複製貼上）＋長版文案/tags
+├── credits.txt           隨交付檔附上的 AI 揭露與模型授權（賣點，見 §5）
+└── CHECKLIST.md          各平台上架步驟（DSP／Bandcamp／stock／Gumroad 各一段）
 ```
 
 實作時發現、原規劃沒預期到的幾點（已處理）：
@@ -157,6 +160,26 @@ ffmpeg 轉一份 mp3 進工作目錄 → `--clean-raw` 刪掉 ComfyUI 原始檔�
 | 影片素材 | `assets/visuals/` | Pond5（影片類） | 產包 |
 
 > 一律帶上 `release.json` 的授權 provenance（模型／授權／來源），這是商用素材的**賣點**，不是附註。
+> `release` 會把同一份 provenance 寫成 `credits.txt` **一起放進交付 ZIP**（買家看得到），
+> 並在 `LISTING.md` 列出各平台要填的欄位。
+
+### 5-1. AI 揭露（2026 起是上架的必要欄位，不是選配）
+
+2026 起 AI 揭露**進了上傳流程本身**：DistroKid 的 **AI Credits** 會問「歌詞／旋律／全部音訊／部分音訊」
+哪些是 AI 生成，選「全部音訊」後還會追問 artist 名是**真人還是 AI 角色**；Apple Music（Transparency Tags）、
+Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線的音樂是 ACE-Step **全生成** → 預設揭露
+`all_audio`（`config.RELEASE_AI_CREDITS`）。這組值會同時進 `release.json`（機器）與 `LISTING.md`／
+`credits.txt`（人／買家），避免上架時靠記憶填。
+
+| 欄位 | 值（本產線預設） | 出處 |
+|---|---|---|
+| `genre` | `Lo-fi` | `config.RELEASE_GENRE` |
+| `explicit` | `False`（純器樂、無歌詞） | `config.RELEASE_EXPLICIT` |
+| `songwriter` | **（未填，需填真名）** | `config.RELEASE_SONGWRITER`／`--songwriter` |
+| `ai_credits.scope` | `all_audio` | `config.RELEASE_AI_CREDITS` |
+| `ai_credits.persona` | `True`（artist 是 AI 角色） | `config.RELEASE_AI_PERSONA` |
+| `listing.tags` | 由 genre/style/專輯名推得（Gumroad 上限 10） | `release.listing_tags()` |
+| `listing.price_usd` | `0`（名稱你的價錢） | `config.RELEASE_PRICE_USD`／`--price` |
 
 ---
 
@@ -240,12 +263,19 @@ ffmpeg 轉一份 mp3 進工作目錄 → `--clean-raw` 刪掉 ComfyUI 原始檔�
 |---|---|---|---|
 | **P1** | `lofi release package` ＋ 單曲 metadata ＋ `generate --format flac` | 上架包 | ✅ 已完成 |
 | **P2** | `lofi live`（ffmpeg → RTMP） | 24/7 直播 | ⬜ 下一步 |
-| **P3** | `lofi release gumroad` ＋ stems 包 | 素材授權 | ⬜ |
+| **P3** | `lofi release gumroad`（API v2 全自動上架）＋ stems 包 | 素材授權 | ⬜（資料層已就緒：`release.json` 的 `listing`＋`LISTING.md`＋`download/*.zip`） |
 | **P4**（選配） | Shorts／Reels 直式衍生 | 短影音 | ⬜ 未選，先列後補 |
 | **P5**（天花板） | label 級 API（DDEX） | 全自動送 DSP | ⬜ 等 P1–P4 跑順再評估 |
 
-> P1 已上線：`lofi release plan|package`、`generate --format flac`、`catalog/releases.jsonl`。
+> P1 已上線：`lofi release plan|package`、`generate --format flac`、`catalog/releases.jsonl`、
+> 上架資料層（`release.json` 的 `genre/explicit/songwriter/ai_credits/listing`、
+> `LISTING.md`、`credits.txt`、`download/<album>.zip`）。
 > 尚未做的是 §3.2 的 **(b) 重生成無損母帶**（列為選配，見 §6-3）。
+
+**P3 為什麼先做「資料層」而不是直接寫 API**：Gumroad 的 `POST /v2/products` 只建立 draft，
+發佈要 `payout settings` 完成；Discover 又要 US$100 真實銷售＋風控審查＋至少 1 筆非退費銷售。
+自動化寫完卻卡在帳號閘門對測試沒幫助；而 DistroKid／Gumroad 缺的是**同一組欄位**，
+所以先把欄位做進 `release`（一次解鎖兩條路），再手動上架一次驗證格式，最後才做 API 自動化。
 
 ---
 

@@ -95,10 +95,12 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ./scripts/lofi release plan    --run coastal01                    # 先看曲序/長度/重複曲名
 ./scripts/lofi release package --run coastal01                    # 產出 output/releases/coastal01/
 ./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
-#   → audio/*.wav（-14 LUFS 母帶）+ cover_3000x3000.jpg + release.json + tracklist.csv + CHECKLIST.md
+#   → audio/*.wav（-14 LUFS 母帶）+ cover_3000x3000.jpg + release.json + tracklist.csv
+#     + LISTING.md（DistroKid／Gumroad 逐欄值）+ credits.txt + download/<album>.zip + CHECKLIST.md
 ```
-> DSP（Spotify/Apple…）與 Bandcamp **沒有公開 API**，所以這步產出「上架包＋清單」，上傳仍需手動。
-> artist 名義預設 `Moni on the Journey`（`config.RELEASE_ARTIST`／`LOFI_RELEASE_ARTIST` 可覆寫）；
+> DSP（Spotify/Apple…）與 Bandcamp **沒有公開 API**，所以這步產出「上架包＋清單」，上傳仍需手動；
+> `LISTING.md` 把兩個平台上架表單要填的值（genre／explicit／songwriter 真名／AI Credits／tags…）整理成一頁，
+> 只負責複製貼上。artist 名義預設 `Moni on the Journey`（`config.RELEASE_ARTIST`／`LOFI_RELEASE_ARTIST` 可覆寫）；
 > 完整平台地圖見 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)。
 
 > 每一步的細節、參數與疑難排解見下面各節；完整操作手冊見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，**可直接照抄的成品配置見 [`docs/RECIPES.md`](docs/RECIPES.md)**。

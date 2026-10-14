@@ -506,9 +506,12 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 |---|---|
 | `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留來源取樣率，ID3 已填） |
 | `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**） |
-| `release.json` | 機器用：album/artist/曲序/授權 provenance/每首母帶參數 |
+| `download/<album>.zip` | 交付檔（`audio/`＋封面＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個 |
+| `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
 | `tracklist.csv` | 人用：No/Title/Duration/Key/BPM/Mood/ISRC |
-| `CHECKLIST.md` | DSP／Bandcamp／stock 各平台的上架步驟 |
+| `LISTING.md` | **上架欄位對照**：DistroKid／Gumroad 要填的值（複製貼上用）＋長版文案與 tags |
+| `credits.txt` | 隨交付檔附上的 AI 揭露與模型授權（商用 provenance） |
+| `CHECKLIST.md` | DSP／Bandcamp／stock／Gumroad 各平台的上架步驟 |
 
 - **artist 名義**：已定案為 **`Moni on the Journey`**（`config.RELEASE_ARTIST`，可用 `LOFI_RELEASE_ARTIST` 或 `--artist` 覆寫）。
   刻意與 YouTube 頻道名（Drifted LoFi）分開，走「廠牌家族」路線；單字名在 Apple Music／MusicBrainz 全部撞名，見 DISTRIBUTION §6-2。
@@ -527,8 +530,26 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
   > **不要用 `--min-score 100`**：全庫 126 首只剩 11 首（9%），而丟掉的理由是產線自己會修的。
   > 用這份黑名單則可用 **123/126**，只有 3 首 `wide_dynamics` 被擋。
   > 沒有品檢紀錄的曲目一律排除（量測不到不可假通過）；硬要收用 `--exclude-flags ''`。
+- **上架表單要填的值，一次湊齊**（`LISTING.md`）：DistroKid 與 Gumroad 都要 `genre`／`explicit`／
+  **`songwriter` 真名**／**AI Credits**（2026 起強制揭露）等欄位，這些散在好幾頁表單上。
+  `release` 會把值寫進 `release.json` 並同時印成 `LISTING.md`：
+  ```bash
+  ./scripts/lofi release package --run coastal01 --songwriter "你的本名"   # DistroKid 原創曲必填真名
+  ./scripts/lofi release package --run coastal01 --ai-credits all_audio    # 本產線＝全生成（預設）
+  ./scripts/lofi release package --run coastal01 --explicit                # 有歌詞且不雅才加（預設否）
+  ./scripts/lofi release package --run coastal01 --price 5                 # Gumroad 定價；0＝名稱你的價錢
+  ./scripts/lofi release package --run coastal01 --tags "lofi,rain,study music"
+  ./scripts/lofi release package --run coastal01 --no-zip                  # 不產交付 ZIP
+  ```
+  預設值集中在 `config.py`（`LOFI_RELEASE_SONGWRITER`／`LOFI_RELEASE_AI_CREDITS`／
+  `LOFI_RELEASE_PRICE_USD`…），可用 `./scripts/lofi config` 查。
+  > **`songwriter` 一定要填真名**（DistroKid 原創曲必填、填藝名會被退）；沒填時 `LISTING.md`／`CHECKLIST.md`
+  > 會標成「⚠️ 未填」逼你上架前處理。
 - **商用守門**：比照 `generate`/`visual`，模型授權未知／禁止商用的批會 **fail-closed**（`--allow-unknown-license` 可略過）。
 - **可中斷續跑**：已存在的母帶會略過（`--force` 重做），所以改一首歌名只需重算那一首。
+  ⚠️ 也因此**只改 artist／album 名（metadata）不會自動重算既有母帶**——ID3 會留舊值。這種情況要加 `--force`。
+  ⚠️ 別忘了 `--tracks`／`--limit`：**不指定就是整個 run**（一個 run 可能有 30+ 首），
+  會把策展好的專輯換成全部曲目、並把原本的母帶當孤兒刪掉（踩過）。
 - **跑其他工作時請限流**：`release` 的母帶是 ffmpeg loudnorm（**純 CPU、不碰 GPU**），
   但不設限時 ffmpeg 會**吃滿所有核心**，會跟 ComfyUI 生成搶 CPU。加 `--threads 2 --nice 15`
   （或設 `LOFI_THREADS=2 LOFI_NICE=15`）就能溫和共存，比照 `make_long_lofi.sh` 的 `THREADS`/`NICE`。

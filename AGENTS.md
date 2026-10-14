@@ -45,7 +45,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
   cli.py           # 單一入口 `lofi <command>`（延遲 import，`lofi qc` 不會被 numpy 拖累）
   upload.py        # 上傳成片到 YouTube（唯一需 Google 套件的模組，用 .venv 與 .secrets/ 憑證）
-  release.py       # 把生成 run 包成上架包（母帶+封面+metadata+清單；DSP/Bandcamp 無 API，故只產包）
+  release.py       # 把生成 run 包成上架包（母帶+封面+metadata+清單+LISTING 欄位+交付 ZIP；DSP/Bandcamp 無 API，故只產包）
   character.py     # 主角定裝（prompts/character/）＋ LoRA 訓練集一致性檢查／字幕／RunPod 打包
 scripts/lofi       # 統一 CLI 入口 wrapper（免安裝；= `python -m lofi.cli`，shell 產線與人都用它）
 scripts/check.sh   # 提交前自檢（compile + unittest；CI 跑同一套）
@@ -61,7 +61,7 @@ assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifes
 assets/refs/                    # 參考素材（人物照片、哼唱錄音、轉檔）—不進版控，且不在任何工具掃描路徑
 catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
-output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包；masters/<style>/<run>/ 為無損母帶（FLAC）
+output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包（audio/ + 封面 + LISTING.md + download/<album>.zip…）；masters/<style>/<run>/ 為無損母帶（FLAC）
 tests/              # python3 -m unittest discover -s tests -v
 docs/RUNBOOK.md     # 操作手冊
 ```
@@ -108,6 +108,7 @@ python3 -m unittest discover -s tests -v
 - **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
 - **商用授權**：產出要能商用。換模型前先在 `config.MODEL_LICENSES` 登錄 `{license, commercial, source}`；`generate`/`visual`/`release` 對 `commercial!=True` 的模型 **fail-closed**（中止，除非 `--allow-unknown-license`）。生成時把 `model_license`/`model_source` 寫進 sidecar/manifest，`meta` 彙整成 `publish.credits`、`release` 彙整成 `release.json` 的 `credits`。稽核用 `./scripts/lofi license check`；矩陣見 `docs/LICENSING.md`。**別用非商用模型**（例：MusicGen CC-BY-NC）。
+- **上架欄位只有一處來源**：`release.json`（`genre`／`explicit`／`songwriter`／`ai_credits`／`listing`）＋同資料夾的 `LISTING.md`（給人複製貼上）與 `credits.txt`（隨交付 ZIP）。AI 揭露（2026 起 DistroKid AI Credits 強制）由 `config.RELEASE_AI_CREDITS` 決定（本產線＝`all_audio`）；`songwriter` 必填**真名**、`tags` 遵守 Gumroad 規則（每 2–20 字、≤10 個）。新平台要填的欄位就加在這裡，別在各處硬編。
 - **繁中註解/輸出**：本專案文件與 CLI 訊息用繁體中文。
 - **README / RUNBOOK 要同步**：新增指令要更新 `README.md` 與 `docs/RUNBOOK.md`。
 

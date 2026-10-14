@@ -9,6 +9,11 @@
   LOFI_MUSIC_VAE       audio VAE 檔名
   LOFI_IMAGE_CKPT      場景圖 checkpoint 檔名
   LOFI_UPSCALE_MODEL   放大模型檔名
+  LOFI_RELEASE_ARTIST  音樂 artist 名義（預設 Moni on the Journey）
+  LOFI_RELEASE_SONGWRITER   作詞作曲真名（DistroKid 原創曲必填）
+  LOFI_RELEASE_AI_CREDITS   AI 揭露範圍（預設 all_audio；DistroKid AI Credits）
+  LOFI_RELEASE_PRICE_USD    Gumroad 定價 USD（0＝名稱你的價錢）
+  LOFI_QC_BLOCKING_FLAGS    品檢要擋掉的 flag（母帶修不掉的才擋）
 
 查目前值：`lofi config`（或 --json / --sh / --licenses）。
 """
@@ -20,6 +25,14 @@ from pathlib import Path
 def _env(name, default):
     v = os.environ.get(name)
     return v if v else default
+
+
+def _bool_env(name, default):
+    """布林環境變數：1/true/yes/on（不分大小寫）＝True；未設＝default。"""
+    v = os.environ.get(name)
+    if v is None or not v.strip():
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on", "y", "t")
 
 
 def _mark(commercial):
@@ -65,6 +78,20 @@ RELEASE_GENRE = _env("LOFI_RELEASE_GENRE", "Lo-fi")
 # 母帶響度目標：Spotify 建議 -14 LUFS；true peak 留 1 dB 餘裕。
 MASTER_LUFS = float(_env("LOFI_MASTER_LUFS", "-14"))
 MASTER_TP = float(_env("LOFI_MASTER_TP", "-1"))
+
+# 上架表單的共用欄位（release 產出 LISTING.md／CHECKLIST.md 用；DistroKid 與 Gumroad 都要）。
+# DistroKid：**原創曲必填 songwriter 真名**（填藝名會被退）；所以這裡刻意留空、在清單上標「待填」，
+# 逼你在上架前填一次（可用 LOFI_RELEASE_SONGWRITER 或 `release package --songwriter`）。
+RELEASE_SONGWRITER = _env("LOFI_RELEASE_SONGWRITER", "")
+# AI 揭露範圍（DistroKid 的 AI Credits；選項見 release.AI_CREDIT_SCOPES）。
+# 本產線的音樂是 ACE-Step **全生成** → 預設 all_audio；封面（SDXL）另記於 credits.txt。
+RELEASE_AI_CREDITS = _env("LOFI_RELEASE_AI_CREDITS", "all_audio")
+# artist 名是否為「AI 角色」（DistroKid 選 all_audio 後會追問，2026 起強制）。
+RELEASE_AI_PERSONA = _bool_env("LOFI_RELEASE_AI_PERSONA", True)
+# explicit 歌詞標記；本產線為純器樂、無人聲 → 預設 False。
+RELEASE_EXPLICIT = _bool_env("LOFI_RELEASE_EXPLICIT", False)
+# Gumroad 定價（USD）；0＝「名稱你的價錢（pay-what-you-want）」，先累積聽眾再看要不要收費。
+RELEASE_PRICE_USD = float(_env("LOFI_RELEASE_PRICE_USD", "0"))
 
 
 # ── 自動品檢（qc）政策 ─────────────────────────────────────────────────
@@ -203,6 +230,10 @@ def as_dict():
         "min_free_gb": MIN_FREE_GB,
         "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
         "release_label": RELEASE_LABEL or "（無）",
+        "release_genre": RELEASE_GENRE,
+        "release_songwriter": RELEASE_SONGWRITER or "（未填；DistroKid 原創曲必填真名）",
+        "release_ai_credits": RELEASE_AI_CREDITS,
+        "release_price_usd": RELEASE_PRICE_USD,
         "master_target": f"{MASTER_LUFS:g} LUFS / {MASTER_TP:g} dBTP",
         "qc_blocking_flags": ", ".join(QC_BLOCKING_FLAGS) or "（不過濾）",
     }

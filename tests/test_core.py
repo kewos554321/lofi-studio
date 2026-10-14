@@ -5,6 +5,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import zipfile
 import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1067,6 +1068,101 @@ class TestRelease(unittest.TestCase):
             "tracks": [{"title": "A"}]})
         for section in ("DSP 串流", "Bandcamp", "stock／sync", "發布前檢查"):
             self.assertIn(section, md)
+
+    def _rec(self, **over):
+        rec = {"album": "Into the Forest", "artist": "Moni on the Journey", "run": "forest-1hr-01",
+               "style": "forest_piano", "genre": "Lo-fi", "label": "", "explicit": False,
+               "songwriter": "Real Name", "ai_credits": {"scope": "all_audio", "persona": True},
+               "master": {"lufs": -14, "tp": -1}, "master_source": "src",
+               "credits": [{"model": "acestep_v1.5_turbo.safetensors", "license": "MIT",
+                            "source": "https://x", "commercial": True}],
+               "tracks": [{"no": 1, "title": "A"}, {"no": 2, "title": "B"}],
+               "total_duration": 240.0, "listing": {}}
+        rec.update(over)
+        return rec
+
+    def test_clean_tags_rules(self):
+        """Gumroad tag 規則：2–20 字、去開頭 #、不分大小寫去重、上限 10。"""
+        kept, rejected = release.clean_tags(
+            ["lofi", "lofi", "#sleep", "x", "study music", "a" * 21])
+        self.assertEqual(kept, ["lofi", "sleep", "study music"])   # 重複／太短／太長都丟
+        self.assertIn("x", rejected)
+        _, over = release.clean_tags([f"tag{i}" for i in range(15)])
+        self.assertEqual(len(over), 5)                             # 超過 10 個的都進 rejected
+        self.assertLessEqual(len(release.clean_tags([f"t{i}" for i in range(15)])[0]), 10)
+
+    def test_listing_tags_legal_and_include_genre(self):
+        tags = release.listing_tags(self._rec())
+        self.assertIn("lofi", tags)                                # genre 小寫進 tag
+        self.assertIn("forest", tags)                              # 專輯名 → tag
+        self.assertIn("piano", tags)                               # style → tag
+        self.assertEqual(release.clean_tags(tags)[1], [])           # 產出的一定合法
+        self.assertLessEqual(len(tags), release.GUMROAD_MAX_TAGS)
+
+    def test_build_listing_defaults_and_price(self):
+        listing = release.build_listing(self._rec())
+        self.assertIn("Into the Forest", listing["short"])
+        self.assertIn("Moni on the Journey", listing["short"])
+        self.assertIn("AI", listing["long"])                       # scope != none → 要揭露
+        self.assertEqual(listing["price_usd"], config.RELEASE_PRICE_USD)
+        # 明給 tags/price 時要沿用（tags 仍會過濾），且 scope=none 不再宣稱 AI
+        got = release.build_listing(self._rec(ai_credits={"scope": "none"}),
+                                    tags=["#Shore", "study music"], price_usd=7.5)
+        self.assertEqual(got["tags"], ["Shore", "study music"])
+        self.assertEqual(got["price_usd"], 7.5)
+        self.assertNotIn("AI 生成", got["long"])
+
+    def test_build_listing_md_has_both_platforms(self):
+        rec = self._rec()
+        rec["listing"] = release.build_listing(rec)
+        md = release.build_listing_md(rec)
+        for needle in ("DistroKid", "Gumroad", "Into the Forest", "Moni on the Journey",
+                       "Songwriter", "AI Credits", "cover_3000x3000.jpg", "download/"):
+            self.assertIn(needle, md)
+        self.assertIn("Real Name", md)
+        # 沒填 songwriter 時要喊出來（DistroKid 原創曲必填真名）
+        rec["songwriter"] = ""
+        self.assertIn("必填真名", release.build_listing_md(rec))
+
+    def test_build_credits_txt_lists_models(self):
+        txt = release.build_credits_txt(self._rec())
+        self.assertIn("acestep_v1.5_turbo.safetensors", txt)
+        self.assertIn("MIT", txt)
+        self.assertIn("all_audio", txt)
+        self.assertIn("AI 角色", txt)                              # persona=True
+        self.assertIn("（無紀錄）", release.build_credits_txt(self._rec(credits=[])))
+
+    def test_build_checklist_includes_shared_fields(self):
+        """LISTING 之後，CHECKLIST 也要直接看到共用欄位與 Gumroad（不必回頭查程式）。"""
+        rec = self._rec()
+        rec["listing"] = release.build_listing(rec)
+        md = release.build_checklist(rec)
+        for needle in ("Songwriter", "AI Credits", "Gumroad", "LISTING.md", "download/"):
+            self.assertIn(needle, md)
+        self.assertIn("explicit = No", md)
+
+    def test_make_release_zip_is_deterministic_and_skips_missing(self):
+        """交付 ZIP：內容決定檔案（時間戳固定），且缺少的成員直接略過不炸。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "a.wav").write_bytes(b"audio-bytes")
+            (d / "tracklist.csv").write_text("No,Title\n1,A\n", encoding="utf-8")
+            members = [(d / "a.wav", "audio/a.wav"),
+                       (d / "tracklist.csv", "tracklist.csv"),
+                       (d / "missing.txt", "missing.txt")]
+            z1 = release.make_release_zip(d / "one.zip", members)
+            z2 = release.make_release_zip(d / "two.zip", members)
+            self.assertEqual(z1.read_bytes(), z2.read_bytes())     # 可重現
+            with zipfile.ZipFile(z1) as z:
+                self.assertEqual(sorted(z.namelist()), ["audio/a.wav", "tracklist.csv"])
+                self.assertEqual(z.read("audio/a.wav"), b"audio-bytes")
+            self.assertFalse((d / "one.zip.tmp").exists())        # 原子替換不留殘檔
+
+    def test_ai_credit_scopes_and_defaults(self):
+        self.assertIn(config.RELEASE_AI_CREDITS, release.AI_CREDIT_SCOPES)
+        self.assertEqual(config.RELEASE_AI_CREDITS, "all_audio")   # ACE-Step 全生成
+        self.assertEqual(release.AI_CREDIT_LABELS["all_audio"], "全部音訊為 AI 生成")
+        self.assertFalse(config.RELEASE_EXPLICIT)                  # 純器樂、無歌詞
 
     def test_masters_subdir_mirrors_tracks(self):
         self.assertEqual(str(catalog.masters_subdir("coastal guitar", "coastal01")),

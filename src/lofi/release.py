@@ -10,8 +10,13 @@ DSP（Spotify/Apple Music…）與 Bandcamp 都**沒有公開 API**，所以自�
   1. 依檔名順序讀 sidecar，取曲名（`mood`）／調性／BPM
   2. 把 mp3 過 loudnorm 成正規化母帶（預設 -14 LUFS / -1 dBTP）
   3. 產生 3000×3000 方圖封面（**純圖、不疊字**；本機無 Pillow/ImageMagick，見 DISTRIBUTION §6-1）
-  4. 寫 `release.json` / `tracklist.csv` / `CHECKLIST.md`
-  5. append 一筆事件到 `catalog/releases.jsonl`（append-only、只記事件不含整包快照）
+  4. 寫 `release.json` / `tracklist.csv` / `LISTING.md` / `credits.txt` / `CHECKLIST.md`
+  5. 打包 `download/<album>.zip`（Gumroad／Bandcamp 的交付檔）
+  6. append 一筆事件到 `catalog/releases.jsonl`（append-only、只記事件不含整包快照）
+
+為什麼要多 `LISTING.md`：DSP 商（DistroKid…）**沒有 API**，而它們的表單欄位（genre／explicit／
+songwriter 真名／AI Credits／封面／ISRC）散在好幾頁。這裡一次把**兩個平台要填的值**印成一頁，
+上架時只負責複製貼上；`release.json` 則保留機器可讀的同一份資料（見 docs/DISTRIBUTION.md §5）。
 
 用法:
   lofi release plan    --run coastal01                     # 只看會產出什麼，不寫檔
@@ -23,8 +28,11 @@ DSP（Spotify/Apple Music…）與 Bandcamp 都**沒有公開 API**，所以自�
 輸出（預設在 output/releases/<run>/，外接碟）:
   audio/01_<slug>.wav   正規化母帶（ID3 已填）
   cover_3000x3000.jpg   封面
-  release.json          機器用（album/artist/track 順序/授權 provenance）
+  download/<album>.zip  交付檔（audio/＋封面＋tracklist＋credits，給 Gumroad／Bandcamp）
+  release.json          機器用（album/artist/track 順序/genre/explicit/songwriter/AI credits/授權 provenance）
   tracklist.csv         人用（No/Title/Duration/Key/BPM/Mood/ISRC）
+  LISTING.md            上架文案（DistroKid／Gumroad 逐欄對照；直接複製貼上）
+  credits.txt           隨交付檔附上的 AI 揭露與模型授權（商用 provenance）
   CHECKLIST.md          各平台上架步驟
 """
 import argparse
@@ -34,6 +42,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 from lofi import catalog as cat
@@ -56,6 +65,24 @@ _THREADS = int(os.environ.get("LOFI_THREADS", "0") or 0)
 _NICE = int(os.environ.get("LOFI_NICE", "0") or 0)
 # 衍生檔的保留字首（見 docs/NAMING.md）：不適合當封面
 DERIVED_PREFIXES = ("anim-", "cmp-", "mask-", "fix-")
+
+# ── 上架文案／平台欄位 ─────────────────────────────────────────────────
+# distroKid 的 AI Credits 選項（2026 起上傳流程強制填；見 docs/DISTRIBUTION.md §5）。
+AI_CREDIT_SCOPES = ("none", "lyrics", "music", "part_audio", "all_audio")
+AI_CREDIT_LABELS = {
+    "none": "無 AI 生成（純人工）",
+    "lyrics": "AI 寫詞",
+    "music": "AI 作曲（旋律／編曲非人工）",
+    "part_audio": "部分音訊為 AI 生成",
+    "all_audio": "全部音訊為 AI 生成",
+}
+# Gumroad Discover 的 tag 規則：每個 2–20 字、不含開頭 #、單一商品上限 10 個。
+GUMROAD_MAX_TAGS = 10
+TAG_MAXLEN = 20
+# 專輯名裡不值得當 tag 的功能詞。
+TAG_STOPWORDS = {"into", "the", "and", "with", "from", "this", "that", "for", "out",
+                 "over", "under", "after", "before", "part", "vol"}
+LISTING_BASE_TAGS = ("lofi", "instrumental", "study music", "sleep", "focus")
 
 
 # ── 純函式（可單元測試，不碰檔案）───────────────────────────────────────
@@ -132,11 +159,209 @@ def build_tracklist_csv(rows):
     return buf.getvalue()
 
 
+def clean_tags(tags, limit=GUMROAD_MAX_TAGS):
+    """清成 Gumroad Discover 可接受的 tag。回傳 (保留, 被丟掉的)。
+
+    規則（Gumroad Discover，2026-10 查核）：每個 2–20 字、**不含開頭 `#`**、不分大小寫去重、
+    單一商品上限 10 個。超出上限的一律丟掉而不是截斷字，避免產生一半的 tag。
+    """
+    kept, rejected, seen = [], [], set()
+    for t in tags or []:
+        s = str(t or "").strip().lstrip("#").strip()
+        key = s.lower()
+        if len(s) < 2 or len(s) > TAG_MAXLEN or key in seen or len(kept) >= limit:
+            if s:
+                rejected.append(s)
+            continue
+        seen.add(key)
+        kept.append(s)
+    return kept, rejected
+
+
+def listing_tags(rec):
+    """由 genre／style／專輯名推 Gumroad 的 tag（順序＝優先序：越特定的越前面）。
+
+    為什麼要自動推：tag 是 Discover 的唯一曝光入口（每個 tag＝一個頁面），
+    而這些資訊 sidecar／release.json 已經有了，不必每次手打。
+    """
+    words = []
+    if rec.get("genre"):
+        words.append(str(rec["genre"]).lower())
+    words += [w.lower() for w in re.split(r"[^0-9A-Za-z]+", str(rec.get("style") or "")) if w]
+    for w in re.split(r"[^0-9A-Za-z]+", str(rec.get("album") or "")):
+        if len(w) >= 4 and w.lower() not in TAG_STOPWORDS:
+            words.append(w.lower())
+    words += list(LISTING_BASE_TAGS)
+    return clean_tags(words)[0]
+
+
+def build_listing(rec, tags=None, price_usd=None):
+    """上架文案（Gumroad 的 summary/description、Bandcamp 的描述共用）＋ tags／定價。
+
+    `tags` 有給就沿用（仍會過 `clean_tags`）；沒給就由 genre/style/專輯名推。
+    """
+    album = rec.get("album") or rec.get("run") or ""
+    artist = rec.get("artist") or ""
+    n = len(rec.get("tracks") or [])
+    dur = rec.get("total_duration") or 0
+    genre = rec.get("genre") or "Lo-fi"
+    short = f"{n} 首 {genre} 器樂曲，全長約 {max(1, round(dur / 60))} 分鐘：〈{album}〉— {artist}。"
+    scope = (rec.get("ai_credits") or {}).get("scope") or "none"
+    body = [
+        f"〈{album}〉是 {artist} 的 {genre} 器樂專輯：{n} 首曲目、全長 {mm.fmt_ts(dur)}。",
+        "全部為器樂演奏、無人聲，適合讀書、工作、睡眠與放鬆時播放。",
+        "每首皆以 -14 LUFS / -1 dBTP 正規化母帶，可直接上串流與商店；封面為 3000×3000 方圖。",
+    ]
+    if scope != "none":
+        body.append("本作部分或全部音訊由 AI 生成（ACE-Step），封面由 AI 生成（SDXL）；"
+                    "所用模型授權明細見包內 credits.txt。")
+    return {
+        "short": short,
+        "long": "\n\n".join(body),
+        "tags": clean_tags(tags)[0] if tags else listing_tags(rec),
+        "price_usd": config.RELEASE_PRICE_USD if price_usd is None else price_usd,
+    }
+
+
+def build_credits_txt(rec):
+    """交付檔內附的 credits.txt：AI 揭露 ＋ 模型授權（商用 provenance）。"""
+    ai = rec.get("ai_credits") or {}
+    scope = ai.get("scope") or "none"
+    lines = [f"{rec.get('album') or ''} — {rec.get('artist') or ''}", "",
+             "AI 揭露（對應 DistroKid AI Credits）",
+             f"  範圍：{scope}（{AI_CREDIT_LABELS.get(scope, scope)}）"]
+    if scope == "all_audio":
+        lines.append(f"  artist 名義：{'AI 角色' if ai.get('persona') else '真人'}")
+    lines += ["", "生成模型與授權（商用 provenance）"]
+    credits = rec.get("credits") or []
+    for c in credits:
+        ok = "可商用" if c.get("commercial") else "需確認"
+        lines.append(f"  - {c.get('model')}：{c.get('license')}（{ok}）  {c.get('source', '')}")
+    if not credits:
+        lines.append("  （無紀錄）")
+    lines += ["", "母帶：-14 LUFS / -1 dBTP（loudnorm）｜封面：3000×3000、無文字"]
+    return "\n".join(lines) + "\n"
+
+
+def build_listing_md(rec):
+    """把 DistroKid／Gumroad 要填的欄位整理成一頁（複製貼上用）。"""
+    listing = rec.get("listing") or {}
+    ai = rec.get("ai_credits") or {}
+    scope = ai.get("scope") or "none"
+    album = rec.get("album") or ""
+    artist = rec.get("artist") or ""
+    n = len(rec.get("tracks") or [])
+    price = listing.get("price_usd")
+    price_txt = "名稱你的價錢 / pay-what-you-want" if not price else f"US${price:g}"
+    tags = listing.get("tags") or []
+    zip_name = f"download/{slugify(album) or 'release'}.zip"
+    sw = rec.get("songwriter") or ""
+    sw_cell = f"`{sw}`" if sw else "⚠️ 未填（DistroKid 原創曲**必填真名**）"
+    lines = [
+        f"# 上架資料：{album} — {artist}",
+        "",
+        f"- 曲數 {n}｜全長 {mm.fmt_ts(rec.get('total_duration') or 0)}｜"
+        f"母帶 {rec.get('master', {}).get('lufs'):g} LUFS / {rec.get('master', {}).get('tp'):g} dBTP",
+        f"- 交付檔：`{zip_name}`（audio/ ＋ 封面 ＋ tracklist.csv ＋ credits.txt）",
+        f"- 封面：`cover_3000x3000.jpg`（3000×3000、JPG、無文字）",
+        "",
+        "> 本頁是**給人複製貼上的值**；同一份資料的機器可讀版在 `release.json`。",
+        "",
+        "## 0. 兩個平台共用的值",
+        "",
+        "| 欄位 | 值 |",
+        "|---|---|",
+        f"| Album title | `{album}` |",
+        f"| Artist | `{artist}` |",
+        f"| Genre | `{rec.get('genre') or ''}` |",
+        f"| Explicit | {'Yes' if rec.get('explicit') else 'No'} |",
+        f"| Songwriter（真名） | {sw_cell} |",
+        f"| AI Credits | `{scope}`（{AI_CREDIT_LABELS.get(scope, scope)}）"
+        + (f"，artist 名為{' AI 角色' if ai.get('persona') else '真人'}" if scope == "all_audio" else "")
+        + " |",
+        f"| Tags | {', '.join(f'`{t}`' for t in tags) or '（無）'} |",
+        f"| Price（Gumroad） | {price_txt} |",
+        "",
+        "## A. DistroKid（無 API，手動上傳）",
+        "",
+        "1. 選商店（Services）→ 建議全選；Musician 方案送審即上線，Plus/Ultimate 才能排未來日",
+        f"2. Artist/band name：`{artist}`（新名字會佔一個 artist slot）",
+        f"3. Album title：`{album}`｜曲數 {n}（＝Album）",
+        f"4. Primary genre：`{rec.get('genre') or ''}`（**上傳後不能改**；次類型可留空）",
+        f"5. 封面：上傳 `cover_3000x3000.jpg`",
+        "6. Artist mapping：全新藝人 → 選「尚無 artist profile」",
+        f"7. Songwriter：**原創曲** → 填真名 `{sw or '⚠️ 未填'}`",
+        f"8. Explicit：{'Yes' if rec.get('explicit') else 'No'}（逐首）",
+        f"9. **AI Credits**：選 `{scope}`"
+        + ("，並聲明 artist 名是 AI 角色" if scope == "all_audio" else "") + "（2026 起強制）",
+        "10. ISRC：留空 → DistroKid 免費自動配發（`tracklist.csv` 的 `ISRC(new)` 也是空的）",
+        "",
+        "> `tracklist.csv` 有逐首曲名／長度／調性／BPM，照檔名順序排 track number。",
+        "",
+        "## B. Gumroad（有 API v2，第一版仍先手動）",
+        "",
+        f"1. Product type：**Digital product**（名稱＝`{album}`）",
+        f"2. Price：{price_txt}" + ("（Gumroad 定價填 0 即可）" if not price else ""),
+        f"3. Cover image：上傳 `cover_3000x3000.jpg`（另做縮圖需要 **方形 ≥600×600**）",
+        f"4. Summary（一句話）：`{listing.get('short') or ''}`",
+        "5. Description：貼下面的長版文案",
+        f"6. Tags（上限 10）：{', '.join(f'`{t}`' for t in tags) or '（無）'}",
+        "7. Category（Discover 需要；不要選 Other）＋ 打開 ratings",
+        f"8. 內容（Content）：上傳 `{zip_name}`",
+        "",
+        "長版描述：",
+        "",
+        "```",
+        (listing.get("long") or "").strip(),
+        "```",
+        "",
+        "> Gumroad 先行條件：帳號要**完成 payout settings** 才能發佈（否則只存成 draft）。",
+        "> Discover 要 USD$100 真實銷售＋風控審查＋至少 1 筆非退費銷售，所以第一筆要靠自己的通路帶。",
+        "> 商品建立後再把 URL 記回 `catalog/releases.jsonl`（append-only，狀態變更用新事件）。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def release_zip_path(dest, album):
+    """交付 ZIP 的路徑：output/releases/<run>/download/<album>.zip。"""
+    return Path(dest) / "download" / f"{slugify(album) or 'release'}.zip"
+
+
+def make_release_zip(dst, members):
+    """把 (來源檔, ZIP 內路徑) 清單打包成交付 ZIP。
+
+    為什麼自己寫 tmp → os.replace 而不用 `io.atomic_write_*`：母帶動輒數百 MB，
+    整包讀進記憶體會在 16GB、ComfyUI 同時跑的時候出事，所以**串流寫檔**、只保留原子替換。
+    成員日期固定成 1980-01-01，讓同一份內容重跑得到位元組相同的 ZIP（可重現；也避免
+    「檔案變了」的錯覺——每次上架都重建 ZIP，時間戳不同會讓 hash 每次都變）。
+    """
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+            for src, arcname in members:
+                src = Path(src)
+                if not src.is_file():
+                    continue
+                info = zipfile.ZipInfo(str(arcname), date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o644 << 16
+                z.writestr(info, src.read_bytes())
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return dst
+
+
 def build_checklist(rec):
     """產出一頁上架清單（繁中）。"""
     artist = rec.get("artist", "")
     album = rec.get("album", "")
     n = len(rec.get("tracks") or [])
+    ai = rec.get("ai_credits") or {}
     lines = [
         f"# 上架清單：{album} — {artist}",
         "",
@@ -148,6 +373,15 @@ def build_checklist(rec):
         + "、".join(f"`{c['model']}`（{c['license']}）" for c in rec.get("credits") or []) or "（無紀錄）",
         "",
         "## 0. 發布前檢查（必做）",
+        "",
+        "### 各平台上架要填的共用值（詳見同資料夾的 `LISTING.md`）",
+        "",
+        f"- Genre：`{rec.get('genre') or ''}`　｜　Explicit：{'Yes' if rec.get('explicit') else 'No'}",
+        f"- Songwriter（**真名**）：`{rec.get('songwriter') or '⚠️ 未填（DistroKid 原創曲必填真名）'}`",
+        f"- AI Credits：`{ai.get('scope') or 'none'}`"
+        + (f"（artist 為{'AI 角色' if ai.get('persona') else '真人'}）" if ai.get("scope") == "all_audio" else ""),
+        f"- 交付檔：`download/{slugify(album) or 'release'}.zip`（audio/＋封面＋tracklist＋credits）",
+        "",
         "",
         "- [ ] `./scripts/lofi license check` 全部可商用",
         "- [ ] 每首歌**聽過**（自動品檢只抓無聲/削波，抓不到「難聽」）",
@@ -164,8 +398,15 @@ def build_checklist(rec):
         f"3. Album title：`{album}`　Artist：`{artist}`"
         + (f"　Label：`{rec.get('label')}`" if rec.get("label") else ""),
         "4. 上傳封面 `cover_3000x3000.jpg`",
-        "5. 逐首填曲名（見 `tracklist.csv`）、genre、mood、explicit = No",
-        "6. 選發布日（建議留 2 週給 Spotify 編輯部 pitch 時間）",
+        f"5. 逐首填曲名（見 `tracklist.csv`）、genre = `{rec.get('genre') or ''}`、"
+        f"explicit = {'Yes' if rec.get('explicit') else 'No'}",
+        f"6. Songwriter（**真名**）：`{rec.get('songwriter') or '⚠️ 未填'}`"
+        "（原創曲必填；填藝名會被退）",
+        f"7. **AI Credits**（2026 起強制）：`{ai.get('scope') or 'none'}`"
+        + ("，並聲明 artist 名是 AI 角色" if ai.get("scope") == "all_audio" else "")
+        + "（DistroKid 上傳流程會問；漏填會被平台事後標記）",
+        "8. ISRC 留空 → 由發行商自動配發（`tracklist.csv` 的 `ISRC(new)` 亦留空）",
+        "9. 選發布日（建議留 2 週給 Spotify 編輯部 pitch 時間）",
         "",
         "## B. Bandcamp（無 API，但單價最高、可賣無損）",
         "",
@@ -179,7 +420,23 @@ def build_checklist(rec):
         "2. 描述務必帶「AI-generated」與本包附的模型授權（`release.json` 的 `credits`）",
         "3. 標籤用 mood／instruments，不要用「lofi」這種太雜的詞當唯一標籤",
         "",
-        "## D. 記回狀態",
+        "## D. Gumroad（**有 API v2**，第一版先手動一次；見 DISTRIBUTION §5／§7 P3）",
+        "",
+        "> Gumroad 是唯一「可全自動」的商店（API v2 已能建立/更新商品、上傳檔案、設封面），",
+        "> 但發佈前要先完成 payout settings，且 Discover 有門檻，所以先手動上架一次驗證欄位。",
+        "",
+        f"1. 新增 **Digital product**，名稱 `{album}`",
+        "2. 定價："
+        + ("「名稱你的價錢（pay-what-you-want）」" if not (rec.get("listing") or {}).get("price_usd")
+           else f"US${(rec.get('listing') or {}).get('price_usd'):g}")
+        + "（先累積聽眾與第一筆真實銷售）",
+        "3. 封面 `cover_3000x3000.jpg`；縮圖另需**方形 ≥600×600**",
+        "4. Summary／Description 貼 `LISTING.md` 的文案；Tags："
+        + (", ".join((rec.get("listing") or {}).get("tags") or []) or "（無）"),
+        "5. 選 category（不要選 Other）並打開 ratings（Discover 的必要條件）",
+        f"6. 內容上傳 `download/{slugify(album) or 'release'}.zip`",
+        "",
+        "## E. 記回狀態",
         "",
         "- [ ] 上架完成後，把各平台 URL 記到 `catalog/releases.jsonl` 或 `release.json`",
         "- [ ] `catalog/releases.jsonl` 是 append-only；狀態變更用新事件，不要改舊行",
@@ -631,6 +888,11 @@ def _parse_flags(s):
     return tuple(f.strip() for f in re.split(r"[,\s]+", s or "") if f.strip())
 
 
+def _parse_tags(s):
+    """`--tags` 字串 → tag 清單。**只切逗號**，因為 tag 可以含空白（例：study music）。"""
+    return [t.strip() for t in (s or "").split(",") if t.strip()]
+
+
 def report_excluded(dropped):
     """把被品檢排除的曲目理由印出來（分類統計 + 一例）。"""
     if not dropped:
@@ -747,13 +1009,16 @@ def cmd_package(args):
                    "tp": config.MASTER_TP if args.tp is None else args.tp}
 
     total_dur = sum(r["duration"] or 0 for r in rows)
-    est_gb = max(total_dur * 0.29 / 1000 * 2, 2.0)   # 母帶 + 餘裕
+    est_gb = max(total_dur * 0.29 / 1000 * 3, 2.0)   # 母帶 + 交付 ZIP + 餘裕
     media.require_free(RELEASES_DIR, est_gb, "外接碟 output/releases")
 
     rec = {
         "release_version": SCHEMA_VERSION, "run": args.run, "style": rows[0]["style"],
         "album": album, "artist": artist, "label": args.label or config.RELEASE_LABEL,
         "genre": args.genre, "format": args.format,
+        "explicit": bool(args.explicit or config.RELEASE_EXPLICIT),
+        "songwriter": args.songwriter or config.RELEASE_SONGWRITER,
+        "ai_credits": {"scope": args.ai_credits, "persona": config.RELEASE_AI_PERSONA},
         "master": meta_master,
         "master_source": describe_master_source(rows),
         "cover_source": cat.relpath(cover_src) if cover_src else None,
@@ -761,6 +1026,7 @@ def cmd_package(args):
         "created_at": cat.now_iso(),
         "credits": [],
         "tracks": [],
+        "listing": {},
         "excluded": [],
         "notes": [],
     }
@@ -824,19 +1090,36 @@ def cmd_package(args):
     } for r in rows]
     rec["total_duration"] = round(sum(r["duration"] or 0 for r in rows), 1)
     rec["dir"] = _rel(dest)
+    rec["listing"] = build_listing(rec, tags=_parse_tags(args.tags),
+                                   price_usd=args.price)
 
     dest.mkdir(parents=True, exist_ok=True)
-    io.atomic_write_json(dest / "release.json", rec)
     csv_rows = [{**t, "artist": artist} for t in rec["tracks"]]
+    io.atomic_write_json(dest / "release.json", rec)
     io.atomic_write_text(dest / "tracklist.csv", build_tracklist_csv(csv_rows))
     io.atomic_write_text(dest / "CHECKLIST.md", build_checklist(rec))
+    io.atomic_write_text(dest / "LISTING.md", build_listing_md(rec))
+    io.atomic_write_text(dest / "credits.txt", build_credits_txt(rec))
+
+    # 4) 交付 ZIP（Gumroad／Bandcamp 的「內容」；重跑一律重建，內容決定檔案）
+    zip_path = None
+    if not args.no_zip:
+        members = [(r["audio_out"], f"audio/{r['audio_out'].name}") for r in rows]
+        members += [(dest / "cover_3000x3000.jpg", "cover_3000x3000.jpg"),
+                    (dest / "tracklist.csv", "tracklist.csv"),
+                    (dest / "credits.txt", "credits.txt")]
+        zip_path = make_release_zip(release_zip_path(dest, album), members)
+        print(f"交付包 → {zip_path.name}（{zip_path.stat().st_size / 1e6:.0f} MB）")
+
     append_release_event(rec)
 
     print()
     print(f"✅ {_rel(dest)}")
     print(f"   曲數 {len(rows)}｜總長 {mm.fmt_ts(rec['total_duration'])}｜母帶 {rec['master']['lufs']:g} LUFS")
-    print(f"   → release.json / tracklist.csv / CHECKLIST.md")
-    print("   接下來：照 CHECKLIST.md 走（DSP 沒有 API，要手動上傳）。")
+    print(f"   → release.json / tracklist.csv / LISTING.md / credits.txt / CHECKLIST.md"
+          + (" / download/*.zip" if zip_path else ""))
+    print("   接下來：照 LISTING.md（DistroKid／Gumroad 逐欄值）與 CHECKLIST.md 走"
+          "——DSP 沒有 API，要手動上傳。）")
     if any("(pt. " in t["title"] for t in rec["tracks"]):
         print("   ⚠️  有曲名自動加了「(pt. N)」，建議改成更好聽的名字後重跑。")
 
@@ -876,6 +1159,19 @@ def main():
     p2.add_argument("--album", default="", help="專輯名（預設用風格名）")
     p2.add_argument("--label", default="", help="label（預設 config.RELEASE_LABEL）")
     p2.add_argument("--genre", default=config.RELEASE_GENRE, help="genre（預設 Lo-fi）")
+    p2.add_argument("--songwriter", default="",
+                    help="作詞作曲者**真名**（DistroKid 原創曲必填；預設 config.RELEASE_SONGWRITER）")
+    p2.add_argument("--ai-credits", default=config.RELEASE_AI_CREDITS, choices=list(AI_CREDIT_SCOPES),
+                    dest="ai_credits",
+                    help="AI 揭露範圍（DistroKid AI Credits；本產線為全生成 → 預設 all_audio）")
+    p2.add_argument("--explicit", action="store_true",
+                    help="標記 explicit 歌詞（本產線為純器樂，預設否）")
+    p2.add_argument("--price", type=float, default=None,
+                    help="Gumroad 定價 USD（0＝名稱你的價錢；預設 config.RELEASE_PRICE_USD）")
+    p2.add_argument("--tags", default="",
+                    help="Gumroad tags（逗號分隔，可含空白）；預設由 genre/style/專輯名推得")
+    p2.add_argument("--no-zip", action="store_true", dest="no_zip",
+                    help="不產 download/<album>.zip 交付包")
     p2.add_argument("--format", default="wav", choices=["wav", "flac"], help="母帶格式（預設 wav）")
     p2.add_argument("--lufs", type=float, default=None, help="目標響度（預設 config.MASTER_LUFS）")
     p2.add_argument("--tp", type=float, default=None, help="true peak 上限 dBTP（預設 config.MASTER_TP）")
