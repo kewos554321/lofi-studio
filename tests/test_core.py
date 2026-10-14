@@ -1126,6 +1126,8 @@ class TestRelease(unittest.TestCase):
 
     def test_build_credits_txt_lists_models(self):
         txt = release.build_credits_txt(self._rec())
+        self.assertIn("Songwriter: Real Name", txt)
+        self.assertIn("（未填）", release.build_credits_txt(self._rec(songwriter="")))
         self.assertIn("acestep_v1.5_turbo.safetensors", txt)
         self.assertIn("MIT", txt)
         self.assertIn("all_audio", txt)
@@ -1163,6 +1165,7 @@ class TestRelease(unittest.TestCase):
         self.assertEqual(config.RELEASE_AI_CREDITS, "all_audio")   # ACE-Step 全生成
         self.assertEqual(release.AI_CREDIT_LABELS["all_audio"], "全部音訊為 AI 生成")
         self.assertFalse(config.RELEASE_EXPLICIT)                  # 純器樂、無歌詞
+        self.assertTrue(config.RELEASE_SONGWRITER, "songwriter 真名要有預設值（DistroKid 必填）")
 
     def test_masters_subdir_mirrors_tracks(self):
         self.assertEqual(str(catalog.masters_subdir("coastal guitar", "coastal01")),

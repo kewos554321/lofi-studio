@@ -175,7 +175,7 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 |---|---|---|
 | `genre` | `Lo-fi` | `config.RELEASE_GENRE` |
 | `explicit` | `False`（純器樂、無歌詞） | `config.RELEASE_EXPLICIT` |
-| `songwriter` | **（未填，需填真名）** | `config.RELEASE_SONGWRITER`／`--songwriter` |
+| `songwriter` | `WeiChieh Wang`（**真名**，非藝名） | `config.RELEASE_SONGWRITER`／`--songwriter` |
 | `ai_credits.scope` | `all_audio` | `config.RELEASE_AI_CREDITS` |
 | `ai_credits.persona` | `True`（artist 是 AI 角色） | `config.RELEASE_AI_PERSONA` |
 | `listing.tags` | 由 genre/style/專輯名推得（Gumroad 上限 10） | `release.listing_tags()` |

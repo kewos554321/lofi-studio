@@ -80,9 +80,10 @@ MASTER_LUFS = float(_env("LOFI_MASTER_LUFS", "-14"))
 MASTER_TP = float(_env("LOFI_MASTER_TP", "-1"))
 
 # 上架表單的共用欄位（release 產出 LISTING.md／CHECKLIST.md 用；DistroKid 與 Gumroad 都要）。
-# DistroKid：**原創曲必填 songwriter 真名**（填藝名會被退）；所以這裡刻意留空、在清單上標「待填」，
-# 逼你在上架前填一次（可用 LOFI_RELEASE_SONGWRITER 或 `release package --songwriter`）。
-RELEASE_SONGWRITER = _env("LOFI_RELEASE_SONGWRITER", "")
+# DistroKid：**原創曲必填 songwriter 真名**（填藝名會被退）。這裡放本名當預設，
+# 可用 LOFI_RELEASE_SONGWRITER 或 `release package --songwriter` 覆寫；
+# 留空時 `LISTING.md`／`CHECKLIST.md` 會標成「⚠️ 未填」提醒你上架前補。
+RELEASE_SONGWRITER = _env("LOFI_RELEASE_SONGWRITER", "WeiChieh Wang")
 # AI 揭露範圍（DistroKid 的 AI Credits；選項見 release.AI_CREDIT_SCOPES）。
 # 本產線的音樂是 ACE-Step **全生成** → 預設 all_audio；封面（SDXL）另記於 credits.txt。
 RELEASE_AI_CREDITS = _env("LOFI_RELEASE_AI_CREDITS", "all_audio")

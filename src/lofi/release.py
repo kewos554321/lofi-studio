@@ -227,7 +227,8 @@ def build_credits_txt(rec):
     """交付檔內附的 credits.txt：AI 揭露 ＋ 模型授權（商用 provenance）。"""
     ai = rec.get("ai_credits") or {}
     scope = ai.get("scope") or "none"
-    lines = [f"{rec.get('album') or ''} — {rec.get('artist') or ''}", "",
+    lines = [f"{rec.get('album') or ''} — {rec.get('artist') or ''}",
+             f"Songwriter: {rec.get('songwriter') or '（未填）'}", "",
              "AI 揭露（對應 DistroKid AI Credits）",
              f"  範圍：{scope}（{AI_CREDIT_LABELS.get(scope, scope)}）"]
     if scope == "all_audio":
