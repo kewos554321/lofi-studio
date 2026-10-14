@@ -1211,6 +1211,25 @@ def cmd_package(args):
     if not rows[0]["sidecar"]:
         rec["notes"].append("這批 sidecar 為空 → 曲名/調性可能不準，上架前請人工確認")
 
+    # 交付母帶的內嵌標籤：credits 不能只活在一個 .txt 裡——**標籤跟著檔案走**，
+    # 使用者只帶走音檔（丟掉 README）時還是看得到 AI 揭露與版權。
+    # 注意：改標籤要 `--force`——既有檔會被「已存在，略過」跳過，標籤不會更新。
+    model_credits = collect_credits(rows)
+    year = str(rec.get("created_at") or "")[:4]
+    ai_note = "AI-generated audio"
+    if model_credits:
+        ai_note += f" ({model_credits[0]['model']}, {model_credits[0]['license']})"
+    if rec.get("songwriter"):
+        ai_note += f". Produced, edited and mastered by {rec['songwriter']}."
+    # 註：不要放 `album_artist`——實測 ffmpeg 的 WAV muxer 會把它丟掉（TPE2 不寫），
+    # 留著只會讓人以為有寫進去。`artist` 已足夠（播放器就是讀它）。
+    common_tags = {
+        "artist": artist, "album": album,
+        "genre": rec["genre"] or "", "date": year,
+        "copyright": f"(C) {year} {artist}".strip() if year else "",
+        "comment": f"{ai_note} All audio is AI-generated; see credits.txt.",
+    }
+
     # 1) 母帶
     audio_dir.mkdir(parents=True, exist_ok=True)
     for r in rows:
@@ -1229,8 +1248,8 @@ def cmd_package(args):
         print(f"[{r['no']:>2}] {r['title']} → {out.name}", flush=True)
         r["master"] = master_track(
             source, out, lufs=rec["master"]["lufs"], tp=rec["master"]["tp"], fmt=rec["format"],
-            metadata={"title": r["title"], "artist": artist, "album": album,
-                      "track": f"{r['no']}/{len(rows)}", "genre": rec["genre"] or ""})
+            metadata={**common_tags, "title": r["title"],
+                      "track": f"{r['no']}/{len(rows)}"})
         r["master"]["lossless"] = bool(r["master_src"])
         r["master"]["source"] = _rel(source)
 
@@ -1260,7 +1279,7 @@ def cmd_package(args):
             rec["master"]["sample_rate"] = sr
         if bits:
             rec["master"]["bits"] = bits
-    rec["credits"] = collect_credits(rows)
+    rec["credits"] = model_credits
     rec["tracks"] = [{
         "no": r["no"], "title": r["title"], "mood": r["mood"], "key": r["key"], "bpm": r["bpm"],
         "duration": round(r["duration"], 1) if r["duration"] else None,

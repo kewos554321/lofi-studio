@@ -507,7 +507,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 
 | 檔案 | 內容 |
 |---|---|
-| `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留來源取樣率，ID3 已填） |
+| `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留取樣率）；內嵌標籤含 title/artist/album/track/genre/date/copyright/**comment（AI 揭露）**——標籤跟著檔案走，買家丟掉 README 也看得到。改標籤要 `--force` |
 | `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**） |
 | `download/<album>.zip` | 交付檔（`audio/`＋封面＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個 |
 | `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
