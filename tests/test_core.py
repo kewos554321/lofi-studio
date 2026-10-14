@@ -1161,15 +1161,20 @@ class TestRelease(unittest.TestCase):
         rec["songwriter"] = ""
         self.assertIn("必填真名", release.build_listing_md(rec))
 
-    def test_build_credits_txt_lists_models(self):
+    def test_build_credits_txt_is_english(self):
+        """credits.txt 會被打包進交付 ZIP 給買家 → 一律英文（不能混中文）。"""
         txt = release.build_credits_txt(self._rec())
         self.assertIn("Songwriter: Real Name", txt)
-        self.assertIn("（未填）", release.build_credits_txt(self._rec(songwriter="")))
+        self.assertIn("(not set)", release.build_credits_txt(self._rec(songwriter="")))
         self.assertIn("acestep_v1.5_turbo.safetensors", txt)
         self.assertIn("MIT", txt)
         self.assertIn("all_audio", txt)
-        self.assertIn("AI 角色", txt)                              # persona=True
-        self.assertIn("（無紀錄）", release.build_credits_txt(self._rec(credits=[])))
+        self.assertIn("an AI persona", txt)                        # persona=True
+        self.assertIn("(none recorded)", release.build_credits_txt(self._rec(credits=[])))
+        self.assertIn("commercial use OK", txt)
+        self.assertIn("Master: -14 LUFS / -1 dBTP", txt)
+        for zh in ("揭露", "範圍", "母帶", "無紀錄", "角色", "可商用"):
+            self.assertNotIn(zh, txt, f"交付檔不該出現中文：{zh}")
 
     def test_build_checklist_includes_shared_fields(self):
         """LISTING 之後，CHECKLIST 也要直接看到共用欄位與 Gumroad（不必回頭查程式）。"""

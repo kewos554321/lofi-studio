@@ -69,12 +69,19 @@ DERIVED_PREFIXES = ("anim-", "cmp-", "mask-", "fix-")
 # ── 上架文案／平台欄位 ─────────────────────────────────────────────────
 # distroKid 的 AI Credits 選項（2026 起上傳流程強制填；見 docs/DISTRIBUTION.md §5）。
 AI_CREDIT_SCOPES = ("none", "lyrics", "music", "part_audio", "all_audio")
-AI_CREDIT_LABELS = {
+AI_CREDIT_LABELS = {                      # 內部文件（LISTING.md/CHECKLIST.md）用繁中
     "none": "無 AI 生成（純人工）",
     "lyrics": "AI 寫詞",
     "music": "AI 作曲（旋律／編曲非人工）",
     "part_audio": "部分音訊為 AI 生成",
     "all_audio": "全部音訊為 AI 生成",
+}
+AI_CREDIT_LABELS_EN = {                   # 交付檔內附給**買家／平台**的說明一律英文
+    "none": "no AI-generated content",
+    "lyrics": "AI-written lyrics",
+    "music": "AI-composed music",
+    "part_audio": "part of the audio is AI-generated",
+    "all_audio": "all of the audio is AI-generated",
 }
 # Gumroad Discover 的 tag 規則：每個 2–20 字、不含開頭 #、單一商品上限 10 個。
 GUMROAD_MAX_TAGS = 10
@@ -247,23 +254,32 @@ def build_listing(rec, tags=None, price_usd=None):
 
 
 def build_credits_txt(rec):
-    """交付檔內附的 credits.txt：AI 揭露 ＋ 模型授權（商用 provenance）。"""
+    """交付檔內附的 credits.txt：AI 揭露 ＋ 模型授權（商用 provenance）。
+
+    ⚠️ **一律英文**：這個檔案會被打包進交付 ZIP **給買家**（也對應 DistroKid／Gumroad
+    的欄位），所以不能是中文。專案內部的中文說明走 `CHECKLIST.md`。
+    """
     ai = rec.get("ai_credits") or {}
     scope = ai.get("scope") or "none"
+    master = rec.get("master") or {}
     lines = [f"{rec.get('album') or ''} — {rec.get('artist') or ''}",
-             f"Songwriter: {rec.get('songwriter') or '（未填）'}", "",
-             "AI 揭露（對應 DistroKid AI Credits）",
-             f"  範圍：{scope}（{AI_CREDIT_LABELS.get(scope, scope)}）"]
+             f"Songwriter: {rec.get('songwriter') or '(not set)'}", "",
+             "AI disclosure (maps to DistroKid AI Credits)",
+             f"  Scope: {scope} ({AI_CREDIT_LABELS_EN.get(scope, scope)})"]
     if scope == "all_audio":
-        lines.append(f"  artist 名義：{'AI 角色' if ai.get('persona') else '真人'}")
-    lines += ["", "生成模型與授權（商用 provenance）"]
+        lines.append(f"  Artist name: {'an AI persona' if ai.get('persona') else 'a human'}")
+    lines += ["", "Models and licences (commercial provenance)"]
     credits = rec.get("credits") or []
     for c in credits:
-        ok = "可商用" if c.get("commercial") else "需確認"
-        lines.append(f"  - {c.get('model')}：{c.get('license')}（{ok}）  {c.get('source', '')}")
+        ok = "commercial use OK" if c.get("commercial") else "needs review"
+        lines.append(f"  - {c.get('model')} — {c.get('license')} ({ok})")
+        if c.get("source"):
+            lines.append(f"      {c['source']}")
     if not credits:
-        lines.append("  （無紀錄）")
-    lines += ["", "母帶：-14 LUFS / -1 dBTP（loudnorm）｜封面：3000×3000、無文字"]
+        lines.append("  (none recorded)")
+    lines += ["",
+              f"Master: {_f(master.get('lufs'), -14):g} LUFS / {_f(master.get('tp'), -1):g} dBTP (loudnorm)",
+              f"Cover: {COVER_SIZE}x{COVER_SIZE} px, no text"]
     return "\n".join(lines) + "\n"
 
 
