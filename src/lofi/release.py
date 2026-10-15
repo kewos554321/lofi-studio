@@ -1224,6 +1224,106 @@ def find_orphans(audio_dir, expected, exts=("*.wav", "*.flac")):
             if f.name not in want]
 
 
+def gumroad_uploaded(event_log=None):
+    """回傳「已送過 Gumroad」的 (run, album) 集合（讀 catalog/releases.jsonl 事件流）。
+
+    為什麼要這支：交付 ZIP 是 audio/ 的副本（一卷約 370MB），但**已上架後就沒有存在必要**——
+    `release package` 可以位元組相同地重建它（成員日期固定 1980-01-01）。判斷依據是事件流，
+    不是我們的記憶；壞行跳過，不讓一行壞掉就整支失效。
+    """
+    out = set()
+    p = Path(event_log or RELEASES_JSONL)
+    if not p.exists():
+        return out
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("event") == "gumroad" and ev.get("run"):
+            out.add((str(ev["run"]), str(ev.get("album") or "")))
+    return out
+
+
+def prune_targets(dirs, uploaded, include_audio=False):
+    """（純函式）回傳 [(目錄, 專輯, [要刪的檔案])]：只挑「已上架過 Gumroad」的上架包。
+
+    - 只刪已上架的：上架前刪掉會讓 `release gumroad` 沒東西可傳（**要重傳就先重跑
+      `release package`**，會產生位元組相同的 ZIP，Gumroad 上傳快取命中、秒級完成）。
+    - `audio/` 預設**不刪**：DSP（DistroKid／Bandcamp）沒有 API，工具無法判斷你上傳完沒，
+      所以要明示 `--audio`。母帶同樣可以從來源重建（loudnorm 是決定性的）。
+    - 大小也是回傳值之一（給人看「省了多少」）。
+    """
+    out = []
+    for d in dirs:
+        d = Path(d)
+        rj = d / "release.json"
+        if not rj.exists():
+            continue
+        try:
+            rec = json.loads(rj.read_text())
+        except (OSError, ValueError):
+            continue
+        if (str(rec.get("run") or ""), str(rec.get("album") or "")) not in uploaded:
+            continue
+        files = sorted((d / "download").glob("*.zip"))
+        if include_audio:
+            files += sorted(p for p in (d / "audio").glob("*") if p.is_file())
+        files = [f for f in files if f.is_file()]
+        if files:
+            out.append((d, rec.get("album") or d.name, files))
+    return out
+
+
+def cmd_prune(args):
+    """回收上架包空間：刪掉「已上架且可重建」的交付 ZIP（可選連母帶）。
+
+    預設只印不刪（`--apply` 才動手）；數字都是實際檔案大小，不是估算。
+    """
+    dest_dirs = [p for p in RELEASES_DIR.glob("*") if p.is_dir()] if not args.run \
+        else [RELEASES_DIR / args.run]
+    uploaded = gumroad_uploaded()
+    if not uploaded:
+        print("catalog/releases.jsonl 裡沒有任何 gumroad 事件 → 沒有東西可回收"
+              "（先跑 `lofi release gumroad`）")
+        return
+    targets = prune_targets(sorted(dest_dirs), uploaded, include_audio=args.audio)
+    skipped = []
+    for d in sorted(dest_dirs):
+        rj = d / "release.json"
+        if not rj.exists():
+            continue
+        try:
+            rec = json.loads(rj.read_text())
+        except (OSError, ValueError):
+            continue
+        if (str(rec.get("run") or ""), str(rec.get("album") or "")) not in uploaded:
+            skipped.append((d, rec.get("album") or d.name))
+    total = sum(f.stat().st_size for _, _, fs in targets for f in fs)
+    print(f"{'（預覽，加 --apply 才刪）' if not args.apply else '（執行刪除）'}"
+          f"　可回收 {len(targets)} 個上架包、約 {total / 1e9:.2f} GB"
+          f"（{'ZIP ＋ 母帶' if args.audio else '只刪交付 ZIP'}）")
+    for d, album, files in targets:
+        sz = sum(f.stat().st_size for f in files)
+        print(f"  {'🗑 刪除' if args.apply else '可刪'} {d.name}/　{album}　"
+              f"{len(files)} 檔、{sz / 1e6:.0f} MB")
+        for f in files:
+            print(f"      {f.relative_to(d)}")
+        if args.apply:
+            for f in files:
+                f.unlink()
+    if skipped:
+        print(f"  （保留 {len(skipped)} 個還沒送過 Gumroad 的上架包："
+              f"{', '.join(a for _, a in skipped[:4])}{' …' if len(skipped) > 4 else ''}）")
+    if args.apply:
+        print("  提醒：要重新上傳就先 `lofi release package --run <run> …`（ZIP 會位元組相同地重建）")
+    else:
+        print("  （這是預覽；確認後加 --apply）")
+
+
 def cmd_plan(args):
     # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
     prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
@@ -1526,6 +1626,14 @@ def build_parser():
     p1 = sub.add_parser("plan", help="只看會產出什麼（不寫檔）")
     add_common(p1)
     p1.set_defaults(func=cmd_plan)
+
+    # prune：回收空間（刪已上架、可重建的交付 ZIP；--audio 才連母帶）
+    p3 = sub.add_parser("prune", help="回收上架包空間（刪已上架、可用 release package 重建的交付 ZIP）")
+    p3.add_argument("--run", default="", help="只處理這一個上架包（預設全部）")
+    p3.add_argument("--audio", action="store_true",
+                    help="連 audio/ 母帶一起刪（**確定 DSP 已上傳完再用**；本機沒有 API 可判斷）")
+    p3.add_argument("--apply", action="store_true", help="真的刪除（預設只預覽）")
+    p3.set_defaults(func=cmd_prune)
 
     p2 = sub.add_parser("package", help="真的產出上架包")
     add_common(p2)

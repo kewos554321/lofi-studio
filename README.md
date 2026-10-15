@@ -95,7 +95,9 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ./scripts/lofi release plan    --run coastal01                    # 先看曲序/長度/重複曲名
 ./scripts/lofi release package --run coastal01                    # 產出 output/releases/coastal01/
 ./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
-#   → audio/*.wav（-14 LUFS 母帶）+ cover_3000x3000.jpg + release.json + tracklist.csv
+./scripts/lofi release prune --apply                               # 上架後回收空間（刪可重建的交付 ZIP）
+#   → audio/*.flac（-14 LUFS 母帶，交付預設 FLAC）+ cover_3000x3000.jpg
+#     + artwork_3840x2160.jpg + release.json + tracklist.csv
 #     + LISTING.md（DistroKid／Gumroad 逐欄值）+ credits.txt + download/<album>.zip + CHECKLIST.md
 
 # Gumroad 是唯一「有 API、可全自動上架」的商店（DSP 沒有）

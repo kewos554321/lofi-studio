@@ -1996,6 +1996,56 @@ class TestMakeEpisodeMusicFormat(unittest.TestCase):
         self.assertIn("--format", out.stderr + out.stdout)
 
 
+class TestReleasePrune(unittest.TestCase):
+    """回收上架包空間：只刪「已上架且可重建」的檔案（ZIP 位元組可重現）。"""
+
+    def _pkg(self, rel, name, run, album, zip_bytes=10, wav_bytes=5):
+        d = rel / name
+        (d / "download").mkdir(parents=True)
+        (d / "audio").mkdir()
+        (d / "release.json").write_text(json.dumps({"run": run, "album": album}))
+        (d / "download" / f"{name}.zip").write_bytes(b"x" * zip_bytes)
+        (d / "audio" / "01.wav").write_bytes(b"y" * wav_bytes)
+        return d
+
+    def test_prune_targets_only_uploaded(self):
+        """未上架的不動——上架前刪掉會讓 `release gumroad` 沒東西可傳。"""
+        with tempfile.TemporaryDirectory() as td:
+            rel = Path(td)
+            self._pkg(rel, "r_1", "r", "A, Vol. 1")
+            self._pkg(rel, "r_2", "r", "A, Vol. 2")
+            uploaded = {("r", "A, Vol. 1")}
+            t = release.prune_targets(sorted(rel.glob("*")), uploaded)
+            self.assertEqual([d.name for d, _, _ in t], ["r_1"])
+            self.assertEqual([f.name for f in t[0][2]], ["r_1.zip"])
+            self.assertEqual(t[0][1], "A, Vol. 1")
+            # --audio 才連母帶一起（DSP 沒有 API，工具無法判斷你傳完沒）
+            t2 = release.prune_targets(sorted(rel.glob("*")), uploaded, include_audio=True)
+            self.assertEqual(sorted(f.name for f in t2[0][2]), ["01.wav", "r_1.zip"])
+
+    def test_prune_targets_tolerates_bad_release_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            rel = Path(td)
+            bad = rel / "broken"
+            (bad / "download").mkdir(parents=True)
+            (bad / "release.json").write_text("{ 壞掉")
+            (bad / "download" / "b.zip").write_bytes(b"x")
+            self.assertEqual(release.prune_targets(sorted(rel.glob("*")), {("r", "A")}), [])
+
+    def test_gumroad_uploaded_reads_event_stream(self):
+        """判斷依據是事件流（append-only），壞行跳過、不讓一行壞掉就整支失效。"""
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "releases.jsonl"
+            log.write_text("\n".join([
+                json.dumps({"event": "release", "run": "r", "album": "A, Vol. 1"}),
+                json.dumps({"event": "gumroad", "run": "r", "album": "A, Vol. 1"}),
+                "{ 壞行",
+                json.dumps({"event": "gumroad", "run": "z", "album": "Z"}),
+            ]))
+            self.assertEqual(release.gumroad_uploaded(log), {("r", "A, Vol. 1"), ("z", "Z")})
+            self.assertEqual(release.gumroad_uploaded(Path(td) / "nope.jsonl"), set())
+
+
 class TestVideoTrackScope(unittest.TestCase):
     """影片段只能用「這個 run」自己的曲。
 

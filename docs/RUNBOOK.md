@@ -597,6 +597,19 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - **封面一律是主角（黑貓 Moni）**：`release` 會讀各 run 的 `manifest.json` 逐檔 prompt，只挑「黑貓」的圖，
   **排除橘虎斑的 `sc01/sc02/sc06`**；判別條件在 `prompts/character/moni.json` 的 `cover_match`。
   找不到主角圖會警告並要你用 `--cover` 指定。要換封面：`--cover <圖檔>` 或 `--visual-run <run>`。
+- **上架後回收空間**：`audio/` 與 `download/<album>.zip`（＝audio/ 的副本，一卷約 370MB）都能用
+  `release package` **位元組相同地重建**（成員日期固定 1980-01-01，實測 sha1 一致 → Gumroad 上傳快取會命中）。
+  已上架後就用它回收：
+
+  ```bash
+  ./scripts/lofi release prune            # 預覽：哪些上架包「已送過 Gumroad」可回收、省多少
+  ./scripts/lofi release prune --apply    # 真的刪（只刪 download/*.zip）
+  ./scripts/lofi release prune --audio --apply   # 連 audio/ 母帶一起刪（**確定 DSP 已上傳完**再用）
+  ```
+
+  判斷依據是 `catalog/releases.jsonl` 的 `gumroad` 事件（不是靠記憶）；沒送過的不會動
+  （上架前刪掉會讓 `release gumroad` 沒東西可傳）。`--audio` 要明示——DSP 沒有 API，工具無法判斷。
+  要重傳就先重跑 `release package`（ZIP 會重建、內容一模一樣）。
 - **選曲自動套品檢政策**：`--exclude-flags`（預設 `config.QC_BLOCKING_FLAGS` = `wide_dynamics,truncated,silent,clipped`）
   只擋「**母帶修不掉**」的 flag。`hot_true_peak`／`loudness_out_of_range` **放行**——`release` 的 loudnorm
   一定修得掉（實測：原始 warn ×30 的森林鋼琴，產出後 **12/12 pass**）。
