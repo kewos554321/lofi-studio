@@ -10,6 +10,7 @@
 - ✅ 上片資訊（title/描述/章節/tags）與上片佇列
 - ✅ 程式重構為 `src/lofi` 套件 + `lofi` CLI（舊 `scripts/*.py` 仍可用）
 - ✅ 長片拼接、視覺循環、影片合成、容量管理
+- ✅ 產線監控＋Email 通知（run 帳本 `lofi status`／本機 UI；`lofi notify`）
 - ⏳ 24/7 直播（OBS 手動設定）
 
 ## 前置需求
@@ -183,6 +184,9 @@ lofi-studio/
 │   ├── comfy.py               # ComfyUI API 小客戶端（api/submit/wait_done）
 │   ├── lock.py                # 生成互斥鎖（避免音樂/圖片同時跑爆 RAM）
 │   ├── io.py                  # 原子寫入 + JSONL 檔案鎖 + 壞檔隔離
+│   ├── runs.py                # 產線 run 帳本（catalog/runs.jsonl：run × stage × 進度）
+│   ├── status.py              # 產線狀態（lofi status）＋本機監控 UI（--serve）
+│   ├── notify.py              # 狀態通知（Email/Gmail SMTP；fail-soft 不影響產線）
 │   ├── catalog.py             # 音樂目錄（sidecar + JSONL）
 │   ├── qc.py                  # 自動品檢
 │   ├── generate.py            # 批次生成（ComfyUI）
@@ -228,6 +232,7 @@ lofi-studio/
 │   └── visuals/<kind><NN>/    # AI 生成的場景圖（一批一夾）；manifest.json 逐檔記 prompt/seed
 ├── catalog/                   # 音樂目錄（P0/P1）
 │   ├── tracks.jsonl           # ★ 唯一進版控的紀錄：精簡事件流（每次生成/品檢/… 一行）
+│   ├── runs.jsonl             # 產線 run 帳本事件流（run × stage × 進度；給 status/notify 讀）
 │   ├── releases.jsonl         # 上架包事件流（lofi release 產出；本機檔）
 │   ├── visuals.jsonl          # 圖片品檢事件流（本機檔；跑過 visual-qc 才會有）
 │   ├── index.csv              # 由側錄重建的查詢索引（衍生物，不進版控）
@@ -274,6 +279,9 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi character check                        # LoRA 訓練集一致性（漏字幕/特徵矛盾/數量不足）
 ./scripts/lofi character caption                      # 補齊字幕＋觸發詞（訓練前必跑）
 ./scripts/lofi character export                       # 打包 RunPod／kohya_ss 訓練包（見 docs/LORA.md）
+./scripts/lofi status                                # 產線狀態（現在跑到哪／佇列／資源）
+./scripts/lofi status --serve                        # 本機監控 UI（http://127.0.0.1:8787）
+./scripts/lofi notify --test                         # Email 通知測試（Gmail 應用程式密碼）
 ```
 
 - 也可以 `pip install -e .` 後直接打 `lofi <command>`（等價）；`PYTHONPATH=src python3 -m lofi.cli <command>` 亦可。
@@ -322,7 +330,7 @@ cd ai-music/lofi-studio
 
 > **各指令的完整參數以 `--help` 為準**（由 argparse 產生，改參數不必改文件）：
 > `./scripts/lofi <cmd> --help`、shell 腳本 `./scripts/<x>.sh --help`。
-> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `zimage` / `cinemagraph` / `upload` / `config`；`python3 scripts/<x>.py` 為相容 shim。
+> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `zimage` / `cinemagraph` / `upload` / `config` / `status` / `notify` / `runs`；`python3 scripts/<x>.py` 為相容 shim。
 
 最常用的幾個：
 
@@ -336,6 +344,9 @@ cd ai-music/lofi-studio
 | `lofi zimage` | 生主角 Moni 封面（Z-Image Turbo GGUF＋LoRA） | `./scripts/lofi zimage --lora mnxy_probe.safetensors --prompt "mnxy, …" --kind sc` |
 | `lofi meta` | 上片資訊 | `./scripts/lofi meta --video output/episodes/rl01/video.mp4 --style rainy_lofi` |
 | `lofi upload` | 上傳 YouTube | `./scripts/lofi upload --episode rl01` |
+| `lofi status` | 產線狀態＋監控 UI | `./scripts/lofi status` / `--serve` / `--json` |
+| `lofi notify` | Email 狀態通知 | `./scripts/lofi notify --test` |
+| `lofi runs` | 產線 run 帳本 | `./scripts/lofi runs ls` |
 | `lofi config` | 看集中設定（模型/位址） | `./scripts/lofi config` |
 | `lofi license` | 商用授權稽核 | `./scripts/lofi license check` |
 
@@ -632,6 +643,55 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - 散熱監控請用 `pmset -g therm`（`pmset -g thermlog` 會持續輸出，別用）。
 
 ## 容量管理與外接碟
+## 監控與通知（run 帳本 / `lofi status` / `lofi notify`）
+
+長流程（`make_episode.sh` / `batch_run.sh`）以前各寫各的 log，狀態散在 `.gpu.lock`、`publish/*.json` 與 `logs/*.log`，沒有地方回答「**現在跑到哪**」。現在多一層 **run 帳本**：`catalog/runs.jsonl`（append-only 事件流，記 run × stage × 進度），通知與監控都讀它。
+
+```bash
+./scripts/lofi status                    # 一眼看全貌：現在／最近 run／上片佇列／資源
+./scripts/lofi status --watch 5          # 每 5 秒刷新
+./scripts/lofi status --run cozy-1hr-03  # 單一 run 的逐段細節
+./scripts/lofi status --failures         # 只看問題（疑似中斷／失敗）
+./scripts/lofi status --json             # 給程式用
+./scripts/lofi status --serve            # 本機監控 UI（http://127.0.0.1:8787）
+./scripts/lofi status --serve --host 0.0.0.0   # 手機連同一個 Wi-Fi 也看得到
+
+./scripts/lofi runs ls                   # run 帳本總表
+./scripts/lofi runs begin --run rl01 --stage music --kind episode --total 40 --unit tracks
+./scripts/lofi runs progress --run rl01 --stage music --done 20
+./scripts/lofi runs end --run rl01 --stage music --status ok
+```
+
+- **產線已自動接線**：`make_episode.sh` 的每個階段、`batch_run.sh` 的每批都會自動記帳；**階段失敗自動寄 error 信、整集跑完寄一封摘要**（未設定通知＝不寄，行為不變）。不需要額外設定。
+- **疑似中斷**：用階段紀錄的 pid（`os.kill(pid,0)`）判存活——行程不在了就標 `⚠️`（不是看事件時間，因為進度事件可能隔很久才寫一次）。
+- `--quiet` 有問題才 `exit 1`，之後要接 watchdog／排程可以直接用。
+
+**Email 通知**（Gmail SMTP，設定一次就好；不需要時整條產線行為完全不變）：
+
+```bash
+./scripts/lofi notify --status           # 看目前通知設定（不寄信）
+./scripts/lofi notify --test             # 寄一封測試信
+```
+
+1. Google 帳號開 **兩步驗證** → 產一組 **應用程式密碼**。
+2. 寫 `.secrets/notify.json`（`.secrets/` 不進版控、`chmod 600`）：
+
+   ```json
+   { "enabled": true,
+     "smtp_host": "smtp.gmail.com", "smtp_port": 465, "use_ssl": true,
+     "username": "you@gmail.com", "app_password": "xxxx xxxx xxxx xxxx",
+     "to": ["you@gmail.com"], "from": "",
+     "min_level": "info", "dedupe_min": 30 }
+   ```
+
+3. `./scripts/lofi notify --test` 收到信即完成。也可用 `LOFI_SMTP_USER` / `LOFI_SMTP_PASS` / `LOFI_NOTIFY_TO` 環境變數覆寫；`LOFI_NOTIFY=0` 可全域關閉。
+
+> ⚠️ 應用程式密碼**沒有權限範圍**——外洩等於**整個信箱的鑰匙**（可讀＋可寄，不像 OAuth 只能寄）。
+> 本專案目前**使用主帳號並接受此風險**；風險評估與升級路徑（專用通知信箱／OAuth）見
+> [`docs/SECURITY.md`](docs/SECURITY.md)。
+
+> 通知是 **fail-soft**：寄信失敗只印警告、記進 `logs/notifications.jsonl`，**絕不中斷產線**。
+
 
 專案本身不大（音樂 ~448MB、圖片 ~68MB、文字 <1MB），真正吃容量的是**成片**與**模型**：
 

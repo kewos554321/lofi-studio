@@ -55,6 +55,10 @@
 #
 # 前置：ComfyUI 需執行中（music / image 階段）；upload 需 Google 憑證（見 README）。
 #
+# 帳本 / 通知：每個階段會寫進 catalog/runs.jsonl（`lofi status` 讀它）；階段失敗自動寄
+#   Email、整段跑完寄一封摘要（設定見 .secrets/notify.json）。未設定或 LOFI_NOTIFY=0
+#   時完全不寄，行為與以前相同。查進度：./scripts/lofi status
+#
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -184,6 +188,112 @@ need_comfy() {
   curl -s --max-time 5 http://127.0.0.1:8188/system_stats >/dev/null \
     || { echo "錯誤: ComfyUI 未啟動（127.0.0.1:8188），請先 ./scripts/launch_comfyui.sh" >&2; exit 1; }
 }
+
+# ---------- run 帳本 + 通知（fail-soft：通知出錯也絕不影響產線）----------
+# 每個階段記進 catalog/runs.jsonl（lofi status / notify 讀它）；階段失敗自動寄
+# error 信、整段跑完寄一封摘要（info）。未設定通知＝完全不寄，行為與以前相同。
+export LOFI_RUNS_NESTED=1          # 讓 batch_run.sh 只報進度、不自己另開一段
+STAGE_CUR=""
+STAGE_T0=0
+STAGE_LOG=""
+SUMMARY=""
+RUN_T0=$(date +%s)
+
+_runs() {
+  if [ "$DRY" = 1 ]; then return 0; fi
+  ./scripts/lofi runs "$@" >/dev/null 2>&1 || true
+  return 0
+}
+
+_notify() {                        # $1=level $2=subject $3=body $4=dedupe(可省)
+  if [ "$DRY" = 1 ]; then return 0; fi
+  if [ -n "${4:-}" ]; then
+    ./scripts/lofi notify --subject "$2" --body "$3" --level "$1" --dedupe-key "$4" >/dev/null 2>&1 || true
+  else
+    ./scripts/lofi notify --subject "$2" --body "$3" --level "$1" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+_begin_stage() {                   # $1=stage  $2=log(可省)
+  if [ "$DRY" = 1 ]; then return 0; fi
+  STAGE_CUR="$1"
+  STAGE_LOG="${2:-}"
+  STAGE_T0=$(date +%s)
+  if [ -n "$STAGE_LOG" ]; then
+    _runs begin --run "$EPISODE" --stage "$1" --kind episode --log "$STAGE_LOG"
+  else
+    _runs begin --run "$EPISODE" --stage "$1" --kind episode
+  fi
+  return 0
+}
+
+_end_stage() {                     # $1=ok|fail|skip
+  if [ "$DRY" = 1 ] || [ -z "$STAGE_CUR" ]; then return 0; fi
+  local el icon
+  el=$(( $(date +%s) - STAGE_T0 ))
+  _runs end --run "$EPISODE" --stage "$STAGE_CUR" --status "$1" --elapsed "$el"
+  icon="✅"
+  if [ "$1" = "fail" ]; then icon="❌"; fi
+  if [ "$1" = "skip" ]; then icon="⏭️"; fi
+  # 用 printf -v（不要用 $(...) 累積：命令替換會吃掉行尾換行，導致全部擠成一行）
+  printf -v SUMMARY '%s  %s %-8s %dm%02ds\n' "$SUMMARY" "$icon" "$STAGE_CUR" $((el / 60)) $((el % 60))
+  STAGE_CUR=""
+  STAGE_LOG=""
+  return 0
+}
+
+do_stage() {                       # $1=stage  $2=函式名  $3=log(可省)
+  _begin_stage "$1" "${3:-}"
+  "$2"
+  _end_stage ok
+}
+
+_episode_summary() {
+  local total body=""
+  total=$(( $(date +%s) - RUN_T0 ))
+  printf -v body 'run    : %s（style=%s, stage=%s）\n' "$EPISODE" "$STYLE" "$STAGE"
+  printf -v body '%s總計   : %dm%02ds\n' "$body" $((total / 60)) $((total % 60))
+  printf -v body '%s階段   :\n%s' "$body" "$SUMMARY"
+  case "$STAGE" in
+    video|all|upload)
+      printf -v body '%s\n產物   :\n  影片   output/episodes/%s/video.mp4\n' "$body" "$EPISODE" ;;
+  esac
+  case "$STAGE" in
+    upload|all)
+      printf -v body '%s  上片   publish/%s.json（YouTube 預設 private；公開要手動）\n' "$body" "$EPISODE" ;;
+  esac
+  case "$STAGE" in
+    cleanup|all)
+      printf -v body '%s  封存   外接 archive/%s/\n' "$body" "$EPISODE" ;;
+  esac
+  printf -v body '%s\n時間   : %s\n' "$body" "$(date '+%F %T')"
+  _notify info "✅ [${EPISODE}] 完成（stage=${STAGE}）" "$body" "episode-done:${EPISODE}"
+  return 0
+}
+
+# EXIT trap：任何中止（含階段內 exit 1）都會把該階段記成 fail 並寄信
+_on_exit() {
+  local code=$?
+  trap - EXIT
+  if [ "$DRY" = 1 ]; then exit "$code"; fi
+  if [ "$code" -ne 0 ]; then
+    if [ -n "$STAGE_CUR" ]; then
+      local st="$STAGE_CUR"
+      _end_stage fail
+      _runs run-end --run "$EPISODE" --status fail
+      _notify error "❌ [${EPISODE}] ${st} 階段失敗（exit ${code}）" \
+"$(printf 'run    : %s（style=%s, stage=%s）\n階段   : %s → ❌ fail（exit %s）\n時間   : %s\n追查   : ./scripts/lofi status --run %s\n' \
+   "$EPISODE" "$STYLE" "$STAGE" "$st" "$code" "$(date '+%F %T')" "$EPISODE")"
+    else
+      _notify error "❌ [${EPISODE}] 產線中止（exit ${code}）" \
+"$(printf 'run    : %s（style=%s, stage=%s）\n說明   : 在階段以外中止（exit %s）\n時間   : %s\n追查   : ./scripts/lofi status --run %s\n' \
+   "$EPISODE" "$STYLE" "$STAGE" "$code" "$(date '+%F %T')" "$EPISODE")"
+    fi
+  fi
+  exit "$code"
+}
+trap _on_exit EXIT
 
 # ---------- 第 1 段：音樂 ----------
 stage_music() {
@@ -369,17 +479,23 @@ stage_cleanup() {
 
 echo "==> make_episode: style=${STYLE} episode=${EPISODE} stage=${STAGE}$([ "$DRY" = 1 ] && echo " (dry-run)")"
 
+# music 階段沒有獨立 log（由 batch_run.sh 寫 logs/batch_<run>.log）
+MUSIC_LOG=""
+if [ "$COUNT" -gt 0 ]; then MUSIC_LOG="logs/batch_${RUN_ID}.log"; fi
+
 case "$STAGE" in
   all)
-    stage_music; stage_image; stage_video
-    if [ "$NO_UPLOAD" = 0 ]; then stage_upload; else echo; echo "(略過上傳 --no-upload)"; fi
-    if [ "$NO_CLEANUP" = 0 ]; then stage_cleanup; else echo "(略過整理 --no-cleanup)"; fi
+    do_stage music stage_music "$MUSIC_LOG"
+    do_stage image stage_image
+    do_stage video stage_video
+    if [ "$NO_UPLOAD" = 0 ]; then do_stage upload stage_upload; else echo; echo "(略過上傳 --no-upload)"; fi
+    if [ "$NO_CLEANUP" = 0 ]; then do_stage cleanup stage_cleanup; else echo "(略過整理 --no-cleanup)"; fi
     ;;
-  music)   stage_music;;
-  image)   stage_image;;
-  video)   stage_video;;
-  upload)  stage_upload;;
-  cleanup) stage_cleanup;;
+  music)   do_stage music   stage_music "$MUSIC_LOG";;
+  image)   do_stage image   stage_image;;
+  video)   do_stage video   stage_video;;
+  upload)  do_stage upload  stage_upload;;
+  cleanup) do_stage cleanup stage_cleanup;;
   *) echo "未知 --stage: ${STAGE}（all|music|image|video|upload|cleanup）" >&2; exit 1;;
 esac
 
@@ -397,3 +513,8 @@ case "$STAGE" in
   cleanup|all)
     echo "   封存:   <archive>/${EPISODE}/";;
 esac
+
+if [ "$DRY" = 0 ]; then
+  _runs run-end --run "$EPISODE" --status ok
+  _episode_summary
+fi

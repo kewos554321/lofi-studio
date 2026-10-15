@@ -13,6 +13,9 @@
 #
 # 前置：ComfyUI 需執行中（scripts/launch_comfyui.sh）。
 #
+# 帳本：這批會記進 catalog/runs.jsonl（`lofi status` 讀進度）。被 make_episode 包住時
+#   只報進度、不另開一段（LOFI_RUNS_NESTED=1）；獨立跑完會寄一封完成信。
+#
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,6 +70,19 @@ DRY_FLAG=""
 FORMAT_FLAG=""
 [ -n "$FORMAT" ] && FORMAT_FLAG="--format $FORMAT"
 
+# ---------- run 帳本 + 通知（fail-soft：出錯絕不影響產線）----------
+NESTED="${LOFI_RUNS_NESTED:-0}"        # 1＝被 make_episode 包住，只報進度
+_runs() {
+  if [ "$DRY" = 1 ]; then return 0; fi
+  ./scripts/lofi runs "$@" >/dev/null 2>&1 || true
+  return 0
+}
+_notify() {                            # $1=level $2=subject $3=body $4=dedupe
+  if [ "$DRY" = 1 ]; then return 0; fi
+  ./scripts/lofi notify --subject "$2" --body "$3" --level "$1" --dedupe-key "${4:-}" >/dev/null 2>&1 || true
+  return 0
+}
+
 echo "=================================================="
 echo " 量產 runner"
 echo "   CSV      : ${CSV}（${TOTAL} 首）"
@@ -88,6 +104,12 @@ if [ "$DRY" = 0 ]; then
     || { echo "錯誤: ComfyUI 未啟動（127.0.0.1:8188）。先跑 scripts/launch_comfyui.sh" >&2; exit 1; }
 fi
 
+# 自己開一段 music（獨立跑時）；被 make_episode 包住則只報進度
+BATCH_T0=$(date +%s)
+if [ "$NESTED" != 1 ]; then
+  _runs begin --run "$RUN_ID" --stage music --kind batch --total "$TOTAL" --unit tracks --log "$LOG"
+fi
+
 {
   echo "### batch_run start $(date '+%F %T') | csv=$CSV total=$TOTAL run=$RUN_ID"
 } >> "$LOG"
@@ -105,6 +127,7 @@ while [ "$off" -lt "$TOTAL" ]; do
       --run-id "$RUN_ID" --sleep "$SLEEP" $CLEAN_FLAG $DRY_FLAG $FORMAT_FLAG $GEN_ARGS 2>&1 | tee -a "$LOG"
   off=$((off + lim))
   echo "   進度：${off}/${TOTAL}" | tee -a "$LOG"
+  _runs progress --run "$RUN_ID" --stage music --done "$off" --total "$TOTAL" --unit tracks
   if [ "$REST" -gt 0 ] && [ "$off" -lt "$TOTAL" ]; then
     echo "   批次間休息 ${REST}s…"
     sleep "$REST"
@@ -114,6 +137,13 @@ done
 {
   echo "### batch_run done $(date '+%F %T') | 共 ${TOTAL} 首"
 } >> "$LOG"
+
+if [ "$NESTED" != 1 ]; then
+  _runs end --run "$RUN_ID" --stage music --status ok --elapsed "$(( $(date +%s) - BATCH_T0 ))"
+  _notify info "✅ [${RUN_ID}] 批次完成（${TOTAL} 首）" \
+"$(printf 'run    : %s\nCSV    : %s\n總數   : %s 首\nlog    : %s\n時間   : %s\n' \
+   "$RUN_ID" "$CSV" "$TOTAL" "$LOG" "$(date '+%F %T')")" "batch-done:${RUN_ID}"
+fi
 
 echo
 echo "✅ 全部跑完（${TOTAL} 首）。log: $LOG"

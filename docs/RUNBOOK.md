@@ -702,7 +702,105 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 
 ---
 
-## 10. 疑難排解
+## 10. 監控與通知（run 帳本 / `lofi status` / `lofi notify`）
+
+長流程以前各寫各的 log，狀態散在 `logs/.gpu.lock`（有 pid）、`publish/*.json`（上片狀態）
+與 `logs/*.log`，沒有地方回答「現在跑到哪」。新增的 **run 帳本**把「run × stage × 進度」
+記成單一 append-only 事件流 `catalog/runs.jsonl`（與 `tracks.jsonl` 同一套機制），
+通知與監控都讀它。**帳本是紀錄（進版控），`logs/.run_state.json` 是可重建的快照。**
+
+### 10.1 看狀態（監控）
+
+```bash
+./scripts/lofi status                    # 一眼看全貌：現在／最近 run／上片佇列／資源
+./scripts/lofi status --watch 5           # 每 5 秒刷新（Ctrl-C 結束）
+./scripts/lofi status --run cozy-1hr-03   # 單一 run 的逐段細節
+./scripts/lofi status --failures          # 只看問題（疑似中斷／失敗）
+./scripts/lofi status --json              # 給程式／排程用
+./scripts/lofi status --quiet             # 無輸出；有問題才 exit 1（watchdog 用）
+```
+
+**本機監控 UI**（唯讀，手機連同一個 Wi-Fi 也能看）：
+
+```bash
+./scripts/lofi status --serve                       # http://127.0.0.1:8787
+./scripts/lofi status --serve --host 0.0.0.0 --port 8787
+# 預設只綁 127.0.0.1；--host 0.0.0.0 才會對外（同網段可見，勿直接暴露到公網）
+```
+
+頁面每 10 秒自動更新，含「現在／最近 run／上片佇列／資源」四塊；
+後端只有 `GET /`（HTML）與 `GET /api/status`（JSON）。
+
+**「疑似中斷」怎麼判**：階段開始時記下實際行程 pid（shell 產線傳入腳本 pid，
+Python 端用 `runs.stage_run`），狀態用 `os.kill(pid, 0)` 判存活——
+行程不在就標 `⚠️`；`pid` 未知時才退回「閒置超過 `LOFI_STATUS_STALE_MIN`（預設 60）分鐘」。
+**不看事件時間**，因為進度事件可能隔很久才寫一次（音樂每首 4–5 分，只每 chunk 記一次）。
+
+### 10.2 記帳（長流程要接）
+
+> **既有的兩條產線已經接好了**，不必自己加：
+> `make_episode.sh` 會對每個階段自動記帳（music→image→video→upload→cleanup），
+> 階段失敗自動寄 error 信、整段跑完寄一封摘要；`batch_run.sh` 每批寫一行進度，
+> 獨立跑完會寄一封完成信（被 `make_episode.sh` 包住時只報進度，不重複開段）。
+> 下面這些是**給未來新腳本**的寫法。
+
+跑新腳本時，把每個階段包起來，狀態才進得了帳本：
+
+```bash
+./scripts/lofi runs begin --run rl01 --stage music --kind episode --total 40 --unit tracks --log logs/x.log
+./scripts/lofi runs progress --run rl01 --stage music --done 20      # 建議只在批次邊界呼叫
+./scripts/lofi runs end    --run rl01 --stage music --status ok
+./scripts/lofi runs run-end --run rl01 --status ok
+./scripts/lofi runs ls                                                # 帳本總表
+```
+
+Python 端（新模組）用 context manager 最省事，例外會自動記成 `fail` 再拋出：
+
+```python
+from lofi import runs
+with runs.stage_run("rl01", "music", kind="episode", total=40) as st:
+    for i, t in enumerate(tracks):
+        ...
+        st.tick(i + 1)                       # 批次邊界回報進度
+    st.artifact("assets/tracks/rainy_lofi/rl01")
+```
+
+### 10.3 Email 通知（一次性設定）
+
+```bash
+./scripts/lofi notify --status            # 看目前設定（不寄信）
+./scripts/lofi notify --test              # 寄一封測試信
+./scripts/lofi notify --subject "主旨" --body "內容" --level warn
+```
+
+1. Google 帳號開 **兩步驗證**，產一組 **應用程式密碼**（一般密碼不能用）。
+2. 寫 `.secrets/notify.json`（`.secrets/` 不進版控、`chmod 600`）：
+
+   ```json
+   { "enabled": true,
+     "smtp_host": "smtp.gmail.com", "smtp_port": 465, "use_ssl": true,
+     "username": "you@gmail.com", "app_password": "xxxx xxxx xxxx xxxx",
+     "to": ["you@gmail.com"], "from": "",
+     "min_level": "info", "dedupe_min": 30 }
+   ```
+
+3. `./scripts/lofi notify --test` 收到信即完成。
+
+> ⚠️ **已知風險（已接受）**：應用程式密碼沒有權限範圍，外洩等於整個信箱的鑰匙
+> （可讀＋可寄）。本專案目前使用主帳號，接受此風險；升級路徑（專用通知信箱／OAuth `gmail.send`）
+> 與重啟決策的時機見 [`docs/SECURITY.md`](SECURITY.md) §2 R-001。
+
+- 環境變數可覆寫：`LOFI_SMTP_USER` / `LOFI_SMTP_PASS` / `LOFI_SMTP_HOST` / `LOFI_NOTIFY_TO` /
+  `LOFI_NOTIFY_MIN_LEVEL`；`LOFI_NOTIFY=0` 全域關閉。`lofi config` 可看目前值。
+- **設定不全時自動視為關閉**，產線行為與以前完全相同（零相依）。
+- 通知 **fail-soft**：寄送失敗只印警告並記進 `logs/notifications.jsonl`，**不影響產線**。
+- `min_level`（debug<info<warn<error）與 `dedupe_key` 冷卻可避免同一件事連發。
+- 應用程式密碼一旦外流要立即撤銷（單獨撤銷，不影響其他）；`notify --status` 只顯示「已設定」，不會印出密碼。
+- `.secrets/` 不要放在任何雲端同步資料夾（iCloud/Dropbox）；權限一律 `chmod 600`。
+
+---
+
+## 11. 疑難排解
 
 | 症狀 | 可能原因 | 處理 |
 |---|---|---|
@@ -718,6 +816,9 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 | 目錄旁多了 `*.json.corrupt-*` | sidecar JSON 壞損被隔離（正常保護） | 檢查該檔；原檔已保留，必要時手動救回後刪除 |
 
 ---
+| `lofi notify --test` 沒收到信 | 設定未就緒或 Gmail 擋 | 先 `lofi notify --status` 看原因；確認已開兩步驗證並用**應用程式密碼**；失敗原因見 `logs/notifications.jsonl` |
+| `lofi status` 一直顯示「疑似中斷」 | 階段行程已結束但沒有 `runs end` | 正常保護（該階段真的沒收尾）；補 `./scripts/lofi runs end --run <id> --stage <s>`，或直接重跑該段 |
+| 監控 UI 打不開 | 只綁了 localhost／埠被占用 | 本機用 `http://127.0.0.1:8787`；手機要加 `--host 0.0.0.0`；換埠 `--port 8888` |
 
 ## 附錄：發布前合規檢查表
 

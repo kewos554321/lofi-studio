@@ -14,6 +14,7 @@
 | `docs/NAMING.md` | 規則 | 檔名/資料夾命名（音樂 + 視覺）與通用原則 |
 | `docs/DISTRIBUTION.md` | 變現 | 多平台上架地圖、自動化天花板、release 上架包規劃 |
 | `docs/LORA.md` | 訓練 | 主角 LoRA 的雲端訓練流程（RunPod + AI Toolkit / Z-Image Turbo）與疑難排解 |
+| `docs/SECURITY.md` | 安全 | 憑證清單、已知風險與決策紀錄（接受什麼風險、升級路徑、何時重啟） |
 
 > 原則：**新增指令只需改 CLI 的 `--help` + RUNBOOK 一處**；README 只放「怎麼跑」，不重抄參數表。
 
@@ -33,6 +34,9 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   comfy.py         # ComfyUI API 小客戶端（api/system_stats/submit/wait_done）
   lock.py          # 生成互斥鎖（fcntl，避免音樂/圖片同時跑爆 16GB RAM）
   io.py            # 原子寫入（atomic_write_text/json）+ JSONL 檔案鎖 + 壞檔隔離（quarantine）
+  runs.py          # 產線 run 帳本（catalog/runs.jsonl：run × stage × 進度；長流程要記帳）
+  status.py        # 產線狀態（lofi status）＋本機監控 UI（--serve；唯讀 http.server）
+  notify.py        # 狀態通知（Email/Gmail SMTP；fail-soft，寄失敗不影響產線）
   license.py       # 商用授權稽核（掃 sidecar/manifest 的模型授權狀態）
   catalog.py       # 音樂目錄：sidecar assets/tracks/<style>/<run>/*.json + catalog/tracks.jsonl
   qc.py            # 自動品檢（ffmpeg/ffprobe，純標準庫）
@@ -61,11 +65,12 @@ assets/tracks/<style>/<run>/   # 生成音檔（分層）+ 每首 sidecar（整�
                                # ★ 內接只留工作用 mp3；無損母帶在 output/masters/（外接，--format flac）
 assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifest.json（一 run 一份：config 共用 + images 逐檔 prompt/seed；不進版控）
 assets/refs/                    # 參考素材（人物照片、哼唱錄音、轉檔）—不進版控，且不在任何工具掃描路徑
-catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
+catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl + runs.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
 output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包（audio/ + 封面 + LISTING.md + download/<album>.zip…）；masters/<style>/<run>/ 為無損母帶（FLAC）
 tests/              # python3 -m unittest discover -s tests -v
 docs/RUNBOOK.md     # 操作手冊
+docs/SECURITY.md    # 憑證清單與已知風險（接受什麼風險、升級路徑、何時重啟）
 ```
 
 ## 常用指令
@@ -84,6 +89,10 @@ docs/RUNBOOK.md     # 操作手冊
 ./scripts/lofi character check                                         # LoRA 訓練集一致性（訓練前必跑）
 ./scripts/lofi visual --count 3 --clean-raw               # 生圖後刪 ComfyUI 原檔（省內接碟）
 ./scripts/lofi config                                  # 目前模型檔名／ComfyUI 位址
+./scripts/lofi status                                  # 產線狀態（現在跑到哪／佇列／資源）
+./scripts/lofi status --serve                          # 本機監控 UI（http://127.0.0.1:8787）
+./scripts/lofi notify --test                           # Email 通知測試（.secrets/notify.json）
+./scripts/lofi runs ls                                 # 產線 run 帳本總表
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40   # 五段產線一條龍
                                                                       # 音樂段預設 --format flac（無損母帶放外接 output/masters；
                                                                       # 外接離線會 fail-closed，臨時可 --format mp3）
@@ -110,7 +119,11 @@ python3 -m unittest discover -s tests -v
   圖片命名固定為「資料夾 `<kind><NN>`、檔名 `<run-id>_<NN>[_<slug>].<ext>`」——`kind`：`ref` 主角定裝參考／`ds` LoRA 訓練集／`sc` 場景風格測試；`NN` 兩位數照生成順序；`slug` 小寫英數短標籤。例：`ref04/ref04_01_gold-socks.png`、`ds02_07_walk-side-fireplace.png`。衍生檔的 slug 用保留字首 `anim-`（動畫）/`cmp-`（對照合成）/`mask-`（遮罩）/`fix-`（後處理）。未給 `--run-id` 時工具會自動編號（`ref05` 之後給 `ref06`）。規則全文與舊→新對照表在 `docs/NAMING.md`。
   音樂新 run 命名標準：`<run-id>_<NNNN>[_<slug>].mp3`（run-id 不可變、序號固定 4 位；`row_id`/`prompt`/`seed` 放 sidecar）。**`track_id` 記在 sidecar、不從檔名推算**；舊 run 檔名維持原樣不動。通用原則與遷移建議詳見 `docs/NAMING.md`。
 - **只加不刪**：`catalog/tracks.jsonl` 與 `catalog/releases.jsonl` 是 append-only 事件流（狀態變更用新事件，不要改舊行）。
+- **長流程要記帳**：新的長流程／腳本請用 `runs.stage_run(...)`（Python）或 `lofi runs begin/progress/end`（shell）把每個階段寫進 `catalog/runs.jsonl`（run × stage × 進度；append-only，一筆狀態轉移一行、progress 只在批次邊界）。`lofi status`／`lofi notify` 都讀這份帳本——**沒記帳就等於「現在跑到哪」查不到**。階段記得起跑行程 pid（Python 用 `os.getpid()`；一次性 CLI `runs begin` 用呼叫者 pid），監控才判得出「還在跑」vs「中斷」。
+  `make_episode.sh`（每階段）與 `batch_run.sh`（每批）**已經接好**：階段失敗自動寄 error 信、整段跑完寄摘要；`make_episode.sh` 會 export `LOFI_RUNS_NESTED=1`，讓 `batch_run.sh` 只報進度、不重複開段。
+- **通知要 fail-soft**：`notify.send()` 永不拋例外（寄失敗只印 stderr + 記 `logs/notifications.jsonl`），且設定不全時自動視為關閉——**加通知不可讓產線新增失敗模式**。憑證放 `.secrets/notify.json`（`chmod 600`，不進版控），設定一律經 `config.NOTIFY_*`／`LOFI_*`。
 - **不進版控**：整個 `assets/`（含音檔、sidecar、圖、動畫、字幕）；`output/`、`logs/`、`catalog/*.db`、`.venv`、models。原則：**git 只收程式與紀錄（`catalog/`），不收素材**。
+- **憑證只放 `.secrets/`**：`chmod 600`、不進版控、不放在雲端同步資料夾；**不要**把 token／密碼寫進 sidecar／manifest／`publish/*.json`／事件流（那些會進版控）。新增或更換憑證機制時，更新 `docs/SECURITY.md`（憑證清單＋已知風險）。
 - **風格版本**：改 `prompts/styles/*.json` 要把 `version` +1，否則舊曲來源對不上。
 - **商用授權**：產出要能商用。換模型前先在 `config.MODEL_LICENSES` 登錄 `{license, commercial, source}`；`generate`/`visual`/`release` 對 `commercial!=True` 的模型 **fail-closed**（中止，除非 `--allow-unknown-license`）。生成時把 `model_license`/`model_source` 寫進 sidecar/manifest，`meta` 彙整成 `publish.credits`、`release` 彙整成 `release.json` 的 `credits`。稽核用 `./scripts/lofi license check`；矩陣見 `docs/LICENSING.md`。**別用非商用模型**（例：MusicGen CC-BY-NC）。
 - **上架欄位只有一處來源**：`release.json`（`genre`／`explicit`／`songwriter`／`ai_credits`／`listing`）＋同資料夾的 `LISTING.md`（給人複製貼上）與 `credits.txt`（隨交付 ZIP）。AI 揭露（2026 起 DistroKid AI Credits 強制）由 `config.RELEASE_AI_CREDITS` 決定（本產線＝`all_audio`）；`songwriter` 必填**真名**、`tags` 遵守 Gumroad 規則（每 2–20 字、≤10 個）。新平台要填的欄位就加在這裡，別在各處硬編。
