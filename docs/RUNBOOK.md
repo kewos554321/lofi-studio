@@ -317,7 +317,23 @@ cp output/lora/probe_mnxy/run/mnxy_probe.safetensors ~/ComfyUI/models/loras/
 |---|---|
 | `--lora` / `--lora-weight` | 主角 LoRA 與強度（**1.0 就是在模型上**）|
 | `--style` | 畫風句（預設 `config.ZIMAGE_STYLE`；**關掉會讓花色飄，別關**）|
+| `--from-image` | **只做 AI 放大**（不生成）：把既有圖放大成高畫質衍生圖，交付 ZIP 的高畫質圖來源 |
 | `--dry-run` | 只印設定與授權檢查（授權檢查先跑，乾跑就能知道會不會被擋）|
+
+**高畫質交付圖（`--from-image`）**：商店頁顯示的是小尺寸（16:9 封面 1920×1080、方形縮圖 1080×1080），
+但**買家拿到的要跟商店看到的一致、而且畫質更高**。所以 `release package` 會把該集橫式原圖
+AI 放大成 4K 一起收進交付 ZIP：
+
+```bash
+# 把該集影片封面放大成 4K（衍生圖，命名 <run>_NN_fix-4k.png；約 15 秒）
+./scripts/lofi zimage --from-image assets/visuals/cozy-1hr-01/cozy-1hr-01_01.png \
+  --run-id cozy-1hr-01 --slug fix-4k --upscale-out 3840x2160 --clean-raw
+# 之後 release package 自動挑「解析度最高的橫式圖」當來源：
+#   商店封面 gumroad_cover_1920x1080.jpg（縮小）＋ ZIP 內 artwork_3840x2160.jpg（4K 原尺寸）
+```
+
+`pick_wide_cover()` 取的是**解析度最高**的橫式圖（不是最新那張），所以放了 4K 衍生圖就會用它。
+影片／cinemagraph 仍走 1080p——不要為了畫質把影片封面生大，會白吃 RAM（見 `AGENTS.md` 資源限制）。
 | `--init-image` / `--mask` | 局部重繪（與 `lofi visual` 同一套遮罩規矩）|
 
 - **prompt 規矩**：一定要含觸發詞，並帶畫風句。少了畫風句，觸發詞只綁得住「是貓」，
@@ -542,8 +558,10 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | 檔案 | 內容 |
 |---|---|
 | `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留取樣率）；內嵌標籤含 title/artist/album/track/genre/date/copyright/**comment（AI 揭露）**——標籤跟著檔案走，買家丟掉 README 也看得到。改標籤要 `--force` |
-| `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**） |
-| `download/<album>.zip` | 交付檔（`audio/`＋封面＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個 |
+| `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**）——也是商店縮圖（方形）用的同一套圖 |
+| `artwork_3840x2160.jpg` | 交付 ZIP 用的 **4K 高畫質橫式圖**（商店 16:9 封面用的同一套圖）。來源優先取該集 AI 放大過的圖 |
+| `gumroad_cover_1920x1080.jpg` / `gumroad_thumb_1080x1080.jpg` | 商店頁直接上傳用（橫式封面 ≥1280×720／方形縮圖 ≥600×600，72 DPI） |
+| `download/<album>.zip` | 交付檔（`audio/`＋**方形與橫式兩張圖**＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個。原則：**買家拿到的要和商店頁看到的一致**（商店顯小尺寸、ZIP 給高畫質版） |
 | `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
 | `tracklist.csv` | **買家視角**的曲目表：No/Title/Artist/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size（不含 ISRC——那是發行商欄位，見 `LISTING.md`） |
 | `LISTING.md` | **上架欄位對照**：DistroKid／Gumroad 要填的值（複製貼上用）＋長版文案與 tags |

@@ -27,8 +27,10 @@ songwriter 真名／AI Credits／封面／ISRC）散在好幾頁。這裡一次�
 
 輸出（預設在 output/releases/<run>/，外接碟）:
   audio/01_<slug>.wav   正規化母帶（ID3 已填）
-  cover_3000x3000.jpg   封面
-  download/<album>.zip  交付檔（audio/＋封面＋tracklist＋credits，給 Gumroad／Bandcamp）
+  cover_3000x3000.jpg   封面（方形；Gumroad 縮圖用的同一套圖）
+  artwork_3840x2160.jpg 交付 ZIP 用 4K 高畫質橫式圖（Gumroad 16:9 封面用的同一套圖）
+  gumroad_*.jpg         商店頁直接上傳用（封面 1920×1080／縮圖 1080×1080）
+  download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits，給 Gumroad／Bandcamp）
   release.json          機器用（album/artist/track 順序/genre/explicit/songwriter/AI credits/授權 provenance）
   tracklist.csv         人用（No/Title/Duration/Key/BPM/Mood/ISRC）
   LISTING.md            上架文案（DistroKid／Gumroad 逐欄對照；直接複製貼上）
@@ -42,12 +44,17 @@ import io as _io
 import json
 import os
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 from lofi import catalog as cat
 from lofi import config
+from lofi.meta import unique_titles      # noqa: F401（專輯內曲名去重；給曲目表與上架包共用）
+
+# 曲目清單的手動編號前綴（給 listing_text 保留、listing_html 剝掉）
+LEADING_NO = re.compile(r"^(\d{1,3})\s+")
 from lofi import io
 from lofi import media
 from lofi import meta as mm
@@ -57,6 +64,10 @@ from lofi.paths import (CATALOG_DIR, RELEASES_DIR, ROOT, TRACKS_DIR, VISUALS_DIR
 RELEASES_JSONL = CATALOG_DIR / "releases.jsonl"
 SCHEMA_VERSION = 1
 COVER_SIZE = 3000
+# 交付 ZIP 內附的高畫質橫式圖（＝商店 16:9 封面的同一套圖，但解析度更高）。
+# 兩張都給全：方形 3000²（商店縮圖同一套）＋ 橫式 3840×2160（商店封面同一套，4K 高畫質）。
+# 來源優先用該集 AI 放大過的 `*_fix-4k`（pick_wide_cover 取解析度最高者），所以真的是 4K 細節。
+ARTWORK_SIZE = (3840, 2160)
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 LOSSLESS_EXTS = (".flac", ".wav", ".aiff", ".aif")   # 無損母帶可接受的容器
 
@@ -106,26 +117,6 @@ def slugify(text, maxlen=40):
     s = str(text or "").lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s[:maxlen].strip("-")
-
-
-def unique_titles(titles):
-    """專輯內曲名去重：同名者依出現順序加 ` (pt. N)`。
-
-    為什麼要：sidecar 的 `mood` 會重複（同風格多首共用同一句），
-    而同一張 release 內曲名重複會讓 DSP／版稅申報混淆。
-    用「出現順序」而非隨機，確保重跑結果一致（可重現）。
-    """
-    seen = {}
-    out = []
-    for t in titles:
-        key = str(t or "").strip().lower()
-        if key in seen:
-            seen[key] += 1
-            out.append(f"{t} (pt. {seen[key]})")
-        else:
-            seen[key] = 1
-            out.append(t)
-    return out
 
 
 def track_title(audio, sidecar):
@@ -294,17 +285,28 @@ def listing_text(lead, sections):
     return "\n\n".join(parts)
 
 
+def _strip_no(text):
+    """去掉「01  」這種手動曲目編號（給 <ol> 用；純文字版仍保留編號）。"""
+    return LEADING_NO.sub("", text, count=1)
+
+
 def listing_html(lead, sections):
     """商品描述的 **HTML** 版（Gumroad 的商品頁吃 HTML：標題＋清單才會真的排版）。
 
     只用最保守的標籤（p/h3/ul/ol/li）並全部 escape——Gumroad 的 editor 會把它存成
     rich content；標籤愈少愈不容易被它的清洗規則改掉。
+
+    注意：**<ol> 本身就會自動編號**，所以有序清單要剝掉資料層的 "01  " 前綴，
+    否則頁面會出現「1. 01 Title」這種雙重編號。純文字版（listing_text）沒有自動編號，
+    所以那裡保留編號。
     """
     esc = _html.escape
     parts = [f"<p>{esc(p)}</p>" for p in lead]
     for s in sections:
-        tag = "ol" if s.get("ordered") else "ul"
-        items = "".join(f"<li>{esc(i)}</li>" for i in s["items"])
+        ordered = bool(s.get("ordered"))
+        tag = "ol" if ordered else "ul"
+        items = "".join(
+            f"<li>{esc(_strip_no(i) if ordered else i)}</li>" for i in s["items"])
         parts.append(f"<h3>{esc(s['heading'].title())}</h3><{tag}>{items}</{tag}>")
         if s.get("closing"):
             parts.append(f"<p>{esc(s['closing'])}</p>")
@@ -1041,6 +1043,64 @@ def make_cover(src, dst, size=COVER_SIZE):
     return dst
 
 
+def pick_wide_cover(run):
+    """該集的橫式封面（影片封面圖）：assets/visuals/<run>/*.png 取**解析度最高**的橫式那張。
+
+    為什麼不是取最新：交付 ZIP 的高畫質橫式圖要從最好的來源縮下來，AI 放大過的
+    `*_fix-4k` 應該勝出（同尺寸才比時間新舊）。
+    """
+    d = VISUALS_DIR / str(run or "")
+    if not d.is_dir():
+        return None
+    best = None
+    for p in d.glob("*.png"):
+        w, h = probe_wh(p)
+        if not (w and h) or w / h <= 1.2:
+            continue
+        key = (w * h, p.stat().st_mtime)
+        if best is None or key > best[0]:
+            best = (key, p)
+    return best[1] if best else None
+
+
+def set_dpi(path, dpi=72):
+    """把 JPEG 的 DPI 標成 72（Gumroad 規格）。用 macOS 內建 sips；沒有就靜默跳過。"""
+    try:
+        return subprocess.run(["sips", "-s", "dpiWidth", str(dpi), "-s", "dpiHeight", str(dpi),
+                               str(path)], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def make_gumroad_thumb(src, dst, size=1080):
+    """Gumroad 縮圖：方形 ≥600×600（方圖直接縮小，不裁切）。"""
+    return make_cover(src, dst, size)
+
+
+def make_gumroad_cover(src, dst, size=(1920, 1080), wide_src=None):
+    """Gumroad 封面：橫式 ≥1280×720。
+
+    優先用橫式原圖（該集影片封面）；沒有的話用方圖＋同張圖放大模糊當背景補滿，
+    避免把方圖硬裁成 16:9 而切掉主角。
+    """
+    w, h = size
+    wide_ok = bool(wide_src) and bool(probe_wh(wide_src)[0])
+    if wide_ok:
+        extra = ["-i", str(wide_src), "-vf",
+                 f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}"]
+    else:
+        extra = ["-i", str(src), "-filter_complex",
+                 f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
+                 f"crop={w}:{h},gblur=sigma=24[bg];"
+                 f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2"]
+    rc, _, err = _run_ff(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *extra,
+                          "-q:v", "2", str(dst)])
+    if rc != 0:
+        sys.exit(f"Gumroad 封面產生失敗：{err.strip()[:400]}")
+    return dst
+
+
 def append_release_event(rec):
     ev = {"ts": cat.now_iso(), "schema_version": SCHEMA_VERSION, "event": "release"}
     ev.update(summarize_release_event(rec))
@@ -1315,6 +1375,20 @@ def cmd_package(args):
         dest.mkdir(parents=True, exist_ok=True)
         make_cover(cover_src, cover_dst)
         print(f"封面 → {cover_dst.name}")
+        # Gumroad 商品頁要兩個尺寸：橫式封面（≥1280×720）與方形縮圖（≥600×600），並標 72 DPI
+        _wide = pick_wide_cover(rec.get("run") or "")
+        _gc, _gt = dest / "gumroad_cover_1920x1080.jpg", dest / "gumroad_thumb_1080x1080.jpg"
+        make_gumroad_cover(cover_src, _gc, wide_src=_wide)
+        make_gumroad_thumb(cover_src, _gt)
+        # 交付 ZIP 的高畫質橫式圖：同一套設計、更高解析度（買家拿到的和商店頁看到的一致）
+        _art = dest / f"artwork_{ARTWORK_SIZE[0]}x{ARTWORK_SIZE[1]}.jpg"
+        make_gumroad_cover(cover_src, _art, size=ARTWORK_SIZE, wide_src=_wide)
+        for _p in (cover_dst, _gc, _gt, _art):
+            set_dpi(_p)
+        print(f"       → {_gc.name}（Gumroad 封面，橫式" +
+              ("，用該集影片封面）" if _wide else "，方圖＋模糊背景）"))
+        print(f"       → {_gt.name}（Gumroad 縮圖，方形）")
+        print(f"       → {_art.name}（交付 ZIP 用高畫質橫式，同一套設計）")
 
     # 3) 記錄與清單
     # 交付母帶的實際格式（量測，不猜）：credits.txt 要寫「24-bit / 48 kHz」。
@@ -1363,7 +1437,11 @@ def cmd_package(args):
     zip_path = None
     if not args.no_zip:
         members = [(r["audio_out"], f"audio/{r['audio_out'].name}") for r in rows]
+        # 買家拿到的要和商店頁看到的一致：商店的 16:9 封面／方形縮圖是「同一套圖」的
+        # 小尺寸版，ZIP 就給同一套圖的高畫質版（方形 3000² ＋ 橫式 2560×1440）。
         members += [(dest / "cover_3000x3000.jpg", "cover_3000x3000.jpg"),
+                    (dest / f"artwork_{ARTWORK_SIZE[0]}x{ARTWORK_SIZE[1]}.jpg",
+                     f"artwork_{ARTWORK_SIZE[0]}x{ARTWORK_SIZE[1]}.jpg"),
                     (dest / "tracklist.csv", "tracklist.csv"),
                     (dest / "credits.txt", "credits.txt")]
         zip_path = make_release_zip(release_zip_path(dest, album), members)

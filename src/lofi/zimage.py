@@ -18,6 +18,8 @@
   lofi zimage --lora "" --prompt "…"                      # 不掛主角 LoRA（純場景圖）
   lofi zimage --init-image base.png --mask area.png --denoise 0.85 --prompt "…"    # 局部重繪
   lofi zimage --upscale RealESRGAN_x4plus_anime_6B.pth --prompt "…"
+  lofi zimage --from-image assets/visuals/cozy-1hr-01/cozy-1hr-01_01.png --slug fix-4k \
+              --upscale-out 3840x2160                      # 只做 AI 放大（交付 ZIP 的高畫質圖來源）
   lofi zimage --dry-run                                   # 只印設定與授權檢查
 
 prompt 的規矩：**一定要含觸發詞**，而且**建議帶畫風句**（`--style`，預設取自
@@ -33,11 +35,11 @@ from pathlib import Path
 
 from lofi import comfy
 from lofi import media
-from lofi.config import (COMFY_OUTPUT, MIN_FREE_GB, ZIMAGE_CLIP, ZIMAGE_LORA,
+from lofi.config import (COMFY_OUTPUT, MIN_FREE_GB, UPSCALE_MODEL, ZIMAGE_CLIP, ZIMAGE_LORA,
                          ZIMAGE_LORA_WEIGHT, ZIMAGE_STYLE, ZIMAGE_UNET, ZIMAGE_VAE,
                          check_commercial, model_license)
 from lofi.lock import gpu_lock
-from lofi.paths import VISUALS_DIR
+from lofi.paths import ROOT, VISUALS_DIR
 from lofi.visual import (VIS_KINDS, model_tag, next_run_id, next_seq,
                          output_filename, print_run_header, sanitize_run_id,
                          update_manifest)
@@ -106,6 +108,28 @@ def build(pos, w, h, seed, steps, cfg, prefix, shift=3.0,
     return g
 
 
+def build_upscale_only(src_name, upscale_model, out_size, prefix):
+    """只做 AI 放大（衍生圖）：LoadImage → ×4 → lanczos 縮到 out_size → SaveImage。
+
+    用途：把已經生好的場景圖（例 1920×1080 的影片封面）放大成高畫質版，當交付 ZIP 的
+    4K 橫式圖來源。與生圖分開，是因為影片／cinemagraph 走 1080p 最省資源（見 AGENTS.md）。
+    """
+    g = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": src_name}},
+        "16": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": upscale_model}},
+        "17": {"class_type": "ImageUpscaleWithModel",
+               "inputs": {"upscale_model": ["16", 0], "image": ["1", 0]}},
+        "10": {"class_type": "SaveImage",
+               "inputs": {"images": ["17", 0], "filename_prefix": prefix}},
+    }
+    if out_size:
+        g["18"] = {"class_type": "ImageScale",
+                   "inputs": {"image": ["17", 0], "width": out_size[0], "height": out_size[1],
+                              "upscale_method": "lanczos", "crop": "disabled"}}
+        g["10"]["inputs"]["images"] = ["18", 0]
+    return g
+
+
 def compose_prompt(prompt, style=""):
     """把畫風句接在 prompt 後面（缺標點就補句點）。
 
@@ -126,8 +150,12 @@ def main():
     ap = argparse.ArgumentParser(prog="lofi zimage",
                                  description="Z-Image Turbo（GGUF）生場景圖——主角 LoRA 的產線路徑")
     ap.add_argument("--url", default=comfy.COMFY_URL)
-    ap.add_argument("--prompt", required=True,
+    ap.add_argument("--prompt", default="",
                     help="prompt（**要含觸發詞**，例 mnxy, …；畫風句由 --style 自動接上）")
+    ap.add_argument("--from-image", default="", dest="from_image",
+                    help="只做 AI 放大：把既有圖放大成高畫質衍生圖（不生成）。"
+                         "例 --from-image assets/visuals/cozy-1hr-01/cozy-1hr-01_01.png "
+                         "--slug fix-4k --upscale-out 3840x2160")
     ap.add_argument("--style", default=ZIMAGE_STYLE,
                     help="畫風句（接在 prompt 後面；空字串＝不加）。預設取自 config.ZIMAGE_STYLE，"
                          "少了它觸發詞只綁得住物種、花色會飄（docs/LORA.md §6）")
@@ -168,6 +196,11 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+    if not args.prompt and not args.from_image:
+        sys.exit("要給 --prompt（生圖）或 --from-image（只做 AI 放大）")
+    if args.from_image and not args.upscale:
+        args.upscale = UPSCALE_MODEL        # 放大模式沒指定就用產線預設那顆
+
     try:
         w, h = (int(x) for x in args.size.lower().split("x"))
     except ValueError:
@@ -184,14 +217,17 @@ def main():
         sys.exit("--mask 要搭配 --init-image（遮罩是「這張圖的哪一塊要重畫」）")
 
     prompt = compose_prompt(args.prompt, args.style)
-    if args.lora and args.style.strip().lower()[:20] not in prompt.lower():
+    if not args.from_image and args.lora and args.style.strip().lower()[:20] not in prompt.lower():
         print("  ⚠️  prompt 沒帶畫風句：觸發詞只會綁住物種，花色可能飄（docs/LORA.md §6）")
 
     # 商用合規守門（未知授權預設 fail-closed）
     if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
-        names = [ZIMAGE_UNET, ZIMAGE_CLIP, ZIMAGE_VAE] + ([args.upscale] if args.upscale else [])
-        if args.lora:
-            names.append(args.lora)
+        if args.from_image:                 # 放大模式只用放大模型
+            names = [args.upscale]
+        else:
+            names = [ZIMAGE_UNET, ZIMAGE_CLIP, ZIMAGE_VAE] + ([args.upscale] if args.upscale else [])
+            if args.lora:
+                names.append(args.lora)
         blocked, findings = check_commercial(names, allow_unknown=args.allow_unknown_license)
         for n, info in findings:
             mark = {True: "✅", False: "⛔"}.get(info["commercial"], "⚠️")
@@ -203,6 +239,75 @@ def main():
     if not args.dry_run:
         comfy.require_online(args.url)
         media.require_free(VIS_DIR, MIN_FREE_GB, "內接碟 assets/visuals")
+
+    # ── 只做 AI 放大：把既有圖放大成高畫質衍生圖，然後結束（不生成）──────────
+    # 用途：交付 ZIP 的高畫質橫式圖來源（商店顯示 1080p、ZIP 給 4K）。
+    # 為什麼不把影片封面直接生大：cinemagraph／影片走 1080p 最省 RAM（AGENTS.md 資源限制）。
+    if args.from_image:
+        src_img = Path(args.from_image)
+        if not src_img.is_file():
+            sys.exit(f"--from-image 找不到檔案：{src_img}")
+        base = media.ffprobe_size(src_img)
+        if up_out is None:
+            if not base:
+                sys.exit("讀不到來源圖尺寸，請用 --upscale-out 指定（例 3840x2160）")
+            up_out = (base[0] * 2, base[1] * 2)
+
+        run_id = sanitize_run_id(args.run_id) or next_run_id(args.kind)
+        out_dir = VIS_DIR / run_id
+        try:
+            _src_rel = str(src_img.resolve().relative_to(ROOT))
+        except ValueError:
+            _src_rel = str(src_img)
+        cfg = {
+            "mode": "upscale-only（AI 放大既有圖）",
+            "from_image": _src_rel,
+            "source_size": f"{base[0]}x{base[1]}" if base else "",
+            "upscale": args.upscale,
+            "upscale_out": f"{up_out[0]}x{up_out[1]}",
+            "license": model_license(args.upscale)["license"],
+            "source": model_license(args.upscale)["source"],
+        }
+        print_run_header(f"AI 放大（{args.upscale}）", run_id, out_dir,
+                         {**cfg, "unet": args.upscale}, count=1)
+        if args.dry_run:
+            return
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # ComfyUI 的 LoadImage 只讀它 input/ 目錄下的檔
+        in_dir = Path.home() / "ComfyUI" / "input"
+        in_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_img, in_dir / src_img.name)
+        seq = next_seq(out_dir, run_id)
+        with gpu_lock("z-image-upscale"):
+            print(f"[1/1] {model_tag(cfg)} {up_out[0]}x{up_out[1]} ← {src_img.name}")
+            try:
+                pid = comfy.submit(args.url, build_upscale_only(
+                    src_img.name, args.upscale, up_out, args.prefix),
+                    client_id="lofi-zimage")
+            except Exception as e:
+                sys.exit(f"提交失敗：{e}")
+            t0 = time.time()
+            try:
+                res, _ = comfy.wait_done(args.url, pid, poll=3, timeout=args.timeout)
+            except comfy.ComfyError as e:
+                sys.exit(f"等待失敗：{e}")
+            for im in res.get("outputs", {}).get("10", {}).get("images", []):
+                raw = COMFY_OUT / im.get("subfolder", "") / im["filename"]
+                if not raw.exists():
+                    continue
+                dst_name = output_filename(run_id, seq, args.slug, Path(im["filename"]).suffix)
+                shutil.copy2(raw, out_dir / dst_name)
+                update_manifest(out_dir, run_id=run_id, tool=TOOL, caller="lofi.zimage",
+                                config=cfg,
+                                images=[{"file": dst_name, "seed": "",
+                                         "prompt": f"derived from {src_img.name}：{args.upscale} "
+                                                   f"×4 後縮到 {up_out[0]}x{up_out[1]}"}])
+                note = ""
+                if args.clean_raw:
+                    raw.unlink(missing_ok=True)
+                    note = "（已刪除 ComfyUI 原始檔）"
+                print(f"    ✅ {time.time() - t0:.0f}s -> {dst_name}{note}")
+        return
 
     run_id = sanitize_run_id(args.run_id) or next_run_id(args.kind)
     out_dir = VIS_DIR / run_id

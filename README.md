@@ -258,6 +258,8 @@ Python 邏輯都在 `src/lofi/`（套件）；`scripts/*.py` 只是**相容 shim
 ./scripts/lofi zimage --lora mnxy_probe.safetensors --lora-weight 1.0 \
     --prompt "mnxy, sitting on a wooden bench on a seaside promenade at sunset" \
     --kind sc --slug seaside                          # 主角 Moni 封面（Z-Image Turbo）
+./scripts/lofi zimage --from-image assets/visuals/cozy-1hr-01/cozy-1hr-01_01.png \
+    --run-id cozy-1hr-01 --slug fix-4k --upscale-out 3840x2160   # 只做 AI 放大（交付 ZIP 的高畫質圖）
 ./scripts/lofi cinemagraph assets/visuals/sc01/sc01_03_rain.png output/visual_loop.mp4   # 需 numpy（.venv）
 ./scripts/lofi config                                # 看集中設定（模型檔名 / ComfyUI 位址）
 ./scripts/lofi config --licenses                      # 看模型授權登錄

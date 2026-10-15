@@ -71,8 +71,11 @@
 ```
 output/releases/coastal01/
 ├── audio/                01_slow-tide.wav …（-14 LUFS / -1 dBTP，ID3 已填）
-├── cover_3000x3000.jpg   封面（無文字，見 §6-1）
-├── download/<album>.zip  交付檔（audio/＋封面＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
+├── cover_3000x3000.jpg   封面（無文字，見 §6-1）；商店縮圖用同一套圖
+├── artwork_3840x2160.jpg  交付 ZIP 用 4K 高畫質橫式圖（商店 16:9 封面同一套圖、AI 放大）
+├── gumroad_cover_1920x1080.jpg / gumroad_thumb_1080x1080.jpg  商店頁上傳用（72 DPI）
+├── download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
+│                         原則：買家拿到的＝商店頁看到的（同一套圖，ZIP 給高畫質版）
 ├── release.json          機器用：album/artist/track 順序/genre/explicit/songwriter/AI credits/ISRC 欄/授權 provenance/母帶參數
 ├── tracklist.csv         買家視角：No/Title/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size
 ├── LISTING.md            上架欄位對照：DistroKid／Gumroad 要填的值（複製貼上）＋長版文案/tags
@@ -91,6 +94,23 @@ output/releases/coastal01/
 - **母帶來源自動分級**：若該曲有無損母帶（`output/masters/`），`release` 會**優先採用**，並在
   `release.json` 記 `master_source`、逐首記 `lossless` 與 `master.source`。所以同一張專輯可以「部分無損、部分有損」，
   而且看得出來哪些是哪些。
+
+### 3.1.1 同一張專輯拆成多卷時：用 `Vol. 1 / 2 / 3`
+
+一張 run 有 30+ 首時，常拆成多卷分別上架（商店與 DSP 各自一個發行）。命名用**業界慣例的 `Vol. N`**：
+
+| 平台 | 顯示的專輯名 | 誰決定 |
+|---|---|---|
+| Gumroad | `Kitchen at Dawn, Vol. 1` | `release.json` 的 `album`（`--album`）|
+| DistroKid／DSP | 同上 | 表單是人工填的，平台以表單為準 |
+| 本機上架包目錄 | `output/releases/<run>_N/` | **內部識別**，不必跟顯示名一致（`release gumroad --run` 用它找檔）|
+
+**不要用 `_1/_2/_3` 當顯示名**——`Vol. N` 買家與平台都一看就懂是同一系列，`_1` 讀起來像檔名。
+
+**曲名要在整張專輯內唯一**（跨卷也不能重複）：`unique_titles` 會把重複的 mood 名加上可讀修飾語
+（`Slow Weekend, Second Cup`），池子用完才退回 `(pt. N)`。但 **`release package` 一次只看得到一卷**，
+所以跨卷的唯一性要由呼叫端負責：打包每一卷前，先把整張專輯算好的唯一曲名寫進
+`output/releases/<run>/release.json` 當 prior，工具才會沿用（見 `scratch/_tmp_cozy_prod.sh`）。
 
 ### 3.3 兩層存放：為什麼無損母帶不能放內接
 

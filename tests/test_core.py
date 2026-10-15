@@ -1075,6 +1075,113 @@ class TestRelease(unittest.TestCase):
     def test_unique_titles_is_case_insensitive(self):
         self.assertEqual(release.unique_titles(["Rain", "rain"]), ["Rain", "rain (pt. 2)"])
 
+    def test_thumbnail_1280x720(self):
+        """YouTube 縮圖：1280×720、≤2MB。需要 qlmanage（macOS）＋ffmpeg，沒有就跳過。"""
+        import shutil as _sh
+        if not (_sh.which("qlmanage") and _sh.which("ffmpeg")):
+            self.skipTest("需要 qlmanage 與 ffmpeg")
+        with tempfile.TemporaryDirectory() as td:
+            art = Path(td) / "art.png"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                            "-i", "color=c=gray:s=1920x1080", "-frames:v", "1", str(art)],
+                           check=True)
+            dst = Path(td) / "t.jpg"
+            out = meta.make_thumbnail(["COZY", "MORNING", "LOFI"], art, dst)
+            if out is None:
+                self.skipTest("qlmanage 在此環境無法渲染（例如沒有 GUI session）")
+            self.assertEqual(release.probe_wh(dst), (1280, 720))
+            self.assertLess(dst.stat().st_size, 2 * 1024 * 1024)      # YouTube 上限 2MB
+
+    def test_gumroad_image_sizes(self):
+        """Gumroad 要「橫式封面 ≥1280×720」與「方形縮圖 ≥600×600」，且 DPI 72。"""
+        import shutil as _sh
+        if not _sh.which("ffmpeg"):
+            self.skipTest("沒有 ffmpeg")
+        with tempfile.TemporaryDirectory() as td:
+            sq, wide = Path(td) / "sq.jpg", Path(td) / "wide.jpg"
+            for out, color, size in ((sq, "black", "3000x3000"), (wide, "blue", "1920x1080")):
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                                "-i", f"color=c={color}:s={size}", "-frames:v", "1", str(out)],
+                               check=True)
+            gc, gt = Path(td) / "gc.jpg", Path(td) / "gt.jpg"
+            release.make_gumroad_cover(sq, gc, wide_src=wide)
+            release.make_gumroad_thumb(sq, gt)
+            self.assertEqual(release.probe_wh(gc), (1920, 1080))   # 橫式
+            self.assertEqual(release.probe_wh(gt), (1080, 1080))   # 方形 ≥600
+            # 沒有橫式原圖時（方圖＋模糊背景）也要生得出來、尺寸一樣
+            gc2 = Path(td) / "gc2.jpg"
+            release.make_gumroad_cover(sq, gc2)
+            self.assertEqual(release.probe_wh(gc2), (1920, 1080))
+
+    def test_artwork_for_zip_is_hires_16x9(self):
+        """交付 ZIP 的高畫質橫式圖：跟商店封面同一套圖，但解析度更高（4K）。
+
+        買家拿到的要跟商店頁看到的一致——商店顯示 1080p，ZIP 給 4K。
+        """
+        import shutil as _sh
+        if not _sh.which("ffmpeg"):
+            self.skipTest("沒有 ffmpeg")
+        self.assertEqual(release.ARTWORK_SIZE, (3840, 2160))
+        with tempfile.TemporaryDirectory() as td:
+            sq, wide = Path(td) / "sq.jpg", Path(td) / "wide.jpg"
+            for out, color, size in ((sq, "black", "3000x3000"), (wide, "blue", "3840x2160")):
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                                "-i", f"color=c={color}:s={size}", "-frames:v", "1", str(out)],
+                               check=True)
+            art = Path(td) / "artwork_3840x2160.jpg"
+            release.make_gumroad_cover(sq, art, size=release.ARTWORK_SIZE, wide_src=wide)
+            self.assertEqual(release.probe_wh(art), (3840, 2160))
+            store = Path(td) / "store.jpg"
+            release.make_gumroad_cover(sq, store, wide_src=wide)      # 商店封面
+            self.assertEqual(release.probe_wh(store), (1920, 1080))
+            # 交付圖要比商店圖大（高畫質才有意義）
+            aw, ah = release.probe_wh(art)
+            sw, sh = release.probe_wh(store)
+            self.assertGreater(aw * ah, sw * sh)
+
+    def test_pick_wide_cover_prefers_highest_resolution(self):
+        """挑橫式來源時取「解析度最高」的那張，不是最新的——不然 4K 衍生圖不會被用到。"""
+        import shutil as _sh
+        if not _sh.which("ffmpeg"):
+            self.skipTest("沒有 ffmpeg")
+        with tempfile.TemporaryDirectory() as td:
+            vis = Path(td) / "visuals"
+            run = vis / "ep01"
+            run.mkdir(parents=True)
+            for name, size in (("ep01_01.png", "1920x1080"), ("ep01_02_fix-4k.png", "3840x2160"),
+                               ("ep01_03_portrait.png", "1080x1920")):
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                                "-i", f"color=c=green:s={size}", "-frames:v", "1",
+                                str(run / name)], check=True)
+            # 讓 1080p 那張變成最新的：若照「取最新」就會挑錯
+            os.utime(run / "ep01_01.png", None)
+            old = release.VISUALS_DIR
+            release.VISUALS_DIR = vis
+            try:
+                self.assertEqual(release.pick_wide_cover("ep01").name, "ep01_02_fix-4k.png")
+                self.assertIsNone(release.pick_wide_cover("nope"))
+            finally:
+                release.VISUALS_DIR = old
+            # 只有直式圖時：不算橫式，回 None（不可硬裁直式圖當封面）
+            (run / "ep01_02_fix-4k.png").unlink()
+            (run / "ep01_01.png").unlink()
+            release.VISUALS_DIR = vis
+            try:
+                self.assertIsNone(release.pick_wide_cover("ep01"))
+            finally:
+                release.VISUALS_DIR = old
+
+    def test_unique_titles_uses_named_variants_when_known(self):
+        """同 mood 的變體要有可讀的名字，不是 (pt. N)（Gumroad／DistroKid 的曲目表要好看）。"""
+        out = release.unique_titles(["Slow Weekend"] * 3)
+        self.assertEqual(out, ["Slow Weekend", "Slow Weekend, Second Cup",
+                               "Slow Weekend, Open Window"])
+        self.assertEqual(len(set(out)), 3)
+        # 池子用完（10 個修飾語之後）仍不得同名
+        many = release.unique_titles(["Slow Weekend"] * 14)
+        self.assertEqual(len(set(many)), 14)
+        self.assertIn("Slow Weekend (pt. 12)", many)
+
     def test_track_title_prefers_mood(self):
         self.assertEqual(release.track_title("x.mp3", {"mood": "rain on the window"}),
                          "Rain on the Window")
@@ -1633,8 +1740,8 @@ class TestGumroad(unittest.TestCase):
         self.assertIn("<h3>Notes</h3>", html)
         self.assertIn("<ol>", html)                       # 曲目用有序清單（會自動編號）
         self.assertIn("<ul>", html)
-        self.assertIn("<li>01  A &amp; B</li>", html)      # 一定要 escape（含曲目編號）
-        self.assertIn("<li>02  &lt;C&gt;</li>", html)
+        self.assertIn("<li>A &amp; B</li>", html)          # <ol> 自動編號 → 不再重複帶 "01  "
+        self.assertIn("<li>&lt;C&gt;</li>", html)          # escape 仍要做
         self.assertNotIn("<C>", html)
         # 純文字版：段落間空行、清單用 "- "
         self.assertIn("WHAT YOU GET\n- 2 tracks", listing["long"])
@@ -1689,6 +1796,23 @@ class TestZImageWorkflow(unittest.TestCase):
     def test_upscale_explicit_size(self):
         g = self._g(upscale_model="UP.pth", up_out=(3000, 3000))
         self.assertEqual((g["18"]["inputs"]["width"], g["18"]["inputs"]["height"]), (3000, 3000))
+
+    def test_upscale_only_graph_drops_sampling(self):
+        """`--from-image` 只放大、不生成：圖上不該有任何取樣節點（否則會白跑一次生成）。"""
+        g = zimage.build_upscale_only("cover.png", "UP.pth", (3840, 2160), "pre")
+        self.assertEqual(g["1"]["class_type"], "LoadImage")
+        self.assertEqual(g["1"]["inputs"]["image"], "cover.png")
+        self.assertEqual(g["16"]["inputs"]["model_name"], "UP.pth")
+        self.assertEqual(g["17"]["inputs"]["image"], ["1", 0])      # 直接吃原圖，不是 VAEDecode
+        self.assertEqual((g["18"]["inputs"]["width"], g["18"]["inputs"]["height"]), (3840, 2160))
+        self.assertEqual(g["10"]["inputs"]["images"], ["18", 0])
+        for node in ("8", "4", "5", "9", "19"):                     # 沒有 KSampler／模型／LoRA
+            self.assertNotIn(node, g)
+
+    def test_upscale_only_graph_without_target_size_keeps_x4(self):
+        g = zimage.build_upscale_only("cover.png", "UP.pth", None, "pre")
+        self.assertNotIn("18", g)
+        self.assertEqual(g["10"]["inputs"]["images"], ["17", 0])    # 直接存 ×4 的結果
 
     def test_inpaint_branch_replaces_latent(self):
         g = self._g(init_image="base.png", mask_image="m.png", denoise=0.85)
