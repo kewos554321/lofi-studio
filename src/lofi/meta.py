@@ -27,6 +27,7 @@ make_meta.py — 為成片產生 YouTube 上片資訊（title / description / ch
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -140,6 +141,47 @@ def synthesize_config(style):
 
 # ----------------------- 章節 / 曲目 -----------------------
 
+# 專輯內同名時的修飾語池（key 用小寫比對；曲名來自 sidecar 的 mood 經 prettify）。
+# 池子用完才退回 ` (pt. N)`，所以任何風格都不會撞名，只是名字會比較制式。
+_TITLE_VARIANTS = {
+    "slow weekend": ["Second Cup", "Open Window", "Warm Rug", "Late Sun", "Soft Rain",
+                     "No Plans", "Kettle On", "Sunlit Floor", "Nothing to Do"],
+    "cozy morning coffee": ["First Sip", "Warm Mug", "Window Seat", "Slow Stir",
+                            "Second Cup", "Steam Rising", "Wooden Table", "Quiet Kitchen",
+                            "Morning Light"],
+    "gentle start of the day": ["First Light", "Soft Steps", "Curtains Open", "Slow Wake",
+                                "Warm Room", "Quiet Morning", "Bare Feet"],
+    "sunlit window": ["Dust Motes", "Curtain Breeze", "Warm Glass", "Afternoon",
+                      "Plant on the Sill"],
+    "spring morning breeze": ["Open Door", "Early Light"],
+}
+
+
+def unique_titles(titles):
+    """專輯內曲名去重：同名者依出現順序加一個**不重複的修飾語**
+    （例 `Slow Weekend, Second Cup`），池子用完才退回 ` (pt. N)`。
+
+    為什麼：sidecar 的 `mood` 會重複（同風格多首共用同一句），同名會讓 DSP／版稅申報混淆；
+    而 `(pt. 2)` 這種純編號在同一張專輯裡看起來像灌水。
+    用「出現順序」配發（不隨機），確保重跑結果一致、可重現。
+    """
+    seen = {}
+    out = []
+    for t in titles:
+        key = str(t or "").strip().lower()
+        n = seen.get(key, 0) + 1
+        seen[key] = n
+        if n == 1:
+            out.append(t)                      # 第一次出現：保留原名
+            continue
+        pool = _TITLE_VARIANTS.get(key) or []
+        if n - 2 < len(pool):
+            out.append(f"{t}, {pool[n - 2]}")  # 第二次起：加不重複的修飾語
+        else:
+            out.append(f"{t} (pt. {n})")       # 池子用完：退回原本的編號寫法
+    return out
+
+
 def track_title(audio):
     sc = cat.load_sidecar(audio)
     if sc and sc.get("mood"):
@@ -191,6 +233,9 @@ def compute_timeline(tracks, xfade):
         tl.append({"file": str(f), "start": cursor, "duration": d,
                    "title": track_title(f), "meta": track_sidecar_meta(f)})
         prev_d = d
+    # 同一個 mood 會有多首 → 曲名去重（否則 YT 說明的 Tracklist 與章節會出現同名）
+    for row, t in zip(tl, unique_titles([r["title"] for r in tl])):
+        row["title"] = t
     return tl
 
 
@@ -217,6 +262,116 @@ def build_credits_block(credits):
         out.append(f"- {model} ({c.get('license')})")
     out += ["", "The full model and licence list ships with every album release."]
     return out
+
+
+def _page_bounds(shot, white=250):
+    """量 qlmanage 輸出裡「頁面」的實際邊界（畫布是方形、四周可能是白邊）。
+
+    回傳 (x, y, w, h)；量不到回 None。純標準庫：先請 ffmpeg 轉灰階 raw 再掃描。
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        raw = Path(td) / "g.raw"
+        rc = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                             "-i", str(shot), "-f", "rawvideo", "-pix_fmt", "gray", str(raw)],
+                            capture_output=True).returncode
+        if rc != 0 or not raw.exists():
+            return None
+        data = raw.read_bytes()
+    side = int(len(data) ** 0.5)
+    if side * side != len(data):                     # 非方形就別猜
+        return None
+    row = [sum(data[y * side:(y + 1) * side]) / side for y in range(side)]
+    nw = [y for y, v in enumerate(row) if v < white]
+    if not nw:
+        return None
+    y0, y1 = nw[0], nw[-1]
+    col = [sum(data[y * side + x] for y in range(y0, y1 + 1, 8)) / max(1, len(range(y0, y1 + 1, 8)))
+           for x in range(side)]
+    cw = [x for x, v in enumerate(col) if v < white]
+    if not cw:
+        return None
+    x0, x1 = cw[0], cw[-1]
+    return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+
+
+def _sips_dpi(path, dpi=72):
+    """把 JPEG 標成 72 DPI（Gumroad／YouTube 的慣例值）。用 macOS 內建 sips，沒有就跳過。"""
+    try:
+        return subprocess.run(["sips", "-s", "dpiWidth", str(dpi), "-s", "dpiHeight", str(dpi),
+                               str(path)], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def make_thumbnail(text_lines, art, dst, size=(1280, 720)):
+    """產一張 YouTube 縮圖：封面圖 + 底部暗階 + 標題文字（粗體、左下）。
+
+    text_lines：list[str]（例 `["COZY", "MORNING", "LOFI"]`）
+    art：封面圖路徑（建議 16:9）
+    回傳 dst 或 None（沒有 qlmanage／渲染失敗）。
+    """
+    import shutil, tempfile
+    if not art or not Path(art).exists() or not shutil.which("qlmanage"):
+        return None
+    lines = [str(x).strip() for x in (text_lines or []) if str(x).strip()]
+    if not lines:
+        return None
+    w, h = size
+    font = 74 if len(lines) <= 3 else 60
+    spans = "".join(f"<span>{_html_escape(x)}</span>" for x in lines)
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{{margin:0;padding:0;width:{w}px;height:{h}px;overflow:hidden}}
+  .b{{position:relative;width:{w}px;height:{h}px;
+     background:url('file://{Path(art).resolve()}') center/cover no-repeat}}
+  .s{{position:absolute;inset:0;
+     background:linear-gradient(to top, rgba(0,0,0,.74) 0%, rgba(0,0,0,0) 58%)}}
+  .t{{position:absolute;left:{int(w*0.044)}px;bottom:{int(h*0.061)}px;color:#fff;
+     font-family:"Arial Black",Arial,Helvetica,sans-serif;font-weight:900;
+     line-height:.94;font-size:{font}px;letter-spacing:1px;
+     text-shadow:0 3px 14px rgba(0,0,0,.6)}}
+  .t span{{display:block}}
+</style></head><body><div class="b"><div class="s"></div>
+  <div class="t">{spans}</div></div></body></html>"""
+    with tempfile.TemporaryDirectory() as td:
+        page = Path(td) / "thumb.html"
+        page.write_text(html, encoding="utf-8")
+        rc = subprocess.run(["qlmanage", "-t", "-s", str(w), "-o", td, str(page)],
+                            capture_output=True).returncode
+        shot = Path(td) / "thumb.html.png"
+        if rc != 0 or not shot.exists():
+            return None
+        # qlmanage 的畫布是方形、頁面在頂端，而且**會縮放**（實測 720 CSS px → 900 px，
+        # 因為它的版面寬是 1024）。所以不寫死裁切框：先量出頁面在畫布上的實際邊界再裁＋縮放。
+        box = _page_bounds(shot)
+        if box is None:
+            return None
+        bx, by, bw, bh = box
+        rc2 = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                              "-i", str(shot), "-vf",
+                              f"crop={bw}:{bh}:{bx}:{by},scale={w}:{h}:flags=lanczos",
+                              "-q:v", "2", str(dst)], capture_output=True).returncode
+        if rc2 != 0:
+            return None
+    _sips_dpi(dst)
+    return dst
+
+
+def _html_escape(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def build_thumbnail_text(rec):
+    """縮圖文字：優先用上片資訊裡的 thumbnail_text，沒有就從標題推。"""
+    t = rec.get("thumbnail_text")
+    if isinstance(t, (list, tuple)) and t:
+        return [str(x) for x in t]
+    if isinstance(t, str) and t.strip():
+        return [x.strip() for x in re.split(r"[|/]", t) if x.strip()]
+    title = str(rec.get("title") or "")
+    head = re.split(r"[|/]", title)[0].strip()
+    return [w for w in head.upper().split() if w][:3]
 
 
 def build_description(cfg, duration, chapters, credits=None):

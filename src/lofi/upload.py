@@ -22,6 +22,7 @@ metadata（標題/描述/tags/category）取自 publish/<名稱>.json（由 make
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,7 +30,12 @@ from lofi import catalog as cat
 from lofi import io
 from lofi.paths import PUBLISH_DIR, ROOT, SECRETS_DIR
 
+# 預設只要上傳權限（自動上傳用；非互動，不能跳出瀏覽器要授權）。
+# 想用 API 讀取／更新／刪除既有影片（修說明、換縮圖）再設 LOFI_YT_SCOPE_EXTRA=1
+# 重新授權一次（會多要 youtube.force-ssl）。
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+if os.environ.get("LOFI_YT_SCOPE_EXTRA") == "1":
+    SCOPES.append("https://www.googleapis.com/auth/youtube.force-ssl")
 DEFAULT_CLIENT_SECRET = SECRETS_DIR / "client_secret.json"
 DEFAULT_TOKEN = SECRETS_DIR / "yt_token.json"
 MAX_TITLE = 100
@@ -110,6 +116,13 @@ def get_credentials(client_secret, token_path):
     creds = None
     if Path(token_path).exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    # 快取的 token 可能只有舊權限（例如先前只有 youtube.upload）：權限不足時要重新授權，
+    # 否則 creds.valid 仍為 True，會一直用到權限不足為止（API 回 403 insufficient scope）。
+    granted = set(getattr(creds, "scopes", None) or []) if creds else set()
+    if creds and creds.valid and not set(SCOPES).issubset(granted):
+        print(f"  既有 token 權限不足（{sorted(granted) or '未知'}）→ 重新授權以取得：",
+              ", ".join(sorted(set(SCOPES) - granted)), flush=True)
+        creds = None
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
