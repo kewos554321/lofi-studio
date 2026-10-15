@@ -461,13 +461,17 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 
 | 段 | 指令本體 | 產物 |
 |---|---|---|
-| `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
+| `music` | `expand_style` → `batch_run` → `auto_qc` → `library`（預設 **`--format flac`**：無損母帶寫外接 `output/masters/`，內接只留工作用 mp3） | `assets/tracks/<style>/<run>/` |
 | `image` | `lofi zimage`（**Z-Image Turbo ＋ 主角 LoRA＝Moni**；`--image-engine sdxl` 退回舊 SDXL）＋ **AI 放大一張 4K 交付圖** | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
 | `upload` | `yt_upload`（YouTube Data API，預設 private）＋**自動設縮圖** | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
 - 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
+- **音樂段預設 `--format flac`（無損母帶）**：`release package` 會自動採用它，買家拿到的是真無損。
+  代價是**母帶寫外接 `output/masters/`（約 1GB/集）→ 外接碟不在線時音樂段會 fail-closed**；
+  臨時要跑可插上碟，或 `--format mp3`（交付母帶就變有損，`release.json` 會記 `lossless: false`）。
+  影片音訊則固定編成 **AAC 320k / 48kHz**（混音來源仍是工作用 mp3——改成吃母帶要連 sidecar 解析一起動，暫且不做）。
 - **`image` 段會多做一張 4K 交付圖**（`<run>_NN_fix-4k.png`，AI 放大，約 15 秒）：商店頁顯示 1080p、
   買家拿 4K，`release package` 會自動挑它（`pick_wide_cover` 取解析度最高者）。尺寸用 `--artwork-out`，
   不要就 `--no-artwork`。挑「影片要用的圖」時會**排除** `_fix-/anim-/cmp-/mask-` 衍生檔——否則 4K 圖

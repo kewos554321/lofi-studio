@@ -268,8 +268,8 @@ def main():
             "license": model_license(args.upscale)["license"],
             "source": model_license(args.upscale)["source"],
         }
-        print_run_header(f"AI 放大（{args.upscale}）", run_id, out_dir,
-                         {**cfg, "unet": args.upscale}, count=1)
+        hdr = {**cfg, "unet": args.upscale}   # 給標頭用：model_tag 會抓 unet 當「跑的是哪顆模型」
+        print_run_header(f"AI 放大（{args.upscale}）", run_id, out_dir, hdr, count=1)
         if args.dry_run:
             return
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -279,7 +279,7 @@ def main():
         shutil.copy2(src_img, in_dir / src_img.name)
         seq = next_seq(out_dir, run_id)
         with gpu_lock("z-image-upscale"):
-            print(f"[1/1] {model_tag(cfg)} {up_out[0]}x{up_out[1]} ← {src_img.name}")
+            print(f"[1/1] {model_tag(hdr)} {up_out[0]}x{up_out[1]} ← {src_img.name}")
             try:
                 pid = comfy.submit(args.url, build_upscale_only(
                     src_img.name, args.upscale, up_out, args.prefix),

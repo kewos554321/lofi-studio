@@ -24,6 +24,8 @@
 #   --episode NAME                 影片輸出包名（預設 <style>-<MMDD-HHMM>）
 #   --minutes N                    影片長度（分，預設 30）
 #   --count N                      音樂階段生成曲數（預設 0 = 不生成、只用既有）
+#   --format mp3|flac              音檔格式（預設 flac＝**無損母帶**存外接 output/masters，內接只留工作用 mp3）
+#                                  mp3 省空間，但交付給買家的母帶就是有損（release 會誠實記 lossless: false）
 #   --run-id ID                    批次碼（音樂＋圖片；預設 = episode）；圖片輸出到 assets/visuals/<ID>/
 #   --limit N                      影片用幾首（預設 16；從 library keeper 挑）
 #   --tracks A B C ...             影片指定曲目（給了就跳過 library 挑選）
@@ -82,6 +84,7 @@ IMG_PROMPT="${LOFI_IMAGE_PROMPT:-}"                          # 空＝用內建�
 LORA="${LOFI_ZIMAGE_LORA-mnxy_probe.safetensors}"            # 主角 LoRA（空字串＝不掛）
 LORA_WEIGHT="${LOFI_ZIMAGE_LORA_WEIGHT:-1.0}"
 SEED=""
+FORMAT="${LOFI_AUDIO_FORMAT:-flac}"              # 音檔格式：flac＝另存無損母帶（外接）＋工作用 mp3
 CHUNK=20
 SLEEP=30
 XFADE=8
@@ -129,6 +132,7 @@ while [ $# -gt 0 ]; do
     --lora-weight) LORA_WEIGHT="$2"; shift 2;;
     --ckpt)    CKPT="$2"; shift 2;;
     --seed)    SEED="$2"; shift 2;;
+    --format)  FORMAT="$2"; shift 2;;
     --chunk)   CHUNK="$2"; shift 2;;
     --sleep)   SLEEP="$2"; shift 2;;
     --xfade)   XFADE="$2"; shift 2;;
@@ -152,6 +156,7 @@ done
 
 [ -n "$STYLE" ] || { echo "錯誤: 需要 --style（見 prompts/styles/）" >&2; exit 1; }
 case "$ENGINE" in sdxl|zimage) ;; *) echo "錯誤: --image-engine 只能是 sdxl 或 zimage（給的是 ${ENGINE}）" >&2; exit 1;; esac
+case "$FORMAT" in mp3|flac) ;; *) echo "錯誤: --format 只能是 mp3 或 flac（給的是 ${FORMAT}）" >&2; exit 1;; esac
 if [ -z "$EPISODE" ]; then
   if [ "$SMOKE" = 1 ]; then EPISODE="${STYLE}-smoke"; else EPISODE="${STYLE}-$(date +%m%d-%H%M)"; fi
 fi
@@ -193,7 +198,9 @@ stage_music() {
   local sargs=()
   if [ -n "$SEED" ]; then sargs=(--seed "$SEED"); fi
   run ./scripts/lofi expand --style "$STYLE" --count "$COUNT" "${sargs[@]+"${sargs[@]}"}" --out "$csv"
-  run ./scripts/batch_run.sh --csv "$csv" --chunk "$CHUNK" --sleep "$SLEEP" --run-id "$RUN_ID" --clean-raw
+  echo "  音檔格式: ${FORMAT}（flac＝另存無損母帶到外接 output/masters；內接只留工作用 mp3）"
+  run ./scripts/batch_run.sh --csv "$csv" --chunk "$CHUNK" --sleep "$SLEEP" --run-id "$RUN_ID" \
+      --format "$FORMAT" --clean-raw
   run ./scripts/lofi qc --all --index
   run ./scripts/lofi library build
   echo "  → 音樂階段完成（run-id=${RUN_ID}）"

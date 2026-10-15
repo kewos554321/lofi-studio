@@ -245,12 +245,12 @@ if [ "$FADE" = 1 ]; then
     -map 0:v:0 -map 1:a:0 \
     -threads "$THREADS" -vf "fade=t=in:st=0:d=2,fade=t=out:st=$((TOTAL-2)):d=2" \
     -c:v h264_videotoolbox -b:v "${VBR}M" -pix_fmt yuv420p \
-    -c:a aac -b:a 192k -ar 44100 -t "$TOTAL" -movflags +faststart "$OUT"
+    -c:a aac -b:a 320k -ar 48000 -t "$TOTAL" -movflags +faststart "$OUT"
 else
   "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y \
     -i "$VID_COPY" -i "$MIX_FINAL" \
     -map 0:v:0 -map 1:a:0 \
-    -c:v copy -c:a aac -b:a 192k -ar 44100 -t "$TOTAL" -movflags +faststart "$OUT"
+    -c:v copy -c:a aac -b:a 320k -ar 48000 -t "$TOTAL" -movflags +faststart "$OUT"
 fi
 
 # ---------- 清中間檔（預設）----------

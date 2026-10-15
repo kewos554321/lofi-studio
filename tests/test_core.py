@@ -1906,6 +1906,34 @@ class TestMakeEpisodeImageEngine(unittest.TestCase):
         self.assertIn("--image-engine", out.stderr + out.stdout)
 
 
+class TestMakeEpisodeMusicFormat(unittest.TestCase):
+    """音樂段預設存無損母帶（--format flac → 外接 output/masters → release 交付真無損）。"""
+
+    SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "make_episode.sh"
+
+    def _dry(self, *args):
+        return subprocess.run(["bash", str(self.SCRIPT), "--style", "cozy_morning",
+                               "--stage", "music", "--episode", "t01", "--count", "1",
+                               "--dry-run", *args], capture_output=True, text=True, timeout=180)
+
+    def test_default_format_is_flac(self):
+        out = self._dry()
+        self.assertEqual(out.returncode, 0, (out.stderr or out.stdout)[-500:])
+        self.assertIn("batch_run.sh", out.stdout)
+        self.assertIn("--format flac", out.stdout)
+
+    def test_mp3_can_be_opted_out(self):
+        out = self._dry("--format", "mp3")
+        self.assertEqual(out.returncode, 0, (out.stderr or out.stdout)[-500:])
+        self.assertIn("--format mp3", out.stdout)
+        self.assertNotIn("--format flac", out.stdout)
+
+    def test_unknown_format_is_rejected(self):
+        out = self._dry("--format", "wav")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("--format", out.stderr + out.stdout)
+
+
 class TestThumbnail(unittest.TestCase):
     """YouTube 縮圖：底圖挑選、文字來源、上傳時的檔案解析（純函式／不需 YouTube）。"""
 

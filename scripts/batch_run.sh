@@ -8,6 +8,7 @@
 #   ./scripts/batch_run.sh --csv prompts/generated/dusk_jazz.csv
 #   ./scripts/batch_run.sh --csv ... --chunk 50 --sleep 60 --run-id dusk01 --clean-raw
 #   ./scripts/batch_run.sh --csv ... --total 1000 --rest 300      # 每批之間多休息 5 分鐘
+#   ./scripts/batch_run.sh --csv ... --format flac                 # 另存無損母帶到外接 output/masters
 #   ./scripts/batch_run.sh --csv ... --gen-args "--duration 150 --steps 10"
 #
 # 前置：ComfyUI 需執行中（scripts/launch_comfyui.sh）。
@@ -24,6 +25,7 @@ REST=0
 TOTAL=0
 RUN_ID=""
 CLEAN=0
+FORMAT=""
 GEN_ARGS=""
 DRY=0
 
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --rest)     REST="$2"; shift 2;;
     --total)    TOTAL="$2"; shift 2;;
     --run-id)   RUN_ID="$2"; shift 2;;
+    --format)   FORMAT="$2"; shift 2;;
     --clean-raw) CLEAN=1; shift;;
     --gen-args) GEN_ARGS="$2"; shift 2;;
     --dry-run)  DRY=1; shift;;
@@ -60,6 +63,9 @@ CLEAN_FLAG=""
 [ "$CLEAN" = 1 ] && CLEAN_FLAG="--clean-raw"
 DRY_FLAG=""
 [ "$DRY" = 1 ] && DRY_FLAG="--dry-run"
+# --format 直接轉給 lofi generate（mp3＝省空間的工作檔；flac＝另存無損母帶到外接 output/masters）
+FORMAT_FLAG=""
+[ -n "$FORMAT" ] && FORMAT_FLAG="--format $FORMAT"
 
 echo "=================================================="
 echo " 量產 runner"
@@ -96,7 +102,7 @@ while [ "$off" -lt "$TOTAL" ]; do
   echo "==> 第 ${batch} 批：offset=${off} limit=${lim}（進度 ${off}/${TOTAL}）"
   # shellcheck disable=SC2086
   ./scripts/lofi generate --csv "$CSV" --offset "$off" --limit "$lim" \
-      --run-id "$RUN_ID" --sleep "$SLEEP" $CLEAN_FLAG $DRY_FLAG $GEN_ARGS 2>&1 | tee -a "$LOG"
+      --run-id "$RUN_ID" --sleep "$SLEEP" $CLEAN_FLAG $DRY_FLAG $FORMAT_FLAG $GEN_ARGS 2>&1 | tee -a "$LOG"
   off=$((off + lim))
   echo "   進度：${off}/${TOTAL}" | tee -a "$LOG"
   if [ "$REST" -gt 0 ] && [ "$off" -lt "$TOTAL" ]; then

@@ -118,7 +118,7 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 
 | 段 | 產物 | 底層工具 |
 |---|---|---|
-| 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar | `expand_style` → `batch_run` → `auto_qc` → `library` |
+| 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar（＋無損母帶 `output/masters/`，預設 `--format flac`） | `expand_style` → `batch_run` → `auto_qc` → `library` |
 | 2 圖片 | `assets/visuals/<kind><NN>/*.png` + manifest（＋一張 4K 交付圖 `_fix-4k`） | `lofi zimage`（Z-Image Turbo ＋ 主角 LoRA；`--image-engine sdxl` 退回舊流程） |
 | 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成 + 縮圖 + 上片資訊） |
 | 4 上傳 | YouTube 影片（預設 private，含縮圖） | `yt_upload`（YouTube Data API；公開/排程之後手動） |
@@ -128,7 +128,9 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 # 一條龍（五段全跑）：1 小時一集
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40
 #   第 2 段生圖預設就是 Z-Image Turbo ＋ 主角 LoRA（Moni）：1472x832（16:9）→ 放大 1920x1080
+#   第 1 段音樂預設就存無損母帶（外接 output/masters，約 1GB/集）→ 串流發行是真無損
 #   退回舊 SDXL 流程 --image-engine sdxl；換場景 --image-prompt "mnxy, <場景>"
+#   只要 mp3（省空間、不需外接碟）--format mp3
 
 # 分段單獨跑（測試用）——每段產物就是下一段的輸入，可任意從中段接續
 ./scripts/make_episode.sh --style rainy_lofi --stage music --count 20   # 只生音樂

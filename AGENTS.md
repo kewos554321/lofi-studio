@@ -85,6 +85,8 @@ docs/RUNBOOK.md     # 操作手冊
 ./scripts/lofi visual --count 3 --clean-raw               # 生圖後刪 ComfyUI 原檔（省內接碟）
 ./scripts/lofi config                                  # 目前模型檔名／ComfyUI 位址
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40   # 五段產線一條龍
+                                                                      # 音樂段預設 --format flac（無損母帶放外接 output/masters；
+                                                                      # 外接離線會 fail-closed，臨時可 --format mp3）
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑單一段（music/image/video/upload/cleanup）
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
