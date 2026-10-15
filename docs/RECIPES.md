@@ -105,6 +105,7 @@
 
 > `--loop` 必須整除總長（1800/20=90、3600/20=180）。
 > 想省電：`--no-video-fade`、`--vbitrate 5`、`THREADS=4 NICE=15`。
+> 影片音源預設優先用**無損母帶**（`--master-source auto`）；中間檔可 `--stage-local` 放內接做（見 `RUNBOOK.md` §5.1）。
 
 ---
 

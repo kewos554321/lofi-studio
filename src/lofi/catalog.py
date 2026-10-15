@@ -84,6 +84,30 @@ def masters_subdir(style, run_id):
     return subdir(MASTERS_DIR, style, run_id)
 
 
+LOSSLESS_EXTS = (".flac", ".wav", ".aiff", ".aif")   # 無損母帶可接受的容器
+
+
+def lossless_master(audio, sidecar=None, style=None, run_id=None):
+    """回傳這首的無損母帶路徑（output/masters/...）；沒有回 None。
+
+    優先序：sidecar 的 `master_file`（生成時寫入）→ 母帶夾內同名 stem 的無損檔。
+    給「串影片優先吃無損母帶」（`library query --lossless`）與 release 共用，
+    找不到時呼叫端自行退回工作檔（下游 fail-soft，不新增失敗模式）。
+    """
+    sc = sidecar if sidecar is not None else (load_sidecar(audio) or {})
+    mf = sc.get("master_file")
+    if mf:
+        p = ROOT / mf
+        if p.exists():
+            return p
+    d = masters_subdir(sc.get("style") or style, sc.get("run_id") or run_id)
+    for ext in LOSSLESS_EXTS:
+        p = d / f"{Path(audio).stem}{ext}"
+        if p.exists():
+            return p
+    return None
+
+
 def read_jsonl():
     if not JSONL_PATH.exists():
         return []

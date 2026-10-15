@@ -153,7 +153,12 @@ def cmd_query(args):
     con.close()
     if getattr(args, "paths", False):
         for r in rows:
-            print(r["file"])
+            f = r["file"]
+            if getattr(args, "lossless", False):
+                m = cat.lossless_master(cat.ROOT / f)      # 有無損母帶就用，沒有才回工作檔
+                if m:
+                    f = cat.relpath(m)
+            print(f)
         return
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -281,6 +286,8 @@ def main():
     q.add_argument("--order", default="score", choices=["score", "track"],
                    help="排序：score（預設，挑最好的）／track（track_id＝生成順序）")
     q.add_argument("--paths", action="store_true", help="只輸出檔案路徑（給 bash 用）")
+    q.add_argument("--lossless", action="store_true",
+                   help="--paths 時優先用無損母帶（output/masters），沒有才回工作檔（串影片音質用）")
 
     sub.add_parser("summary")
 

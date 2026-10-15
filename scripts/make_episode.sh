@@ -46,6 +46,8 @@
 #   --chunk N --sleep N            音樂批次大小 / 散熱秒數（預設 20 / 30）
 #   --duration-range MIN MAX       音樂每首長度隨機區間（秒；預設 120 150＝2:00~2:30）
 #   --no-duration-range            音樂固定長度（回 generate 預設 120 秒）
+#   --master-source auto|working   影片音源（預設 auto＝有無損母帶 output/masters 就用，音質更好）
+#   --stage-local                  影片中間檔在內接暫存，組好再搬進 output（少碰慢的外接碟）
 #   --xfade N --loop N --fps N --vbitrate N   傳給 make_long_lofi.sh
 #   --cg-args "..."                傳給 make_cinemagraph.py
 #   --privacy private|unlisted|public          上傳可見性（預設 private＝上線手動）
@@ -94,6 +96,8 @@ FORMAT="${LOFI_AUDIO_FORMAT:-flac}"              # 音檔格式：flac＝另存�
 CHUNK=20
 SLEEP=30
 DURATION_RANGE="${LOFI_DURATION_RANGE:-120 150}"   # 音樂每首長度區間（秒）；空＝固定用 generate 預設 120
+MASTER_SOURCE="${LOFI_MASTER_SOURCE:-auto}"        # 影片音源：auto（有無損母帶就用）／working（一律工作 mp3）
+STAGE_LOCAL="${LOFI_STAGE_LOCAL:-0}"               # 1＝影片中間檔在內接暫存，組好再搬進 output（見 make_long_lofi）
 XFADE=8
 LOOP=20
 FPS=30
@@ -144,6 +148,9 @@ while [ $# -gt 0 ]; do
     --sleep)   SLEEP="$2"; shift 2;;
     --duration-range)    DURATION_RANGE="$2 $3"; shift 3;;
     --no-duration-range) DURATION_RANGE=""; shift;;
+    --master-source)     MASTER_SOURCE="$2"; shift 2;;
+    --stage-local)       STAGE_LOCAL=1; shift;;
+    --no-stage-local)    STAGE_LOCAL=0; shift;;
     --xfade)   XFADE="$2"; shift 2;;
     --loop)    LOOP="$2"; shift 2;;
     --fps)     FPS="$2"; shift 2;;
@@ -435,18 +442,24 @@ stage_video() {
     # 就會撈到別的 run 分數更高的曲 —— 實測踩過：第 2 集影片 36 首裡 34 首來自第 1 集，
     # 影片變成上一集的音樂，而且曲目表和本集專輯對不上。
     local t
+    # 音源：--master-source auto（預設）＝有無損母帶就用（串影片音質更好），沒有退回工作 mp3
+    local llargs=()
+    case "$MASTER_SOURCE" in
+      working) : ;;                       # 一律用工作檔（assets/tracks 的 mp3）
+      *) llargs=(--lossless) ;;           # auto / lossless：優先 output/masters 的無損母帶
+    esac
     while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
       ./scripts/lofi library query --style "$STYLE" --run-id "$RUN_ID" --order track \
-        --status keep --limit "$LIMIT" --paths 2>/dev/null || true)
+        --status keep --limit "$LIMIT" --paths "${llargs[@]+"${llargs[@]}"}" 2>/dev/null || true)
     if [ "${#tracks[@]}" -eq 0 ]; then
       while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
         ./scripts/lofi library query --style "$STYLE" --run-id "$RUN_ID" --order track \
-          --limit "$LIMIT" --paths 2>/dev/null || true)
+          --limit "$LIMIT" --paths "${llargs[@]+"${llargs[@]}"}" 2>/dev/null || true)
     fi
     if [ "${#tracks[@]}" -eq 0 ]; then   # 這個 run 真的沒曲目才退回整個風格（而且要看得出來）
       echo "  ⚠️  run ${RUN_ID} 沒有可用曲目 → 退回整個風格挑（會混到別的 run 的曲）" >&2
       while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
-        ./scripts/lofi library query --style "$STYLE" --limit "$LIMIT" --paths 2>/dev/null || true)
+        ./scripts/lofi library query --style "$STYLE" --limit "$LIMIT" --paths "${llargs[@]+"${llargs[@]}"}" 2>/dev/null || true)
     fi
   fi
   if [ "$TRACKS_SET" = 1 ] || [ "$DRY" = 0 ]; then
@@ -465,9 +478,11 @@ stage_video() {
     echo "          --style ${STYLE} --tracks <曲目> --xfade ${XFADE} --loop ${LOOP} --fps ${FPS} --vbitrate ${VBR} ${CG_ARGS}"
     return 0
   fi
+  local slargs=()
+  [ "${STAGE_LOCAL:-0}" = 1 ] && slargs=(--stage-local)
   run ./scripts/make_long_lofi.sh --image "$img" --minutes "$MIN" --episode "$EPISODE" \
       --style "$STYLE" --tracks "${tracks[@]}" --xfade "$XFADE" --loop "$LOOP" \
-      --fps "$FPS" --vbitrate "$VBR" $CG_ARGS
+      --fps "$FPS" --vbitrate "$VBR" "${slargs[@]+"${slargs[@]}"}" $CG_ARGS
 }
 
 # ---------- 第 4 段：上傳 ----------

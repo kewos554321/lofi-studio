@@ -671,12 +671,13 @@ class TestCatalogLayer(unittest.TestCase):
         (self.root / "assets" / "tracks").mkdir(parents=True)
         (self.root / "catalog").mkdir()
         self._saved = {k: getattr(catalog, k) for k in
-                       ("ROOT", "TRACKS_DIR", "CATALOG_DIR", "JSONL_PATH", "INDEX_CSV")}
+                       ("ROOT", "TRACKS_DIR", "CATALOG_DIR", "JSONL_PATH", "INDEX_CSV", "MASTERS_DIR")}
         catalog.ROOT = self.root
         catalog.TRACKS_DIR = self.root / "assets" / "tracks"
         catalog.CATALOG_DIR = self.root / "catalog"
         catalog.JSONL_PATH = catalog.CATALOG_DIR / "tracks.jsonl"
         catalog.INDEX_CSV = catalog.CATALOG_DIR / "index.csv"
+        catalog.MASTERS_DIR = self.root / "output" / "masters"
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -731,6 +732,26 @@ class TestCatalogLayer(unittest.TestCase):
         review.review_file(audio, rating=4)
         review.review_file(audio, clear=True)
         self.assertNotIn("review", catalog.load_sidecar(audio))
+
+    def test_lossless_master_prefers_sidecar_then_folder(self):
+        audio = self._audio("nujabes/run1/song_01.mp3")
+        md = self.root / "output" / "masters" / "nujabes" / "run1"
+        md.mkdir(parents=True)
+        (md / "song_01.flac").write_bytes(b"fLaC")
+        catalog.upsert_track(audio, {"style": "nujabes", "run_id": "run1"})
+        self.assertEqual(catalog.lossless_master(audio), md / "song_01.flac")   # 母帶夾同名檔
+        other = self.root / "output" / "masters" / "elsewhere" / "x.flac"
+        other.parent.mkdir(parents=True)
+        other.write_bytes(b"fLaC")
+        sc = catalog.load_sidecar(audio)
+        sc["master_file"] = catalog.relpath(other)
+        catalog.save_sidecar(audio, sc)
+        self.assertEqual(catalog.lossless_master(audio), other)                 # sidecar 優先
+
+    def test_lossless_master_none_when_absent(self):
+        audio = self._audio("nujabes/run1/song_02.mp3")
+        catalog.upsert_track(audio, {"style": "nujabes", "run_id": "run1"})
+        self.assertIsNone(catalog.lossless_master(audio))     # 沒有母帶 → None（呼叫端退回工作檔）
 
     def test_review_event_is_compact(self):
         """事件流只記評分欄位，不夾帶整包 prompt（避免 tracks.jsonl 膨脹）。"""

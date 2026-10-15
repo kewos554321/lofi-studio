@@ -29,6 +29,7 @@
 #   --cg-args "..."      額外傳給 make_cinemagraph.py 的參數（例: --steam 1.2 ...）
 #   --no-video-fade      不做影像淡入淡出（可省一次重編碼，最省電）
 #   --keep-temp          保留中間檔（預設成功後自動刪除，省空間）
+#   --stage-local        中間檔在內接暫存（mktemp），成品組好再搬進 output（少碰慢/易掉線的外接碟）
 #   --vbitrate N         最終影片位元率 Mbps（預設 9；lofi 用 4~5 就很夠，檔案小一半）
 #   --out PATH           輸出檔，預設 output/videos/lofi_<minutes>min.mp4
 #   --episode NAME       一集一包：全部輸出放 output/episodes/<NAME>/（video.mp4 + mix.wav + visual_loop.mp4）
@@ -66,6 +67,7 @@ META=1
 THREADS="${THREADS:-0}"
 NICE="${NICE:-10}"
 MASTER="${LOFI_MIX_MASTER:-none}"       # 母帶鏈：none（舊行為）| warm（見 build_long_mix.sh）
+STAGE_LOCAL="${LOFI_STAGE_LOCAL:-0}"    # 1＝中間檔在內接暫存（mktemp），成品再搬進 output（少碰慢的外接碟）
 TRACKS=(
   assets/tracks/rainy_lofi/legacy/rainy_lofi_01_00001.mp3
   assets/tracks/jazzhop_lounge/legacy/jazzhop_lounge_01_00001.mp3
@@ -82,6 +84,8 @@ while [ $# -gt 0 ]; do
     --fps)     FPS="$2"; shift 2;;
     --xfade)   XF="$2"; shift 2;;
     --master)  MASTER="$2"; shift 2;;
+    --stage-local)    STAGE_LOCAL=1; shift;;
+    --no-stage-local) STAGE_LOCAL=0; shift;;
     --image)   IMAGE="$2"; shift 2;;
     --generate) GENERATE=1; shift;;
     --ckpt)    CKPT="$2"; shift 2;;
@@ -132,6 +136,23 @@ else
   LIST="output/_loop_list.txt"
 fi
 
+# ---------- --stage-local：中間檔在內接暫存，成品再搬進輸出（少碰慢/易掉線的外接碟）----------
+# 動機：output/ 是外接（USB/ExFAT ~86MB/s）；一集的中間檔＋成品峰值約 5–6GB，全程走慢碟很浪費。
+# 做在內接 NVMe、最後只搬成品，外接只被碰「讀來源＋寫成品」兩次。內接需要暫存空間（見下方 preflight）。
+OUT_FINAL="$OUT"
+if [ "$STAGE_LOCAL" = 1 ]; then
+  STAGE="$(mktemp -d "${TMPDIR:-/tmp}/lofi_stage.XXXXXX")"
+  if [ "$KEEP" = 0 ]; then trap 'rm -rf "$STAGE"' EXIT; fi
+  echo "==> 內接暫存（--stage-local）：$STAGE"
+  CINE_LOOP="$STAGE/visual_loop.mp4"
+  LOOP_1080="$STAGE/_loop_1080.mp4"
+  MIX_RAW="$STAGE/_mix_raw.wav"
+  MIX_FINAL="$STAGE/mix.wav"
+  VID_COPY="$STAGE/_video_copy.mp4"
+  LIST="$STAGE/_loop_list.txt"
+  OUT="$STAGE/video.mp4"
+fi
+
 # 用 nice 包裝（nice -n 0 也合法，故陣列永遠非空，避免 bash3.2 + set -u 的空陣列問題）
 NICEP=(nice -n "$NICE")
 
@@ -160,6 +181,25 @@ if [ "${SKIP_DISK_CHECK:-0}" != "1" ] && [ -n "${FREE_GB:-}" ]; then
     exit 1
   elif [ "$LOW" = 1 ]; then
     echo "⚠️  警告: 剩餘空間偏低（低於 需要+${MIN_FREE_GB}GB），過程可能不足。"
+  fi
+fi
+
+# --stage-local 時成品最後要寫回輸出目錄：先確認那裡存在且放得下最終片
+if [ "$STAGE_LOCAL" = 1 ]; then
+  FINALDIR="$(dirname "$OUT_FINAL")"
+  if ! mkdir -p "$FINALDIR" 2>/dev/null; then
+    echo "錯誤: 無法寫入輸出目錄 ${FINALDIR}（外接碟可能沒掛載/掉線）→ 先跑 ./scripts/disk_report.sh" >&2
+    exit 1
+  fi
+  if [ "${SKIP_DISK_CHECK:-0}" != "1" ]; then
+    NEED_FINAL_GB=$(awk -v v="$VBR" -v t="$TOTAL" 'BEGIN{printf "%.2f", v*t/8/1024 + 0.3}')
+    FREE_FINAL_GB=$(df -Pk "$FINALDIR" 2>/dev/null | awk 'NR==2{printf "%.1f", $4/1024/1024}')
+    echo "==> 輸出空間檢查: ${FINALDIR} 可用 ${FREE_FINAL_GB}GB / 成品約需 ${NEED_FINAL_GB}GB"
+    if [ -n "${FREE_FINAL_GB:-}" ] && \
+       [ "$(awk -v f="$FREE_FINAL_GB" -v n="$NEED_FINAL_GB" 'BEGIN{print (f<n)?"1":"0"}')" = 1 ]; then
+      echo "錯誤: 輸出目錄空間不足以放成品（需要約 ${NEED_FINAL_GB}GB）。" >&2
+      exit 1
+    fi
   fi
 fi
 
@@ -233,8 +273,14 @@ fi
 echo
 echo "==> [D] 複製 loop 成 ${MIN} 分鐘（concat + copy，秒級、不重編碼）"
 : > "$LIST"
+# 清單要絕對路徑：相對路徑接 $ROOT；已經是絕對的（--stage-local 的內接暫存）就直接用，
+# 否則會變成 $ROOT//var/... 而開不了檔。
+case "$LOOP_1080" in
+  /*) LOOP_ABS="$LOOP_1080" ;;
+  *)  LOOP_ABS="$ROOT/$LOOP_1080" ;;
+esac
 for _ in $(seq 1 $((TOTAL / LOOP))); do
-  printf "file '%s/%s'\n" "$ROOT" "$LOOP_1080" >> "$LIST"
+  printf "file '%s'\n" "$LOOP_ABS" >> "$LIST"
 done
 "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i "$LIST" \
   -threads "$THREADS" -c copy -t "$TOTAL" "$VID_COPY"
@@ -255,8 +301,20 @@ else
     -c:v copy -c:a aac -b:a 320k -ar 48000 -t "$TOTAL" -movflags +faststart "$OUT"
 fi
 
+# ---------- --stage-local：把成品從內接暫存搬到輸出目錄 ----------
+if [ "$STAGE_LOCAL" = 1 ]; then
+  mkdir -p "$(dirname "$OUT_FINAL")"
+  mv -f "$OUT" "$OUT_FINAL"
+  if [ -n "$EPISODE" ]; then
+    if [ -f "$CINE_LOOP" ]; then mv -f "$CINE_LOOP" "$(dirname "$OUT_FINAL")/visual_loop.mp4"; fi
+    if [ -f "$MIX_FINAL" ]; then mv -f "$MIX_FINAL" "$(dirname "$OUT_FINAL")/mix.wav"; fi
+  fi
+  OUT="$OUT_FINAL"
+  echo "   （成品已從內接暫存搬出 → $(dirname "${OUT}")）"
+fi
+
 # ---------- 清中間檔（預設）----------
-if [ "$KEEP" = 0 ]; then
+if [ "$KEEP" = 0 ] && [ "$STAGE_LOCAL" = 0 ]; then
   if [ -n "$EPISODE" ]; then
     rm -f "$LOOP_1080" "$VID_COPY" "$MIX_RAW" "$LIST"
     echo "   （保留 video.mp4 / mix.wav / visual_loop.mp4；其餘中間檔已清）"
@@ -264,6 +322,8 @@ if [ "$KEEP" = 0 ]; then
     rm -f "$VID_COPY" "$MIX_RAW" "$MIX_FINAL" "$CINE_LOOP" "$LOOP_1080" "$LIST"
     echo "   （已清除中間檔；加 --keep-temp 可保留）"
   fi
+elif [ "$STAGE_LOCAL" = 1 ] && [ "$KEEP" = 0 ]; then
+  echo "   （內接暫存已清除；成品在 $(dirname "${OUT}")）"
 fi
 
 # ---------- 回報 ----------

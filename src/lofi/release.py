@@ -69,7 +69,7 @@ COVER_SIZE = 3000
 # 來源優先用該集 AI 放大過的 `*_fix-4k`（pick_wide_cover 取解析度最高者），所以真的是 4K 細節。
 ARTWORK_SIZE = (3840, 2160)
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
-LOSSLESS_EXTS = (".flac", ".wav", ".aiff", ".aif")   # 無損母帶可接受的容器
+LOSSLESS_EXTS = cat.LOSSLESS_EXTS   # 無損母帶容器（集中於 catalog；保留別名給舊引用）
 
 # 執行緒上限與 niceness：不設時 ffmpeg 會吃滿所有核心，在背景生成時會明顯搶 CPU。
 # 可用 `--threads/--nice` 或環境變數 LOFI_THREADS／LOFI_NICE 指定（比照 make_long_lofi.sh 的 THREADS/NICE）。
@@ -1380,19 +1380,9 @@ def find_lossless_master(audio, sidecar, style, run):
 
     優先序：sidecar 的 `master_file`（生成時寫入）→ 母帶夾內同名 stem 的無損檔。
     找不到就退回工作用的 mp3（release 仍會產出，只是 `master_source` 會註明有損）。
+    （邏輯集中在 catalog.lossless_master，與 `library query --lossless` 共用。）
     """
-    sc = sidecar or {}
-    mf = sc.get("master_file")
-    if mf:
-        p = ROOT / mf
-        if p.exists():
-            return p
-    d = cat.masters_subdir(sc.get("style") or style, sc.get("run_id") or run)
-    for ext in LOSSLESS_EXTS:
-        p = d / f"{Path(audio).stem}{ext}"
-        if p.exists():
-            return p
-    return None
+    return cat.lossless_master(audio, sidecar, style, run)
 
 
 def cmd_package(args):

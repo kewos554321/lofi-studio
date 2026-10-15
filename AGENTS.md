@@ -102,6 +102,8 @@ docs/SECURITY.md    # 憑證清單與已知風險（接受什麼風險、升級�
                                                                       # 音樂段預設每首 2:00–2:30 隨機（--duration-range 120 150）
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑單一段（music/image/video/upload/cleanup）
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
+./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --stage-local  # 中間檔在內接組，成品再搬外接（少碰慢碟）
+./scripts/lofi library query --style rainy_lofi --paths --lossless   # 取無損母帶路徑（影片音源優先用它）
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw
 ./scripts/cleanup_outputs.sh --comfy                   # 清 ComfyUI 原始輸出（預覽；加 --apply 才刪）
 ./scripts/cleanup_outputs.sh --apply                   # 清專案 output（中間檔＋舊成片，保留最新 3 支）

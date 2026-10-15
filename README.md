@@ -636,6 +636,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
     --minutes 60 --episode rainy-01 --style rainy_lofi
 # → output/episodes/rainy-01/{video.mp4, mix.wav, visual_loop.mp4}
 #   並產生 publish/rainy-01.json（識別名即 episode 名稱）
+# 加 --stage-local：中間檔在內接暫存做，成品組好才搬進 output（少碰慢/易掉線的外接碟）
 ```
 
 - `--episode NAME` 會把中間檔與成品都收進 `output/episodes/NAME/`（只留 `video.mp4`、`mix.wav`、`visual_loop.mp4`）。

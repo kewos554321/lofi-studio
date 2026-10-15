@@ -177,6 +177,17 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 
 > 要湊滿 1 小時：約 30 首 2 分鐘的曲子。第一次先做 30 分鐘版本試水溫。
 
+### 5.1 音源與輸出佈局（`make_long_lofi` / `make_episode`）
+
+- **`--master-source auto|working`**（`make_episode`，預設 `auto`）：影片音源**優先用無損母帶**
+  （`output/masters/` 的 FLAC，用 `library query --lossless` 解析），沒有才退回工作 mp3。
+  這樣影片少一道有損（`mp3 V0 → AAC 320k` 變 `FLAC → AAC 320k`），母帶不在時自動退回、不新增失敗模式。
+  手動要拿母帶路徑：`./scripts/lofi library query --style X --paths --lossless`。
+- **`--stage-local`**（`make_long_lofi`／`make_episode`，或 `LOFI_STAGE_LOCAL=1`）：中間檔
+  （`_mix_raw.wav`／`mix.wav`／`_video_copy.mp4`…）改在**內接暫存**（`mktemp -d`）做，成品組好才搬進
+  `output/`。動機：`output/` 是外接（USB/ExFAT ~86MB/s），一集中間＋成品峰值約 5–6GB；放內接 NVMe
+  快很多、外接只被碰「讀來源＋寫成品」兩次。會先檢查內接暫存與輸出目錄的空間。
+
 ---
 
 ## 6. 原創視覺
