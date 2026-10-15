@@ -116,6 +116,10 @@ def summarize_event(event, record):
         out["tags"] = d.get("tags")
     elif event == "set-status":
         out["status"] = d.get("status")
+    elif event == "review":
+        rv = d.get("review") or {}
+        out.update({"rating": rv.get("rating"), "note": rv.get("note"),
+                    "status": d.get("status")})
     else:  # generated / backfill / upsert / 其他
         out.update({k: d.get(k) for k in
                     ("style", "style_version", "mood", "row_id", "run_id",

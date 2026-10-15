@@ -32,14 +32,48 @@
 | Text encoder | `qwen_0.6b_ace15` + `qwen_1.7b_ace15` |
 | VAE | `ace_1.5_vae` |
 | 🟡 `--duration` | `120`（安全區） |
-| 🟡 `--steps` | `8`（要更穩可 10–12，較慢） |
-| 🟡 `--cfg-scale` | `2.0` |
-| 🟡 `--temperature` | `0.85`（想更穩用 `0.8`） |
+| 🟡 `--quality` | `fast`（預設）＝原設定 `steps 8 / temp 0.85 / cfg 2.0` |
+| 🟡 `--steps` | 依 `--quality`（`balanced`→10、`stable`→12；要更穩可 12+，較慢） |
+| 🟡 `--cfg-scale` | `2.0`（三個預設都相同） |
+| 🟡 `--temperature` | 依 `--quality`（`balanced`→0.82、`stable`→0.8，越穩越低） |
+| 🟡 `--generate-audio-codes` | 純文字生成＝**開**（提升音質、較慢）；`--init-audio`（audio2audio）＝自動**關** |
 | 輸出 | MP3 V0 |
 
+> **品質預設**（`--quality`，一次調 steps＋temperature）：
+> `fast`＝原設定（速度優先，與舊行為完全相同）；`balanced`／`stable`＝用時間換穩定度。
+> 個別 `--steps` / `--temperature` / `--cfg-scale` 有給就蓋過預設。實測 `stable`（12 步）比 `fast` 慢約 5 成。
+> **負面 caption（已生效）**：ACE-Step 的內建節點沒有 negative 輸入，本專案自建一個
+> `LofiAceStepNegativeEncode`（原始碼 `scripts/comfy_nodes/lofi_ace_negative.py`，安裝到
+> `~/ComfyUI/custom_nodes/lofi_ace_negative/`，**裝完要重啟 ComfyUI**）把 `caption_negative`
+> 傳進 ACE-Step 的 LLM 語音碼階段做 CFG 對比。`lofi generate` **預設就用每列的 `negative`**
+> （`--negative` 覆寫全部、`--no-negative` 關閉）。
+> 注意：它只影響「LLM 語意音碼」那段，**不是**擴散取樣的負面條件。
+
 ```bash
-./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 3 --clean-raw
+./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 3 --quality stable --clean-raw
 ```
+
+### 1.1 混音母帶鏈（`build_long_mix.sh --master`）
+
+交叉淡入串成長片時，舊行為（`--master none`，預設）**只對整段混音跑一次 `loudnorm`**：不修逐軌響度差、不碰音色。
+`--master warm` 多了兩層（純 ffmpeg、無 GPU）：
+
+1. **逐軌 `loudnorm`（-18 LUFS / -1.5 dBTP）**：對齊每首音量。ACE-Step 各曲 LRA 差很大（實測 3~12 LU），不修的話長片裡會忽大忽小。
+2. **bus 音色鏈**：`highpass 28Hz`（清 subsonic）→ 一點低頻暖度（`bass`）→ 收刺耳高頻（`treble -1.5dB@9k`）→ 溫和 glue 壓縮（`acompressor` 2:1）→ 立體寬度（`extrastereo`）→ 軟削頂（`asoftclip`）。最後仍走原本的 two-pass `loudnorm` 到 -14 LUFS / -1 dBTP。
+
+✅ 實測（5 首 nujabes 測試曲、9.5 分長片，兩者都精準 -14.0 LUFS）：
+
+| 模式 | 整體 LRA |
+|---|---|
+| `none` | 6.3 LU |
+| `warm` | **4.0 LU**（響度更一致） |
+
+```bash
+./scripts/build_long_mix.sh --master warm out/mix.wav 8 assets/tracks/a.mp3 assets/tracks/b.mp3
+```
+
+- `make_long_lofi.sh` 也吃 `--master`（或用環境變數 `LOFI_MIX_MASTER`）。
+- 預設是 `none`（**與舊行為完全相同**）；聽過 A/B 覺得好再改預設。
 
 ---
 

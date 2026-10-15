@@ -65,7 +65,7 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 ./scripts/lofi library set-status keep --verdict pass --min-score 90
 ./scripts/lofi library query --tag style:rainy_lofi --status keep
 
-# 拼成長片音訊（-14 LUFS 正規化）
+# 拼成長片音訊（-14 LUFS 正規化；加 --master warm 開逐軌對齊＋音色母帶鏈，見 docs/RECIPES.md §1.1）
 ./scripts/build_long_mix.sh output/mixes/mix_1hr.wav 8 assets/tracks/rainy_lofi/*/*.mp3
 ```
 
@@ -205,7 +205,7 @@ lofi-studio/
 │   ├── check_env.sh           # 環境檢查
 │   ├── setup_python_env.sh    # 建立 .venv 並裝 demucs
 │   ├── make_demo_tracks.sh    # 產生測試用示範音檔/圖片
-│   ├── build_long_mix.sh      # ★ 交叉淡入 + -14 LUFS 正規化
+│   ├── build_long_mix.sh      # ★ 交叉淡入 + -14 LUFS 正規化（--master warm 可開音色母帶鏈）
 │   ├── make_visual_loop.sh    # 靜圖 -> 無縫循環動態影片（平移+顆粒+暗角）
 │   ├── render_video.sh        # ★ 視覺 + 音訊 -> 最終 mp4
 │   ├── make_long_lofi.sh      # ★ 低負載長片：短 loop + 複製（避免 CPU/GPU 過熱）
@@ -242,7 +242,7 @@ lofi-studio/
 ├── output/                    # symlink → 外接碟
 │   ├── videos/                # 最終影片（舊佈局）
 │   ├── episodes/<name>/       # ★ 一集一包：video.mp4 + mix.wav + visual_loop.mp4
-│   ├── releases/<run>/        # ★ 上架包：audio/ + cover_3000x3000.jpg + release.json + CHECKLIST.md
+│   ├── releases/<run>/        # ★ 上架包：audio/（FLAC）+ 方形封面 + 16:9 4K 圖 + release.json + ZIP
 │   ├── masters/<style>/<run>/ # ★ 無損母帶（FLAC；--format flac 生成，體積大故放外接）
 │   ├── mixes/                 # 長片音訊
 │   └── stems/                 # Demucs 輸出
@@ -330,7 +330,7 @@ cd ai-music/lofi-studio
 
 > **各指令的完整參數以 `--help` 為準**（由 argparse 產生，改參數不必改文件）：
 > `./scripts/lofi <cmd> --help`、shell 腳本 `./scripts/<x>.sh --help`。
-> `<cmd>` = `generate` / `qc` / `library` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `zimage` / `cinemagraph` / `upload` / `config` / `status` / `notify` / `runs`；`python3 scripts/<x>.py` 為相容 shim。
+> `<cmd>` = `generate` / `qc` / `library` / `review` / `meta` / `publish` / `backfill` / `migrate` / `expand` / `visual` / `visual-qc` / `zimage` / `cinemagraph` / `upload` / `config` / `status` / `notify` / `runs`；`python3 scripts/<x>.py` 為相容 shim。
 
 最常用的幾個：
 
@@ -339,6 +339,7 @@ cd ai-music/lofi-studio
 | `lofi generate` | 批次生成音樂（ComfyUI） | `./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01` |
 | `lofi qc` | 音樂自動品檢 | `./scripts/lofi qc --all --index` |
 | `lofi library` | SQLite 圖書館 / 標籤 | `./scripts/lofi library build && ./scripts/lofi library summary` |
+| `lofi review` | 人工複審：聽感評分（keeper 篩選用） | `./scripts/lofi review assets/tracks/<style>/<run>/ --rating 5` |
 | `lofi visual` | 生場景圖 | `./scripts/lofi visual --count 3 --size 768x512` |
 | `lofi visual-qc` | 場景圖品檢 | `./scripts/lofi visual-qc --all --force` |
 | `lofi zimage` | 生主角 Moni 封面（Z-Image Turbo GGUF＋LoRA） | `./scripts/lofi zimage --lora mnxy_probe.safetensors --prompt "mnxy, …" --kind sc` |
@@ -394,6 +395,7 @@ ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定�
 ./scripts/lofi generate --limit 3        # 先生 3 首試水溫（約 15 分鐘）
 ./scripts/lofi generate                  # CSV 全部 10 首（約 50 分鐘）
 ./scripts/lofi generate --seed 12345     # 固定 seed 可重現
+./scripts/lofi generate --quality stable # 取樣品質預設 fast|balanced|stable（時間換穩定度；要更穩就用它）
 ./scripts/lofi generate --format flac    # 無損母帶（串流發行用；預設 mp3）
 ```
 
@@ -642,7 +644,6 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - 其他選項：`--tracks ...`、`--xfade 8`、`--cg-args "--steam 1.2 --carlight 0.5 ..."`、`--no-video-fade`（最省電）。
 - 散熱監控請用 `pmset -g therm`（`pmset -g thermlog` 會持續輸出，別用）。
 
-## 容量管理與外接碟
 ## 監控與通知（run 帳本 / `lofi status` / `lofi notify`）
 
 長流程（`make_episode.sh` / `batch_run.sh`）以前各寫各的 log，狀態散在 `.gpu.lock`、`publish/*.json` 與 `logs/*.log`，沒有地方回答「**現在跑到哪**」。現在多一層 **run 帳本**：`catalog/runs.jsonl`（append-only 事件流，記 run × stage × 進度），通知與監控都讀它。
@@ -692,6 +693,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 
 > 通知是 **fail-soft**：寄信失敗只印警告、記進 `logs/notifications.jsonl`，**絕不中斷產線**。
 
+## 容量管理與外接碟
 
 專案本身不大（音樂 ~448MB、圖片 ~68MB、文字 <1MB），真正吃容量的是**成片**與**模型**：
 

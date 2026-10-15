@@ -52,6 +52,7 @@ DEFAULT_THRESHOLDS = {
     "high_band_warn_db": -10.0,   # 6kHz 以上能量相對全頻 > 此 -> warn（刺耳）
     "crest_warn_max": 20.0,       # 峰值-均值 > 此 -> warn（動態過大/爆音風險）
     "bpm_tolerance": 12.0,        # 概略 BPM 與要求差距 > 此 -> warn
+    "loudness_spread_warn": 4.0,  # 同一批掃描的 LUFS 落差 > 此 -> 提示（拼長片會忽大忽小）
     "dedupe_similarity": 0.985,   # （保留）指紋相似度門檻，僅供未來實驗用
 }
 
@@ -241,11 +242,12 @@ def _error_result(reason):
         "note": labels.get(reason, reason),
         "duration": None, "lufs": None, "lra": None, "true_peak": None,
         "peak_db": None, "rms_db": None, "crest_db": None, "dc_offset": None,
-        "silence_ratio": None, "high_band_db": None, "bpm_est": None, "fingerprint": None,
+        "silence_ratio": None, "high_band_db": None, "bpm_est": None,
+        "bpm_want": None, "bpm_match": None, "bpm_flag": None, "fingerprint": None,
     }
 
 
-def judge(m, requested_duration=None, thresholds=None):
+def judge(m, requested_duration=None, thresholds=None, wanted_bpm=None):
     """依量測值判定 verdict/score/flags（純函式，不碰檔案，方便測試）。"""
     if m.get("error"):
         return _error_result(m["error"])
@@ -309,6 +311,26 @@ def judge(m, requested_duration=None, thresholds=None):
         if crest > th["crest_warn_max"]:
             warn.append("wide_dynamics")
 
+    # BPM 比對：**只記錄、不影響 verdict/score**。估 BPM 用能量自相關，對 lofi 的
+    # 切分音常鎖到反拍 → 半/倍速誤判很常見（實測 5 首中 2 首被誤判倍速）。
+    # 若列進 warn，會把好曲的分數拉低、害 `library set-status keep --min-score 90` 誤刪。
+    # 故只給 bpm_flag 供人看（CLI 另外印一行），不進 warnings。
+    bpm_want, bpm_match, bpm_flag = None, None, None
+    try:
+        if wanted_bpm not in (None, ""):
+            bpm_want = float(wanted_bpm)
+    except (TypeError, ValueError):
+        bpm_want = None
+    if bpm_want is not None and bpm_est:
+        est = float(bpm_est)
+        tol = th["bpm_tolerance"]
+        bpm_match = abs(bpm_want - est) <= tol
+        if not bpm_match:
+            if abs(bpm_want * 2 - est) <= tol or abs(bpm_want / 2 - est) <= tol:
+                bpm_flag = "octave"
+            else:
+                bpm_flag = "mismatch"
+
     if hard:
         verdict = "fail"
     elif warn:
@@ -332,12 +354,16 @@ def judge(m, requested_duration=None, thresholds=None):
         "silence_ratio": round(silence, 3) if silence is not None else None,
         "high_band_db": round(high_band_db, 1) if high_band_db is not None else None,
         "bpm_est": bpm_est,
+        "bpm_want": bpm_want,
+        "bpm_match": bpm_match,
+        "bpm_flag": bpm_flag,
         "fingerprint": fp,
     }
 
 
-def analyze(path, requested_duration=None, thresholds=None):
-    return judge(measure(path), requested_duration=requested_duration, thresholds=thresholds)
+def analyze(path, requested_duration=None, thresholds=None, wanted_bpm=None):
+    return judge(measure(path), requested_duration=requested_duration,
+                 thresholds=thresholds, wanted_bpm=wanted_bpm)
 
 
 def qc_file(audio, force=False, thresholds=None, write=True):
@@ -348,16 +374,8 @@ def qc_file(audio, force=False, thresholds=None, write=True):
         return audio, sc["auto_qc"], True
 
     requested = (sc.get("gen") or {}).get("duration")
-    result = analyze(audio, requested_duration=requested, thresholds=thresholds)
-
-    # BPM 比對：est 誤差大是常態，僅記錄供參考，不列入 verdict
-    want_bpm = sc.get("bpm")
-    if want_bpm and result.get("bpm_est"):
-        try:
-            result["bpm_want"] = float(want_bpm)
-            result["bpm_match"] = abs(float(want_bpm) - float(result["bpm_est"])) <= DEFAULT_THRESHOLDS["bpm_tolerance"]
-        except (TypeError, ValueError):
-            pass
+    result = analyze(audio, requested_duration=requested, thresholds=thresholds,
+                     wanted_bpm=sc.get("bpm"))
 
     if write:
         if not sc:
@@ -428,10 +446,19 @@ def main():
     dupes = run_dedupe(thresholds) if args.dedupe else []
     idx, n = cat.reconstruct_index() if args.index else (None, None)
 
+    # 同批響度落差：曲目彼此差太大 → 拼長片會忽大忽小（--master warm 可逐軌修）
+    th = {**DEFAULT_THRESHOLDS, **thresholds}
+    lufs_vals = [r["lufs"] for _, r, _ in results if isinstance(r.get("lufs"), (int, float))]
+    spread = round(max(lufs_vals) - min(lufs_vals), 1) if len(lufs_vals) >= 3 else None
+    spread_warn = spread is not None and spread > th["loudness_spread_warn"]
+
     if args.json:
         print(json.dumps({
             "tracks": [{"file": cat.relpath(a), "skipped": s, **r} for a, r, s in results],
             "duplicates": [{"ids": ids} for ids in dupes],
+            "loudness_spread": ({"lu": spread, "min": round(min(lufs_vals), 1),
+                                 "max": round(max(lufs_vals), 1), "warn": spread_warn}
+                                if spread is not None else None),
             "index": cat.relpath(idx) if idx else None,
         }, ensure_ascii=False, indent=2))
         return
@@ -451,9 +478,17 @@ def main():
               f" | BPM~{r['bpm_est']}")
         if r["flags"]:
             print(f"      旗標: {', '.join(r['flags'])}")
+        if r.get("bpm_flag"):
+            word = "疑似倍速/半速" if r["bpm_flag"] == "octave" else "與要求差較多"
+            print(f"      節奏: BPM~{r['bpm_est']}（要求 {r['bpm_want']:g}，{word}；"
+                  f"估計器對切分音常誤判，僅供參考、不扣分）")
 
     print(f"\n小計: pass={counts['pass']}  warn={counts['warn']}  fail={counts['fail']}"
           + (f"  error={counts['error']}" if counts["error"] else ""))
+
+    if spread_warn:
+        print(f"⚠️  本批響度落差 {spread} LU（{min(lufs_vals):.1f}~{max(lufs_vals):.1f} LUFS）"
+              f" → 拼長片建議 build_long_mix --master warm 逐軌對齊")
 
     if dupes:
         print("\n⚠️  完全相同的內容（sha1 重複，建議刪掉多餘的）:")

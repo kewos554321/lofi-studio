@@ -65,6 +65,7 @@ EPISODE=""
 META=1
 THREADS="${THREADS:-0}"
 NICE="${NICE:-10}"
+MASTER="${LOFI_MIX_MASTER:-none}"       # 母帶鏈：none（舊行為）| warm（見 build_long_mix.sh）
 TRACKS=(
   assets/tracks/rainy_lofi/legacy/rainy_lofi_01_00001.mp3
   assets/tracks/jazzhop_lounge/legacy/jazzhop_lounge_01_00001.mp3
@@ -80,6 +81,7 @@ while [ $# -gt 0 ]; do
     --loop)    LOOP="$2"; shift 2;;
     --fps)     FPS="$2"; shift 2;;
     --xfade)   XF="$2"; shift 2;;
+    --master)  MASTER="$2"; shift 2;;
     --image)   IMAGE="$2"; shift 2;;
     --generate) GENERATE=1; shift;;
     --ckpt)    CKPT="$2"; shift 2;;
@@ -209,7 +211,7 @@ echo "    冷卻 8s…"; sleep 8
 # ---------- 階段 C：10 分鐘音訊（CPU 極輕）----------
 echo
 echo "==> [C] 音樂：交叉淡入 ${#TRACKS[@]} 首（xfade ${XF}s）"
-./scripts/build_long_mix.sh "$MIX_RAW" "$XF" "${TRACKS[@]}"
+./scripts/build_long_mix.sh --master "$MASTER" "$MIX_RAW" "$XF" "${TRACKS[@]}"
 echo "    裁成 ${TOTAL}s 並加頭尾 2s 淡入淡出…"
 AF="afade=t=in:d=2,afade=t=out:st=$((TOTAL-2)):d=2"
 "${NICEP[@]}" ffmpeg -hide_banner -loglevel error -y -i "$MIX_RAW" \

@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lofi import (backfill, catalog, character, config, expand, generate,  # noqa: E402
-                  gumroad, io, library, media, meta, notify, publish, qc, release,
+                  gumroad, io, library, media, meta, notify, publish, qc, release, review,
                   runs, status, upload, visual, visual_qc, zimage)
 
 
@@ -522,6 +522,22 @@ class TestAudioQC(unittest.TestCase):
     def test_wide_dynamics_warns(self):
         self.assertIn("wide_dynamics", qc.judge(self._m(stats={"peak_db": 5.0}))["flags"])
 
+    def test_bpm_octave_flagged_not_scored(self):
+        """要求 80 卻量到 ~40 或 ~160 → 標 bpm_flag=octave，但不扣分（估計器對切分音會誤判）。"""
+        r = qc.judge(self._m(bpm_est=160.0), wanted_bpm=80)
+        self.assertEqual(r["bpm_flag"], "octave")
+        self.assertNotIn("bpm_octave", r["flags"])       # 不進 warnings
+        self.assertEqual(r["score"], 100)                 # 不影響 keeper 篩選
+        self.assertEqual(qc.judge(self._m(bpm_est=40.0), wanted_bpm=80)["bpm_flag"], "octave")
+
+    def test_bpm_match_or_mismatch(self):
+        r_ok = qc.judge(self._m(bpm_est=78.0), wanted_bpm=80)
+        self.assertTrue(r_ok["bpm_match"])
+        self.assertIsNone(r_ok["bpm_flag"])
+        self.assertEqual(qc.judge(self._m(bpm_est=120.0), wanted_bpm=80)["bpm_flag"], "mismatch")
+        # 沒給 wanted_bpm 時不判 BPM（向後相容）
+        self.assertIsNone(qc.judge(self._m(bpm_est=160.0))["bpm_match"])
+
     def test_measure_and_judge_are_separate(self):
         """judge 只吃量測 dict；analyze 才是 I/O 進入點。"""
         self.assertTrue(callable(qc.measure))
@@ -698,6 +714,34 @@ class TestCatalogLayer(unittest.TestCase):
         json.loads(p.read_text(encoding="utf-8"))                      # 合法 JSON
         self.assertFalse(p.with_name(p.name + ".tmp").exists())        # 無 tmp 殘留
 
+    def test_review_writes_rating_and_note(self):
+        """人工複審把聽感評分寫進 sidecar（keeper 篩選的唯一來源）。"""
+        audio = self._audio()
+        catalog.upsert_track(audio, {"style": "x", "track_id": "t-r"})
+        review.review_file(audio, rating=5, note="sax 最像", status="keep")
+        sc = catalog.load_sidecar(audio)
+        self.assertEqual(sc["review"]["rating"], 5)
+        self.assertEqual(sc["review"]["note"], "sax 最像")
+        self.assertEqual(sc["status"], "keep")
+        self.assertIn("reviewed_at", sc["review"])
+
+    def test_review_clear_removes_review(self):
+        audio = self._audio()
+        catalog.upsert_track(audio, {"style": "x"})
+        review.review_file(audio, rating=4)
+        review.review_file(audio, clear=True)
+        self.assertNotIn("review", catalog.load_sidecar(audio))
+
+    def test_review_event_is_compact(self):
+        """事件流只記評分欄位，不夾帶整包 prompt（避免 tracks.jsonl 膨脹）。"""
+        ev = catalog.summarize_event("review", {"track_id": "t", "file": "f",
+                                                "prompt": "落落長", "status": "keep",
+                                                "review": {"rating": 5, "note": "讚"}})
+        self.assertEqual(ev["rating"], 5)
+        self.assertEqual(ev["note"], "讚")
+        self.assertEqual(ev["status"], "keep")
+        self.assertNotIn("prompt", ev)
+
     def test_append_event_fields(self):
         ev = catalog.append_event("generated", {"track_id": "t1", "gen": {"seed": 7}})
         self.assertEqual((ev["event"], ev["track_id"], ev["seed"]), ("generated", "t1", 7))
@@ -835,6 +879,38 @@ class TestWorkflowAssembly(unittest.TestCase):
         flac = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x", audio_format="flac")
         self.assertEqual(flac["107"]["class_type"], "SaveAudio")
         self.assertNotIn("quality", flac["107"]["inputs"])
+
+    def test_generate_quality_presets_and_overrides(self):
+        """--quality 給預設、個別旗標可覆寫；fast 必須等於原始預設（不可悄悄改變產線）。"""
+        self.assertEqual(generate.sampling_params("fast"),
+                         {"steps": 8, "temperature": 0.85, "cfg_scale": 2.0})
+        self.assertEqual(generate.sampling_params("stable")["steps"], 12)
+        self.assertLess(generate.sampling_params("stable")["temperature"],
+                        generate.sampling_params("fast")["temperature"])
+        # 個別覆寫優先於預設
+        self.assertEqual(generate.sampling_params("stable", steps=6)["steps"], 6)
+        self.assertEqual(generate.sampling_params("fast", temperature=0.7)["temperature"], 0.7)
+
+    def test_generate_audio_codes_flag_reaches_node(self):
+        """generate_audio_codes 要真的傳進節點（audio2audio 給音訊參考時應可關）。"""
+        on = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x")
+        self.assertTrue(on["94"]["inputs"]["generate_audio_codes"])
+        off = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x",
+                                    generate_audio_codes=False)
+        self.assertFalse(off["94"]["inputs"]["generate_audio_codes"])
+
+    def test_generate_negative_switches_node(self):
+        """有 negative 才改用自訂節點（LofiAceStepNegativeEncode）；沒有則維持內建節點。"""
+        plain = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x")
+        self.assertEqual(plain["94"]["class_type"], "TextEncodeAceStepAudio1.5")
+        self.assertNotIn("negative", plain["94"]["inputs"])
+        wn = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x",
+                                   negative="vocals, harsh synths")
+        self.assertEqual(wn["94"]["class_type"], "LofiAceStepNegativeEncode")
+        self.assertEqual(wn["94"]["inputs"]["negative"], "vocals, harsh synths")
+        # 空白 negative 視為沒給
+        blank = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x", negative="  ")
+        self.assertEqual(blank["94"]["class_type"], "TextEncodeAceStepAudio1.5")
 
     def test_unique_path_adds_suffix(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2124,8 +2200,6 @@ class TestThumbnail(unittest.TestCase):
                          Path("--given"))
 
 
-if __name__ == "__main__":
-    unittest.main()
 class TestRunsLedger(unittest.TestCase):
     """產線 run 帳本：事件寫入／摺疊／存活判定（catalog/runs.jsonl）。"""
 
@@ -2476,3 +2550,5 @@ class TestStatusMonitor(unittest.TestCase):
         self.assertEqual(status._w(status._pad("定裝參考", 12)), 12)
 
 
+if __name__ == "__main__":
+    unittest.main()

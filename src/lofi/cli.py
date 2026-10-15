@@ -5,6 +5,7 @@
   lofi generate  [batch_generate 參數]
   lofi qc        [auto_qc 參數]
   lofi library   build | query | summary | tag | set-status
+  lofi review    [評分]（人工複審：聽感評分寫進 sidecar，keeper 篩選用；--list 看未評分）
   lofi meta      [make_meta 參數]
   lofi publish   [upload_status 參數]
   lofi backfill  [backfill_catalog 參數]
@@ -33,6 +34,7 @@ MODULES = {
     "generate":    ("lofi.generate",    "用 ComfyUI 批次生成音樂"),
     "qc":          ("lofi.qc",          "自動品檢（響度/削波/靜音/時長）"),
     "library":     ("lofi.library",     "SQLite 圖書館 + 自動標籤"),
+    "review":      ("lofi.review",      "人工複審：聽感評分寫進 sidecar（keeper 篩選用）"),
     "meta":        ("lofi.meta",        "產生 YouTube 上片資訊"),
     "publish":     ("lofi.publish",     "上片佇列"),
     "backfill":    ("lofi.backfill",    "回填既有音檔到目錄"),

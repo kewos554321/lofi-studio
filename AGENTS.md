@@ -45,6 +45,7 @@ src/lofi/          # Python 套件（所有邏輯；import 用 `from lofi import
   meta.py          # YouTube title/描述/章節/tags
   publish.py       # 上片佇列
   library.py       # SQLite 圖書館(catalog/library.db) + 自動標籤
+  review.py        # 人工複審：聽感評分(1-5)寫進 sidecar（keeper 篩選用；library --min-rating）
   expand.py        # 風格骨架 -> 曲目清單 CSV
   visual.py        # ComfyUI + SDXL 生場景圖
   cinemagraph.py   # 靜圖 -> 無縫局部微動循環（唯一需 numpy 的模組，用 .venv）
@@ -67,7 +68,7 @@ assets/visuals/<kind><NN>/      # 生成場景圖（一 run 一夾）＋ manifes
 assets/refs/                    # 參考素材（人物照片、哼唱錄音、轉檔）—不進版控，且不在任何工具掃描路徑
 catalog/            # tracks.jsonl + visuals.jsonl + releases.jsonl + runs.jsonl 事件流（進版控）；index.csv / library.db 為衍生物（gitignore）
 publish/            # 上片資訊 + 狀態
-output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包（audio/ + 封面 + LISTING.md + download/<album>.zip…）；masters/<style>/<run>/ 為無損母帶（FLAC）
+output/             # symlink → 外接碟；episodes/<name>/ 為一集一包（video.mp4 + mix.wav + visual_loop.mp4）；releases/<run>/ 為上架包（audio/ 預設 FLAC + 方形封面 + 16:9 4K 圖 + LISTING.md + download/<album>.zip…）；masters/<style>/<run>/ 為無損母帶（FLAC）
 tests/              # python3 -m unittest discover -s tests -v
 docs/RUNBOOK.md     # 操作手冊
 docs/SECURITY.md    # 憑證清單與已知風險（接受什麼風險、升級路徑、何時重啟）
@@ -79,6 +80,8 @@ docs/SECURITY.md    # 憑證清單與已知風險（接受什麼風險、升級�
 ./scripts/lofi generate --csv prompts/generated/x.csv --run-id b01   # 單一入口（免安裝；= lofi generate）
 ./scripts/lofi qc --all --index
 ./scripts/lofi library build && ./scripts/lofi library summary
+./scripts/lofi review --list                                          # 看哪些曲還沒人工評分
+./scripts/lofi review assets/tracks/<style>/<run>/ --rating 5        # 聽感評分（keeper 篩選用）
 ./scripts/lofi meta --video output/videos/x.mp4 --style cozy_morning
 ./scripts/lofi publish --ready
 ./scripts/lofi expand --style rainy_lofi --count 20 --seed 42
@@ -148,6 +151,7 @@ python3 -m unittest discover -s tests -v
   原因是 int8 沒有 Metal 加速路徑，會退回超慢的模擬運算。**在 Mac 上優先用 GGUF。**
 - GGUF 用法：裝 `ComfyUI-GGUF`（在 `custom_nodes/`）＋ `gguf` pip 套件到 venv → 用 `UnetLoaderGGUF` / `CLIPLoaderGGUF` 節點。
 - **（實驗註記，非預設）z-image GGUF**：`unet/z-image-turbo-Q5_K_M.gguf` + `text_encoders/Qwen3-4B-Q8_0.gguf` + `vae/ae.safetensors`，CLIP type 選 `lumina2`。產線**預設圖片模型仍是 SDXL `DreamShaperXL-v1.0-Alpha2`**（見 `config.py`）；這組只在個別視覺實驗用過。
+- **自訂節點（產線相依）**：`scripts/comfy_nodes/lofi_ace_negative.py` 開放 ACE-Step 1.5 的 **negative caption**（內建節點沒有）。安裝：`mkdir -p ~/ComfyUI/custom_nodes/lofi_ace_negative && cp scripts/comfy_nodes/lofi_ace_negative.py ~/ComfyUI/custom_nodes/lofi_ace_negative/__init__.py`，**裝完／改完必須重啟 ComfyUI**。`lofi generate` 預設會用它送每列的 `negative`；節點不在時 `--no-negative` 可退回內建節點。
 
 ## 資源限制（RAM / 磁碟，每次都要先想）
 

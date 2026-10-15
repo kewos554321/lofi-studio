@@ -1,0 +1,28 @@
+{
+  "name": "nujabes_night",
+  "version": 1,
+  "description": "Nujabes 系 jazzy lofi：暗色爵士和聲、溫暖電鋼、薩克斯風與黑膠雜訊，深夜讀書。",
+  "backbone": "lofi hip hop, chillhop, jazzhop, instrumental, melancholic, nostalgic, nujabes-style, late night study vibe, warm tape saturation, vinyl crackle, tape hiss, slight wow and flutter, subtle sidechain compression, soft room reverb, laid-back swing groove",
+  "closing": "warm, nostalgic, introspective, low fidelity texture",
+  "negative": "vocals, singing, rap, harsh synths, edm drop, distorted, overcompressed, sharp highs",
+  "duration": 120,
+  "bpm_range": [78, 84],
+  "keys": ["F major", "D minor", "A minor", "C major", "G minor", "E minor"],
+  "instruments": [
+    "muted felt piano, warm fender rhodes, sultry saxophone line, warm upright bass, lo-fi electric guitar with chorus",
+    "felt piano chords, rhodes electric piano, brushed swing drums, warm upright bass",
+    "jazz piano voicings, muted saxophone, soft kick, walking upright bass",
+    "electric guitar with chorus, rhodes pads, laid-back swing drums, deep sub bass",
+    "warm rhodes chords, muted trumpet, soft dusty drums, round upright bass",
+    "plucked felt piano, ambient rhodes pad, sultry sax, soft dusty drums"
+  ],
+  "moods": [
+    "late night study session",
+    "Fmaj7 Em7 Dm7 Cmaj7 chord progression",
+    "rainy window at midnight",
+    "quiet jazz cafe after hours",
+    "sleepy late hours",
+    "nostalgic memories",
+    "city lights after midnight"
+  ]
+}

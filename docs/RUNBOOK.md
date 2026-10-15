@@ -76,7 +76,8 @@ cd ai-music/lofi-studio
 lofi hip hop, warm tape saturation, rainy night mood, study beats,
 70 BPM, D minor, mellow piano chords, brushed drums, sidechain compression
 ```
-避免：`no vocals, no EDM drop, no harsh synths`
+正向 prompt **不要**寫 `no vocals, no EDM drop, no harsh synths` 這類否定詞——「不要什麼」放
+**negative**（每列的 `negative` 欄，或 `lofi generate --negative "..."`；走自訂節點，見 `RECIPES.md` §1）。
 
 起始 prompt 庫見 `prompts/prompt_library.csv`（10 種氛圍，含調性/BPM）。
 
@@ -85,8 +86,8 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 | 參數 | 建議值 |
 |---|---|
 | 長度 | 120 秒（2 分鐘） |
-| Steps | 30–50 |
-| CFG | 4–7 |
+| 品質 | `--quality fast`（預設）／`balanced`／`stable`；要更穩就往上（時間換品質，見 `RECIPES.md` §1） |
+| Steps / CFG | 由 `--quality` 決定（`fast`＝8 步 / cfg 2.0）——ACE-Step turbo **不吃** 30–50 步那種大值 |
 | Seed | 每首換一個；滿意的記下來微調 |
 | 輸出 | 預設 **48 kHz 立體聲 mp3**（ComfyUI `SaveAudioMP3`，≈248 kbps VBR）；`--format flac` 改存無損 FLAC |
 
@@ -99,8 +100,22 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
   **產線（`make_episode.sh`）音樂段已預設 flac**；外接離線會 fail-closed，臨時用 `--format mp3`。
   批次範例：`./scripts/lofi generate --csv prompts/generated/x.csv --clean-raw --format flac`
 
-### 2.4 挑選
+### 2.4 挑選（人工複審）
 只留「能撐 2 分鐘不無聊」的。淘汰的不要省，硬用會讓長片變難聽。
+
+`lofi review` 把聽感評分（1–5★）寫進 sidecar，之後就篩得出來：
+
+```bash
+./scripts/lofi review --list                                    # 看哪些還沒評（未評分排前面）
+./scripts/lofi review assets/tracks/<style>/<run>/ --rating 5 --note "sax 那首最像"
+./scripts/lofi review <檔> --status reject                      # 只改狀態
+./scripts/lofi library build
+./scripts/lofi library set-status keep --min-rating 4          # 4★ 以上標 keeper
+./scripts/lofi library query --style <style> --status keep --paths   # 拿去拼長片
+```
+
+- 傳資料夾＝整個 run 套同一評分；要逐首評就一個檔一個檔來。
+- `--clear` 清評分。沒有 sidecar 的舊檔先 `lofi qc` / `lofi backfill` 才評得動。
 
 ### 2.5 音樂目錄與品管（P0/P1）
 
@@ -109,9 +124,12 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 - `batch_generate.py` 成功後會自動寫側錄（`assets/tracks/<檔>.json`）+ 事件流（`catalog/tracks.jsonl`）+ 跑自動品檢。
 - 既有舊曲用 `./scripts/lofi backfill` 補（會從 `output/logs/*.log` 撈回 seed）。
 - 自動品檢：`./scripts/lofi qc --all --index`。`fail`（無聲／截斷／嚴重削波）會自動標 `reject`；`warn` 進人工複審。
+- 品檢另會提示（**只顯示、不扣分**，不影響 keeper 篩選）：
+  - `節奏: BPM~…（要求 …）`＝估到的 BPM 與要求差較多（估 BPM 對 lofi 的切分音常半/倍速誤判）。
+  - 同批響度落差 > `loudness_spread_warn`（預設 4 LU）→ 提醒拼長片用 `build_long_mix --master warm` 逐軌對齊。
 - 詳細判定與側錄格式見 `README.md` 的「音樂目錄與品管」一節。
 
-> 之後（P2/P3，尚未實作）會在此基礎上做：試聽評分工具、`prompt_report.py` 把壞 prompt 的維度統計出來、標籤與由標籤重組歌單。
+> 人工評分與 `--min-rating` 篩選已可用（`lofi review`）。仍待做：`prompt_report.py`（把壞 prompt 的維度統計出來）、由標籤重組歌單。
 
 ---
 
@@ -152,6 +170,8 @@ lofi 通常要「去人聲」版本。本專案已封裝：
 
 - `8` 是交叉淡入秒數（lofi 建議 6–10 秒）。
 - 腳本會逐首 crossfade，並做 **-14 LUFS** 兩段式正規化。
+- **`--master warm`**：加上逐軌響度對齊＋bus 音色鏈（高通／暖度／收高頻／glue 壓縮／立體寬度／軟削頂）。
+  預設 `none`＝只有 loudnorm（舊行為）。實測整段 LRA 6.3→4.0 LU，改前先 A/B（見 `RECIPES.md` §1.1）。
 
 > 要湊滿 1 小時：約 30 首 2 分鐘的曲子。第一次先做 30 分鐘版本試水溫。
 
@@ -330,7 +350,7 @@ AI 放大成 4K 一起收進交付 ZIP：
 ./scripts/lofi zimage --from-image assets/visuals/cozy-1hr-01/cozy-1hr-01_01.png \
   --run-id cozy-1hr-01 --slug fix-4k --upscale-out 3840x2160 --clean-raw
 # 之後 release package 自動挑「解析度最高的橫式圖」當來源：
-#   商店封面 gumroad_cover_1920x1080.jpg（縮小）＋ ZIP 內 artwork_3840x2160.jpg（4K 原尺寸）
+#   一張 artwork_3840x2160.jpg 同時當商店封面與 ZIP 內的橫式圖（4K 原尺寸）
 ```
 
 `pick_wide_cover()` 取的是**解析度最高**的橫式圖（不是最新那張），所以放了 4K 衍生圖就會用它。
@@ -468,7 +488,10 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | `upload` | `yt_upload`（YouTube Data API，預設 private）＋**自動設縮圖** | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
-- 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
+- 影片段挑曲**只用這個 run 自己的曲**（`library query --run-id --order track`，生成順序），`--limit`／`--tracks` 可覆寫；
+  未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
+  ⚠️ 不要改成「整個風格」挑：`library query` 預設按分數排序，會撈到別的 run 分數更高的曲
+  （實測：第 2 集影片 36 首裡 34 首來自第 1 集，影片變成上一集的音樂）。真的沒曲目才退回風格並印警告。
 - **音樂段預設 `--format flac`（無損母帶）**：`release package` 會自動採用它，買家拿到的是真無損。
   代價是**母帶寫外接 `output/masters/`（約 1GB/集）→ 外接碟不在線時音樂段會 fail-closed**；
   臨時要跑可插上碟，或 `--format mp3`（交付母帶就變有損，`release.json` 會記 `lossless: false`）。
@@ -562,7 +585,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 ./scripts/lofi release package --run coastal01
 ./scripts/lofi release package --run coastal01 --limit 12 --album "The Windowsill"
 ./scripts/lofi release package --run coastal01 --style coastal_guitar --visual-run sc06
-./scripts/lofi release package --run coastal01 --format flac  # 母帶用 FLAC（較小）
+./scripts/lofi release package --run coastal01 --format wav   # 交付改 WAV（相容性最廣；預設是 FLAC）
 ./scripts/lofi release package --run coastal01 --threads 2 --nice 15   # 與其他工作共存
 ```
 
@@ -575,10 +598,9 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 
 | 檔案 | 內容 |
 |---|---|
-| `audio/NN_<slug>.wav` | 正規化母帶（**-14 LUFS / -1 dBTP**，保留取樣率）；內嵌標籤含 title/artist/album/track/genre/date/copyright/**comment（AI 揭露）**——標籤跟著檔案走，買家丟掉 README 也看得到。改標籤要 `--force` |
-| `cover_3000x3000.jpg` | 封面（置中裁切＋放大；**純圖不疊字**）——也是商店縮圖（方形）用的同一套圖 |
-| `artwork_3840x2160.jpg` | 交付 ZIP 用的 **4K 高畫質橫式圖**（商店 16:9 封面用的同一套圖）。來源優先取該集 AI 放大過的圖 |
-| `gumroad_cover_1920x1080.jpg` / `gumroad_thumb_1080x1080.jpg` | 商店頁直接上傳用（橫式封面 ≥1280×720／方形縮圖 ≥600×600，72 DPI） |
+| `audio/NN_<slug>.flac` | 正規化母帶（**-14 LUFS / -1 dBTP**，24-bit 保留取樣率）；內嵌標籤含 title/artist/album/track/genre/date/copyright/**comment（AI 揭露）**——標籤跟著檔案走，買家丟掉 README 也看得到。改標籤要 `--force`。格式預設 **FLAC**（`--format wav` 可改） |
+| `cover_3000x3000.jpg` | **方形封面（純圖不疊字）**：DistroKid 封面 ＋ Gumroad 縮圖 ＋ 交付 ZIP，一張到底 |
+| `artwork_3840x2160.jpg` | **16:9 高畫質圖**：Gumroad 封面 ＋ 交付 ZIP，同一張（來源優先取該集 AI 放大過的 4K 圖） |
 | `download/<album>.zip` | 交付檔（`audio/`＋**方形與橫式兩張圖**＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個。原則：**買家拿到的要和商店頁看到的一致**（商店顯小尺寸、ZIP 給高畫質版） |
 | `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
 | `tracklist.csv` | **買家視角**的曲目表：No/Title/Artist/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size（不含 ISRC——那是發行商欄位，見 `LISTING.md`） |
@@ -814,11 +836,11 @@ with runs.stage_run("rl01", "music", kind="episode", total=40) as st:
 | 生成前就中止「磁碟空間不足」 | Python 端 preflight（正常保護） | 清理 `./scripts/cleanup_outputs.sh --apply`；或調低門檻 `LOFI_MIN_FREE_GB=10` |
 | 品檢出現 `❓ error` | ffmpeg/ffprobe 缺失或檔案壞 | 確認 `ffmpeg -version`；該曲重測或刪除 |
 | 目錄旁多了 `*.json.corrupt-*` | sidecar JSON 壞損被隔離（正常保護） | 檢查該檔；原檔已保留，必要時手動救回後刪除 |
-
----
 | `lofi notify --test` 沒收到信 | 設定未就緒或 Gmail 擋 | 先 `lofi notify --status` 看原因；確認已開兩步驗證並用**應用程式密碼**；失敗原因見 `logs/notifications.jsonl` |
 | `lofi status` 一直顯示「疑似中斷」 | 階段行程已結束但沒有 `runs end` | 正常保護（該階段真的沒收尾）；補 `./scripts/lofi runs end --run <id> --stage <s>`，或直接重跑該段 |
 | 監控 UI 打不開 | 只綁了 localhost／埠被占用 | 本機用 `http://127.0.0.1:8787`；手機要加 `--host 0.0.0.0`；換埠 `--port 8888` |
+
+---
 
 ## 附錄：發布前合規檢查表
 
