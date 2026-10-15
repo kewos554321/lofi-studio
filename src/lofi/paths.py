@@ -29,6 +29,14 @@ CATALOG_DIR = ROOT / "catalog"
 PUBLISH_DIR = ROOT / "publish"
 LOGS_DIR = ROOT / "logs"
 
+# 產線 run 帳本（append-only 事件流；run × stage × 進度，見 src/lofi/runs.py）。
+# 與 tracks/releases.jsonl 同一個 catalog/：git 收紀錄、狀態變更用新事件。
+RUNS_JSONL = CATALOG_DIR / "runs.jsonl"
+# 通知紀錄（本機，不進版控）：哪封信寄成功／失敗，也是 dedupe 冷卻的依據。
+NOTIFY_LOG = LOGS_DIR / "notifications.jsonl"
+# 「現在」快照（衍生物、可重建）：由 run 帳本攤平而來，給 UI／看板便宜地讀。
+RUN_STATE = LOGS_DIR / ".run_state.json"
+
 # 提示詞骨架
 PROMPTS_DIR = ROOT / "prompts"
 STYLE_DIR = PROMPTS_DIR / "styles"

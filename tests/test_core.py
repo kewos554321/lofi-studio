@@ -15,8 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lofi import (backfill, catalog, character, config, expand, generate,  # noqa: E402
-                  gumroad, io, library, media, meta, qc, release, upload, visual,
-                  visual_qc, zimage)
+                  gumroad, io, library, media, meta, notify, publish, qc, release,
+                  runs, status, upload, visual, visual_qc, zimage)
 
 
 def _png_with_prompt(path, workflow):
@@ -2126,3 +2126,353 @@ class TestThumbnail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class TestRunsLedger(unittest.TestCase):
+    """產線 run 帳本：事件寫入／摺疊／存活判定（catalog/runs.jsonl）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        self._saved = {k: runs.__dict__[k] for k in ("RUNS_JSONL", "RUN_STATE")}
+        runs.RUNS_JSONL = self.root / "catalog" / "runs.jsonl"
+        runs.RUN_STATE = self.root / "logs" / ".run_state.json"
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(runs, k, v)
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _ev(event, **kw):
+        d = {"ts": kw.pop("ts"), "schema_version": 1, "event": event}
+        d.update(kw)
+        return d
+
+    def test_lifecycle_events_and_fold(self):
+        runs.stage_start("r1", "music", kind="episode", total=3, unit="tracks")
+        runs.progress("r1", "music", 1, 3, unit="tracks")
+        runs.stage_end("r1", "music", runs.OK, elapsed_s=12.34, artifacts=["a.mp3"])
+        env = runs.load_events()
+        self.assertEqual([e["event"] for e in env],
+                         ["stage_start", "progress", "stage_end"])
+        self.assertEqual(env[0]["schema_version"], runs.SCHEMA_VERSION)
+        self.assertTrue(env[0]["ts"])
+        r = runs.fold(env)["r1"]
+        st = r["stages"]["music"]
+        self.assertEqual(st["status"], "ok")
+        self.assertEqual(st["done"], 1)
+        self.assertEqual(st["total"], 3)
+        self.assertEqual(st["elapsed_s"], 12.3)
+        self.assertEqual(st["artifacts"], ["a.mp3"])
+        self.assertEqual(runs.run_status(r), "ok")
+
+    def test_run_end_status(self):
+        runs.stage_start("r1", "music")
+        runs.stage_end("r1", "music")
+        runs.run_end("r1", runs.FAIL, note="上游斷線")
+        r = runs.fold(runs.load_events())["r1"]
+        self.assertEqual(runs.run_status(r), runs.FAIL)
+        self.assertEqual(r["note"], "上游斷線")
+
+    def test_snapshot_written(self):
+        runs.stage_start("r1", "music", total=10, pid=os.getpid())
+        self.assertTrue(runs.RUN_STATE.exists())
+        snap = json.loads(runs.RUN_STATE.read_text(encoding="utf-8"))
+        self.assertEqual(snap["running"][0]["run_id"], "r1")
+
+    def test_current_alive_vs_stale_by_pid(self):
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(minutes=5)).isoformat()
+        alive = [self._ev("stage_start", ts=old, run_id="ok-run", stage="music",
+                          pid=os.getpid())]
+        cur = runs.current(alive, now=now)
+        self.assertEqual(len(cur), 1)
+        self.assertIs(cur[0]["alive"], True)
+        self.assertFalse(cur[0]["stale"])
+        # pid 不存在 → 一定卡死
+        dead = [self._ev("stage_start", ts=old, run_id="dead", stage="music",
+                         pid=999999)]
+        cur = runs.current(dead, now=now)
+        self.assertIs(cur[0]["alive"], False)
+        self.assertTrue(cur[0]["stale"])
+
+    def test_current_unknown_pid_uses_idle_threshold(self):
+        now = datetime.now(timezone.utc)
+        fresh = [self._ev("stage_start", ts=(now - timedelta(minutes=1)).isoformat(),
+                          run_id="a", stage="music")]                 # 無 pid
+        self.assertFalse(runs.current(fresh, now=now)[0]["stale"])
+        idle = [self._ev("stage_start",
+                         ts=(now - timedelta(minutes=config.STATUS_STALE_MIN + 5)).isoformat(),
+                         run_id="b", stage="music")]
+        self.assertTrue(runs.current(idle, now=now)[0]["stale"])
+
+    def test_current_closes_on_stage_end(self):
+        now = datetime.now(timezone.utc)
+        ts = now.isoformat()
+        env = [self._ev("stage_start", ts=ts, run_id="r", stage="music"),
+               self._ev("stage_end", ts=ts, run_id="r", stage="music", status="ok")]
+        self.assertEqual(runs.current(env, now=now), [])
+
+    def test_pid_alive(self):
+        self.assertIs(runs.pid_alive(os.getpid()), True)
+        self.assertIs(runs.pid_alive(999999), False)
+        self.assertIsNone(runs.pid_alive(None))
+        self.assertIsNone(runs.pid_alive("not-a-pid"))
+
+    def test_stage_run_records_failure_and_reraises(self):
+        with self.assertRaises(ValueError):
+            with runs.stage_run("r2", "image", kind="episode") as st:
+                st.tick()
+                st.artifact("x.png")
+                raise ValueError("boom")
+        ev = runs.load_events()[-1]
+        self.assertEqual(ev["event"], "stage_end")
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("boom", ev["note"])
+        self.assertEqual(ev["artifacts"], ["x.png"])
+
+    def test_stage_run_success_marks_artifacts(self):
+        with runs.stage_run("r3", "video") as st:
+            st.artifact("p.mp4")
+        st = runs.fold(runs.load_events())["r3"]["stages"]["video"]
+        self.assertEqual(st["status"], "ok")
+        self.assertEqual(st["artifacts"], ["p.mp4"])
+
+    def test_recent_runs_sorted_and_limited(self):
+        for rid, ts in (("old", "2026-01-01T00:00:00+08:00"),
+                        ("new", "2026-06-01T00:00:00+08:00")):
+            runs.stage_start(rid, "music")
+            # 直接改最後一行的 ts 以便排序測試
+        rows = runs.recent_runs()
+        self.assertEqual(len(rows), 2)
+        runs.stage_start("only", "music")
+        self.assertEqual(len(runs.recent_runs(limit=1)), 1)
+
+    def test_stage_order_uses_episode_sequence(self):
+        self.assertEqual(runs.stage_order(["video", "music", "upload", "image"]),
+                         ["music", "image", "video", "upload"])
+        self.assertEqual(runs.stage_order(["zzz", "music"]), ["music", "zzz"])
+
+    def test_age_min(self):
+        now = datetime.now(timezone.utc)
+        self.assertEqual(runs.age_min(now.isoformat(), now), 0.0)
+        self.assertIsNone(runs.age_min(""))
+        self.assertIsNone(runs.age_min("不是時間"))
+
+
+class TestNotify(unittest.TestCase):
+    """通知層：設定優先序、純函式訊息組裝、fail-soft 與 dedupe（不真的寄信）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        self._saved_log = notify.NOTIFY_LOG
+        self._saved_file = config.NOTIFY_FILE
+        notify.NOTIFY_LOG = self.root / "notifications.jsonl"
+        config.NOTIFY_FILE = self.root / "notify.json"
+        self._chan = dict(notify.CHANNELS)
+
+    def tearDown(self):
+        notify.NOTIFY_LOG = self._saved_log
+        config.NOTIFY_FILE = self._saved_file
+        notify.CHANNELS.clear()
+        notify.CHANNELS.update(self._chan)
+        self.tmp.cleanup()
+
+    def _settings(self, **over):
+        st = notify.load_settings()
+        st.update({"enabled": True, "username": "u@gmail.com",
+                   "app_password": "pw", "to": ["me@gmail.com"],
+                   "min_level": "info", "dedupe_min": 30})
+        st.update(over)
+        return st
+
+    def test_render_stage(self):
+        subject, body = notify.render_stage("cozy-1hr-03", "music", "fail",
+                                            elapsed_s=90, note="ComfyUI 斷線",
+                                            artifacts=["a/"], log="logs/x.log")
+        self.assertIn("cozy-1hr-03", subject)
+        self.assertIn("music", subject)
+        self.assertIn("❌", subject)
+        self.assertIn("1m30s", body)
+        self.assertIn("ComfyUI 斷線", body)
+
+    def test_render_run_lists_stages(self):
+        subject, body = notify.render_run("ep1", "ok",
+                                          stages={"music": "ok", "video": "ok"})
+        self.assertIn("ep1", subject)
+        self.assertIn("music", body)
+        self.assertIn("video", body)
+
+    def test_settings_env_overrides_file(self):
+        config.NOTIFY_FILE.write_text(json.dumps({"username": "file@x.com",
+                                                  "app_password": "fpw",
+                                                  "to": ["file@x.com"]}),
+                                      encoding="utf-8")
+        os.environ.pop("LOFI_SMTP_USER", None)
+        try:
+            self.assertEqual(notify.load_settings()["username"], "file@x.com")
+            os.environ["LOFI_SMTP_USER"] = "env@x.com"
+            self.assertEqual(notify.load_settings()["username"], "env@x.com")
+        finally:
+            os.environ.pop("LOFI_SMTP_USER", None)
+
+    def test_read_file_tolerates_bad_json(self):
+        config.NOTIFY_FILE.write_text("{ not json", encoding="utf-8")
+        self.assertEqual(notify._read_file(), {})
+
+    def test_status_of_settings_reports_missing(self):
+        ready, reason = notify.status_of_settings({"enabled": True, "username": "",
+                                                    "app_password": "", "to": []})
+        self.assertFalse(ready)
+        self.assertIn("缺", reason)
+
+    def test_send_disabled(self):
+        ok, detail = notify.send("s", "b", settings=self._settings(enabled=False))
+        self.assertFalse(ok)
+        self.assertIn("停用", detail)
+
+    def test_send_below_min_level(self):
+        ok, detail = notify.send("s", "b", level="info",
+                                 settings=self._settings(min_level="error"))
+        self.assertFalse(ok)
+        self.assertIn("門檻", detail)
+
+    def test_send_dry_run(self):
+        ok, detail = notify.send("s", "b", dry_run=True, settings=self._settings())
+        self.assertTrue(ok)
+        self.assertIn("dry-run", detail)
+
+    def test_send_dedupes_repeated_key(self):
+        notify.CHANNELS["email"] = lambda st, s, b: (True, "fake")
+        ok1, _ = notify.send("報警", "內容", level="error", dedupe_key="disk-low",
+                             settings=self._settings())
+        ok2, detail2 = notify.send("報警", "內容", level="error", dedupe_key="disk-low",
+                                   settings=self._settings())
+        self.assertTrue(ok1)
+        self.assertFalse(ok2)
+        self.assertIn("冷卻", detail2)
+
+    def test_send_is_fail_soft(self):
+        def boom(st, s, b):
+            raise RuntimeError("SMTP 掛了")
+        notify.CHANNELS["email"] = boom
+        ok, detail = notify.send("s", "b", level="error", settings=self._settings())
+        self.assertFalse(ok)
+        self.assertIn("SMTP 掛了", detail)                  # 回報失敗，但沒有拋出
+
+    def test_send_logs_notification(self):
+        notify.CHANNELS["email"] = lambda st, s, b: (True, "fake")
+        notify.send("主旨", "內容", settings=self._settings())
+        rec = json.loads(notify.NOTIFY_LOG.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(rec["subject"], "主旨")
+        self.assertTrue(rec["ok"])
+
+    def test_send_email_strips_app_password_spaces(self):
+        """Gmail 應用程式密碼常以空格分組貼上；含空格也要能登入成功。"""
+        calls = {}
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None, context=None):
+                calls["host"] = host
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def login(self, u, p):
+                calls["user"], calls["pw"] = u, p
+
+            def send_message(self, m):
+                calls["msg"] = m
+
+        orig = notify.smtplib.SMTP_SSL
+        notify.smtplib.SMTP_SSL = FakeSMTP
+        try:
+            st = self._settings(username="u@gmail.com",
+                                app_password="abcd efgh ijkl mnop")
+            ok, _ = notify.send_email(st, "s", "b")
+        finally:
+            notify.smtplib.SMTP_SSL = orig
+        self.assertTrue(ok)
+        self.assertEqual(calls["pw"], "abcdefghijklmnop")
+        self.assertEqual(calls["host"], "smtp.gmail.com")
+
+
+class TestStatusMonitor(unittest.TestCase):
+    """監控：狀態蒐集、文字輸出、JSON 與 UI 頁面（純讀取）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / "logs").mkdir()
+        (self.root / "publish").mkdir()
+        (self.root / "output").mkdir()
+        self._saved = {
+            "runs": {k: runs.__dict__[k] for k in ("RUNS_JSONL", "RUN_STATE")},
+            "pub": publish.PUBLISH_DIR,
+            "status": {k: status.__dict__[k] for k in ("ROOT", "LOGS_DIR", "OUTPUT_DIR")},
+        }
+        runs.RUNS_JSONL = self.root / "catalog" / "runs.jsonl"
+        runs.RUN_STATE = self.root / "logs" / ".run_state.json"
+        publish.PUBLISH_DIR = self.root / "publish"
+        status.ROOT = self.root
+        status.LOGS_DIR = self.root / "logs"
+        status.OUTPUT_DIR = self.root / "output"
+
+    def tearDown(self):
+        for k, v in self._saved["runs"].items():
+            setattr(runs, k, v)
+        publish.PUBLISH_DIR = self._saved["pub"]
+        for k, v in self._saved["status"].items():
+            setattr(status, k, v)
+        self.tmp.cleanup()
+
+    def test_collect_shape(self):
+        runs.stage_start("ep1", "music", kind="episode", total=4, pid=os.getpid())
+        runs.progress("ep1", "music", 2, 4)
+        io.atomic_write_json(publish.PUBLISH_DIR / "ep1.json",
+                             {"status": "pending", "title": "Rain"})
+        view = status.collect()
+        self.assertEqual([r["run_id"] for r in view["running"]], ["ep1"])
+        self.assertEqual(view["running"][0]["done"], 2)
+        self.assertEqual(view["queue"]["counts"]["pending"], 1)
+        self.assertEqual(view["ledger"]["events"], 2)
+        self.assertIn("free_gb", view["resources"])
+
+    def test_render_text_and_json(self):
+        runs.stage_start("ep1", "music", total=4, pid=os.getpid())
+        view = status.collect()
+        text = status.render_text(view)
+        self.assertIn("現在", text)
+        self.assertIn("ep1", text)
+        self.assertIn("上片佇列", text)
+        self.assertEqual(json.loads(status.render_json(view))["running"][0]["run_id"], "ep1")
+
+    def test_collect_limit_zero_returns_all(self):
+        for i in range(3):
+            runs.stage_start(f"ep{i}", "music")
+        self.assertEqual(len(status.collect(limit=1)["runs"]), 1)
+        self.assertEqual(len(status.collect(limit=0)["runs"]), 3)    # --run 查舊 run 用
+
+    def test_render_run_detail(self):
+        runs.stage_start("ep1", "music")
+        runs.stage_end("ep1", "music", runs.OK)
+        text = status.render_text(status.collect(), run="ep1")
+        self.assertIn("run ep1", text)
+        self.assertIn("music", text)
+
+    def test_failures_only_when_clean(self):
+        self.assertIn("沒有問題", status.render_text(status.collect(), failures_only=True))
+
+    def test_page_has_placeholders(self):
+        self.assertIn("__INTERVAL__", status.PAGE)
+        self.assertIn("/api/status", status.PAGE)
+
+    def test_pad_handles_cjk_width(self):
+        self.assertEqual(status._w("定裝參考"), 8)
+        self.assertEqual(status._w("ref01"), 5)
+        self.assertEqual(status._w(status._pad("定裝參考", 12)), 12)
+
+

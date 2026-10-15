@@ -19,12 +19,21 @@
   LOFI_RELEASE_AI_CREDITS   AI 揭露範圍（預設 all_audio；DistroKid AI Credits）
   LOFI_RELEASE_PRICE_USD    Gumroad 定價 USD（0＝名稱你的價錢）
   LOFI_QC_BLOCKING_FLAGS    品檢要擋掉的 flag（母帶修不掉的才擋）
+  LOFI_NOTIFY               0＝關閉所有通知（產線行為完全不變）
+  LOFI_SMTP_HOST/PORT/SSL   Gmail SMTP 連線（預設 smtp.gmail.com:465 SSL）
+  LOFI_SMTP_USER/PASS       SMTP 帳號／應用程式密碼（或放 .secrets/notify.json）
+  LOFI_NOTIFY_FROM/TO       寄件者／收件者（TO 可逗號分隔多個）
+  LOFI_NOTIFY_MIN_LEVEL     通知門檻 debug|info|warn|error（預設 info）
+  LOFI_STATUS_PORT          `lofi status --serve` 監控 UI 埠（預設 8787）
+  LOFI_STATUS_STALE_MIN     階段閒置幾分鐘且行程未知 → 判可疑（預設 60）
 
 查目前值：`lofi config`（或 --json / --sh / --licenses）。
 """
 import json
 import os
 from pathlib import Path
+
+from lofi.paths import SECRETS_DIR
 
 
 def _env(name, default):
@@ -81,6 +90,31 @@ IPADAPTER_MODELS = ("ip-adapter-plus_sdxl_vit-h.safetensors",
 # ── 資源保護 ─────────────────────────────────────────────────────────
 # 生成前要求內接碟至少這麼多可用 GB（見 AGENTS.md 資源限制）
 MIN_FREE_GB = float(_env("LOFI_MIN_FREE_GB", "20"))
+
+
+# ── 通知（notify；單人維運的狀態通知）──────────────────────────────────
+# Email（Gmail SMTP）：憑證放 .secrets/notify.json（不進版控）或用 LOFI_SMTP_* 環境變數。
+# 一定要能「完全不影響產線」：LOFI_NOTIFY=0 全域關閉；設定不全時 notify 自動視為關閉。
+# 詳見 src/lofi/notify.py。
+NOTIFY_ENABLED = _bool_env("LOFI_NOTIFY", True)
+NOTIFY_FILE = SECRETS_DIR / "notify.json"
+NOTIFY_SMTP_HOST = _env("LOFI_SMTP_HOST", "smtp.gmail.com")
+NOTIFY_SMTP_PORT = int(_env("LOFI_SMTP_PORT", "465"))
+NOTIFY_SMTP_SSL = _bool_env("LOFI_SMTP_SSL", True)
+NOTIFY_SMTP_USER = _env("LOFI_SMTP_USER", "")
+NOTIFY_SMTP_PASS = _env("LOFI_SMTP_PASS", "")             # Gmail 應用程式密碼
+NOTIFY_FROM = _env("LOFI_NOTIFY_FROM", "")                # 空＝用 username
+NOTIFY_TO = tuple(t.strip() for t in _env("LOFI_NOTIFY_TO", "").split(",") if t.strip())
+NOTIFY_MIN_LEVEL = _env("LOFI_NOTIFY_MIN_LEVEL", "info")  # debug|info|warn|error
+NOTIFY_DEDUPE_MIN = int(_env("LOFI_NOTIFY_DEDUPE_MIN", "30"))
+NOTIFY_TIMEOUT = float(_env("LOFI_NOTIFY_TIMEOUT", "15"))
+
+
+# ── 監控（status；`lofi status` 與本機 UI）────────────────────────────
+# 開著的階段若行程已不在 → 判「疑似中斷」；行程未知、且閒置超過此分鐘數 → 可疑。
+STATUS_STALE_MIN = int(_env("LOFI_STATUS_STALE_MIN", "60"))
+STATUS_PORT = int(_env("LOFI_STATUS_PORT", "8787"))       # `lofi status --serve` 預設埠
+STATUS_RECENT = int(_env("LOFI_STATUS_RECENT", "8"))      # 最近 run 顯示筆數
 
 
 # ── 發行（release / 上架包）─────────────────────────────────────────────
@@ -267,6 +301,14 @@ def as_dict():
         "zimage_lora_weight": ZIMAGE_LORA_WEIGHT,
         "upscale_model": UPSCALE_MODEL,
         "min_free_gb": MIN_FREE_GB,
+        "notify_enabled": NOTIFY_ENABLED,
+        "notify_file": str(NOTIFY_FILE),
+        "notify_to": ", ".join(NOTIFY_TO) or "（未設定；見 .secrets/notify.json）",
+        "notify_smtp": f"{NOTIFY_SMTP_USER or '（未設定）'}@{NOTIFY_SMTP_HOST}:{NOTIFY_SMTP_PORT}"
+                       + ("" if NOTIFY_SMTP_SSL else "（STARTTLS）"),
+        "notify_min_level": NOTIFY_MIN_LEVEL,
+        "status_port": STATUS_PORT,
+        "status_stale_min": STATUS_STALE_MIN,
         "release_artist": RELEASE_ARTIST or "（未設定；見 LOFI_RELEASE_ARTIST）",
         "release_label": RELEASE_LABEL or "（無）",
         "release_genre": RELEASE_GENRE,

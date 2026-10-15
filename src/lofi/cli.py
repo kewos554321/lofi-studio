@@ -17,6 +17,9 @@
   lofi upload    [yt_upload 參數]（需 Google 套件＋憑證，用 .venv）
   lofi release   plan | package（把生成 run 包成上架包；串流/商店，見 docs/DISTRIBUTION.md）
   lofi character show | check（主角定裝 + LoRA 訓練集一致性檢查）
+  lofi runs      begin | progress | end | run-end | ls（產線 run 帳本）
+  lofi status    [--json|--watch SEC|--run ID|--failures|--quiet|--serve]
+  lofi notify    --status | --test | --subject S --body B（Email 狀態通知；fail-soft）
   lofi config    [--json|--sh|--licenses]（集中設定：模型檔名 / ComfyUI 位址 / 授權）
   lofi license   check | models（商用授權稽核）
 
@@ -44,6 +47,9 @@ MODULES = {
     "license":     ("lofi.license",     "商用授權稽核（掃模型與授權狀態）"),
     "release":     ("lofi.release",     "把生成 run 包成上架包（plan | package；串流/商店）"),
     "character":   ("lofi.character",   "主角定裝檢視 + LoRA 訓練集一致性檢查（show | check）"),
+    "runs":        ("lofi.runs",        "產線 run 帳本（run × stage × 進度；begin/end/progress/ls）"),
+    "status":      ("lofi.status",      "產線狀態（現在跑到哪／上片佇列／資源；--serve 監控 UI）"),
+    "notify":      ("lofi.notify",      "狀態通知（Email；--status/--test；fail-soft 不影響產線）"),
 }
 
 
