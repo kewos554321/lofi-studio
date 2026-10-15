@@ -32,6 +32,8 @@
 #   --upscale NAME                 生圖放大模型（預設 RealESRGAN_x4plus_anime_6B.pth；未安裝則跳過）
 #   --upscale-out WxH              放大後尺寸（sdxl 預設生成尺寸×2；zimage 預設 1920x1080）
 #   --no-upscale                   關閉生圖放大
+#   --artwork-out WxH              交付 ZIP 用高畫質橫式圖的尺寸（預設 3840x2160＝4K）
+#   --no-artwork                   不產高畫質交付圖（影片仍可正常跑）
 #   --size WxH                     生圖尺寸（預設 768x512）
 #   --ckpt NAME                    生圖 checkpoint（**只給 sdxl 引擎用**）
 #   --image-engine sdxl|zimage     生圖引擎（預設 zimage＝Z-Image Turbo＋主角 LoRA）
@@ -90,6 +92,8 @@ CG_ARGS=""
 PRIVACY="private"
 ARCHIVE=""
 KEEP_VISUAL=0
+ARTWORK=1                                        # 生 4K 高畫質交付圖（給交付 ZIP；--no-artwork 關）
+ARTWORK_OUT="3840x2160"
 NO_UPLOAD=0
 NO_CLEANUP=0
 DRY=0
@@ -135,6 +139,8 @@ while [ $# -gt 0 ]; do
     --privacy) PRIVACY="$2"; shift 2;;
     --archive) ARCHIVE="$2"; shift 2;;
     --keep-visual) KEEP_VISUAL=1; shift;;
+    --artwork-out) ARTWORK_OUT="$2"; shift 2;;
+    --no-artwork) ARTWORK=0; shift;;
     --no-upload) NO_UPLOAD=1; shift;;
     --no-cleanup) NO_CLEANUP=1; shift;;
     --smoke)   shift;;
@@ -194,6 +200,15 @@ stage_music() {
 }
 
 # ---------- 第 2 段：圖片 ----------
+# ---------- 第 2 段：圖片 ----------
+# 挑「影片要用的封面圖」：排除後處理過的衍生圖（`_NN_fix-…`／`anim-`／`cmp-`／`mask-`，
+# 見 docs/NAMING.md）。不排除的話，交付 ZIP 用的 4K 放大圖會被當成影片來源
+# （cinemagraph 跑 4K：慢又吃 RAM），而影片其實只要 1080p。
+pick_cover_image() {
+  local d="$1"
+  ls -t "$d"/*.png 2>/dev/null | grep -vE '_[0-9]+_(fix|anim|cmp|mask)-' | head -1 || true
+}
+
 stage_image() {
   echo
   echo "===== [2/5] 圖片 (image) ====="
@@ -244,6 +259,22 @@ stage_image() {
         --prefix "$EPISODE" --run-id "$RUN_ID" --clean-raw \
         "${sargs[@]+"${sargs[@]}"}" "${uargs[@]+"${uargs[@]}"}"
   fi
+  # 交付 ZIP 的高畫質橫式圖來源：把影片封面 AI 放大到 4K。
+  # 商店頁顯示 1080p、買家拿到 4K（同一套圖），release package 會自動挑它（取解析度最高者）。
+  # 影片本身仍走 1080p——這裡只是多一張衍生圖（命名 <run>_NN_fix-4k.png）。
+  if [ "$ARTWORK" = 1 ] && [ "$NO_UPSCALE" = 0 ] \
+     && [ -f "$HOME/ComfyUI/models/upscale_models/${UPSCALE}" ]; then
+    local wide
+    wide="$(pick_cover_image "assets/visuals/${RUN_ID}")"
+    if [ -n "$wide" ]; then
+      echo "  高畫質交付圖: ${wide##*/} → ${ARTWORK_OUT}（AI 放大，只給交付 ZIP 用）"
+      run ./scripts/lofi zimage --from-image "$wide" --run-id "$RUN_ID" \
+          --slug fix-4k --upscale "$UPSCALE" --upscale-out "$ARTWORK_OUT" --clean-raw
+    elif [ "$DRY" = 1 ]; then
+      echo "  [dry-run] ./scripts/lofi zimage --from-image assets/visuals/${RUN_ID}/<封面>.png" \
+           "--run-id ${RUN_ID} --slug fix-4k --upscale ${UPSCALE} --upscale-out ${ARTWORK_OUT} --clean-raw"
+    fi
+  fi
   echo "  → 圖片階段完成（assets/visuals/${RUN_ID}/，含 manifest.json；ComfyUI 原檔已刪）"
 }
 
@@ -255,7 +286,7 @@ stage_video() {
   # --- 選圖 ---
   local img="$IMAGE"
   if [ -z "$img" ] && [ "$DRY" = 0 ]; then
-    img="$(ls -t "assets/visuals/${RUN_ID}"/*.png 2>/dev/null | head -1 || true)"
+    img="$(pick_cover_image "assets/visuals/${RUN_ID}")"
     if [ -z "$img" ]; then img="$(ls -t assets/visuals/*/*.png assets/visuals/*.png 2>/dev/null | head -1 || true)"; fi
   fi
   if [ "$DRY" = 1 ]; then

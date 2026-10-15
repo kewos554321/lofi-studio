@@ -119,9 +119,9 @@ CLI 統一入口：`./scripts/lofi <command>`（用專案 `.venv`／系統 pytho
 | 段 | 產物 | 底層工具 |
 |---|---|---|
 | 1 音樂 | `assets/tracks/<style>/<run>/*.mp3` + sidecar | `expand_style` → `batch_run` → `auto_qc` → `library` |
-| 2 圖片 | `assets/visuals/<kind><NN>/*.png` + manifest | `generate_visual`（ComfyUI + SDXL） |
-| 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成） |
-| 4 上傳 | YouTube 影片（預設 private） | `yt_upload`（YouTube Data API；公開/排程之後手動） |
+| 2 圖片 | `assets/visuals/<kind><NN>/*.png` + manifest（＋一張 4K 交付圖 `_fix-4k`） | `lofi zimage`（Z-Image Turbo ＋ 主角 LoRA；`--image-engine sdxl` 退回舊流程） |
+| 3 影片 | `output/episodes/<episode>/` + `publish/<episode>.json` | `make_long_lofi`（cinemagraph + 混音 + 合成 + 縮圖 + 上片資訊） |
+| 4 上傳 | YouTube 影片（預設 private，含縮圖） | `yt_upload`（YouTube Data API；公開/排程之後手動） |
 | 5 整理 | 封存到外接 `archive/<episode>/` | `archive_episode.sh` |
 
 ```bash

@@ -462,12 +462,16 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 | 段 | 指令本體 | 產物 |
 |---|---|---|
 | `music` | `expand_style` → `batch_run` → `auto_qc` → `library` | `assets/tracks/<style>/<run>/` |
-| `image` | `lofi zimage`（**Z-Image Turbo ＋ 主角 LoRA＝Moni**；`--image-engine sdxl` 退回舊 SDXL） | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
+| `image` | `lofi zimage`（**Z-Image Turbo ＋ 主角 LoRA＝Moni**；`--image-engine sdxl` 退回舊 SDXL）＋ **AI 放大一張 4K 交付圖** | `assets/visuals/<kind><NN>/`（含 manifest.json；`--clean-raw` 刪 ComfyUI 原檔） |
 | `video` | `make_long_lofi`（cinemagraph + 混音 + 合成 + metadata） | `output/episodes/<episode>/`、`publish/<episode>.json` |
-| `upload` | `yt_upload`（YouTube Data API，預設 private） | `publish/<episode>.json` 寫回 youtube_url |
+| `upload` | `yt_upload`（YouTube Data API，預設 private）＋**自動設縮圖** | `publish/<episode>.json` 寫回 youtube_url |
 | `cleanup` | `archive_episode.sh` | 外接 `archive/<episode>/`（並刪中間檔） |
 
 - 影片段預設從 `library` 挑 `keep` 曲目（`--limit 16`、`--tracks` 覆寫）；未給 `--image` 就挑 `assets/visuals/<run-id>/` 最新圖。
+- **`image` 段會多做一張 4K 交付圖**（`<run>_NN_fix-4k.png`，AI 放大，約 15 秒）：商店頁顯示 1080p、
+  買家拿 4K，`release package` 會自動挑它（`pick_wide_cover` 取解析度最高者）。尺寸用 `--artwork-out`，
+  不要就 `--no-artwork`。挑「影片要用的圖」時會**排除** `_fix-/anim-/cmp-/mask-` 衍生檔——否則 4K 圖
+  會被當成影片來源，cinemagraph 跑 4K（慢又吃 RAM）。
 - 清理：`music` 段的 `batch_run` 帶 `--clean-raw`（刪 `~/ComfyUI/output/audio` 原檔）、`image` 段帶 `--clean-raw`（刪原圖），ComfyUI 輸出不會殘留；`cleanup` 段則封存成片到外接 `archive/`。
 - `--count 0`（預設）＝音樂段不生成、沿用既有曲目。
 - `all` 時可用 `--no-upload` / `--no-cleanup` 略過第 4/5 段；上傳可見性用 `--privacy private|unlisted|public`（預設 private）。
