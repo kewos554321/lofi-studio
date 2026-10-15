@@ -248,6 +248,7 @@ def build_listing(rec, tags=None, price_usd=None):
         "heading": "WHAT YOU GET",
         "items": [f"{n} tracks in {fmt}, {mm.fmt_ts(dur)}",
                   f"Album cover, {COVER_SIZE} × {COVER_SIZE} px",
+                  f"Cover art (16:9) in {ARTWORK_SIZE[0]} × {ARTWORK_SIZE[1]} px",
                   "Tracklist",
                   "Liner notes listing every model and licence used"],
         "closing": "One .zip download. The files are yours to keep.",
