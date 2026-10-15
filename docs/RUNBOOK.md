@@ -403,7 +403,7 @@ AI 放大成 4K 一起收進交付 ZIP：
 | 光線 | 色溫呼吸 | `--temp` | `0`（關） | 全域 |
 | 物體 | 蒸氣上升 | `--steam` `--steam-pos cx,cy,r` | `0`（關） | `0.62,0.72,0.10` |
 | 物體 | 玻璃水珠 | `--drops` `--drop-region` | `0`（關） | 同 window |
-| 物體 | 灰塵微粒 | `--dust` `--dust-region` | `0`（關） | 同 window |
+| 物體 | 灰塵微粒 | `--dust` `--dust-size` `--dust-region` | `0`（關） | 同 window |
 | 物體 | 盆栽微晃 | `--sway` `--plant` | `0`（關） | `0.04,0.52,0.70,0.82` |
 | 物體 | 窗簾輕擺 | `--curtain-sway` `--curtain-region` | `0`（關） | `0.51,0.15,0.63,0.66` |
 | 表面 | 書頁光暈 | `--sheen` `--sheen-region` | `0`（關） | `0.55,0.87,0.30` |

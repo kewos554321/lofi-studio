@@ -21,7 +21,7 @@ make_cinemagraph.py — 從一張 lofi 靜圖產生「無縫循環的局部微�
   動態物體類
     --steam           蒸氣/熱氣上升（咖啡杯、湯）
     --drops           玻璃水珠滑落（貼在玻璃上的水痕，非室內下雨）
-    --dust            灰塵微粒在光束中飄浮
+    --dust            灰塵微粒在光束中飄浮（--dust-size 可調粒徑：0=細點、4~8=明顯、>8=大顆）
     --sway            盆栽葉片微晃
     --curtain-sway    窗簾布幔輕擺
     --rain            窗內雨絲（預設 0=關；易被看成室內下雨）
@@ -48,7 +48,7 @@ make_cinemagraph.py — 從一張 lofi 靜圖產生「無縫循環的局部微�
   --curtain-region x0,y0,x1,y1 窗簾輕擺（預設 0.51,0.15,0.63,0.66）
   --steam-pos cx,cy,r         蒸氣來源與範圍（預設 0.62,0.72,0.10）
   --drop-region x0,y0,x1,y1   玻璃水珠（預設同 --window）
-  --dust-region x0,y0,x1,y1   灰塵（預設同 --window）
+  --dust-region x0,y0,x1,y1   灰塵範圍（0~1；預設同 --window；`full`＝整個畫面）
   --sheen-region cx,cy,r      書頁柔光（預設 0.55,0.87,0.30）
 """
 import argparse
@@ -232,7 +232,12 @@ class Cinemagraph:
         phy = self.rng.uniform(0.0, TAU, n).astype(np.float32)
         base = self.rng.uniform(0.15, 0.55, n).astype(np.float32)
         tw = self.rng.uniform(0.0, TAU, n).astype(np.float32)
-        return cx, cy, ax, ay, phx, phy, base, tw
+        # 粒徑（像素）：0＝舊的 1px 細點；>0＝每顆再帶 ±40% 變化（大小不一才自然）
+        if self.args.dust_size > 0:
+            size = self.args.dust_size * self.rng.uniform(0.6, 1.4, n).astype(np.float32)
+        else:
+            size = np.zeros(n, np.float32)
+        return cx, cy, ax, ay, phx, phy, base, tw, size
 
     def _make_steam(self, n):
         cycles = self.rng.integers(1, 3, n).astype(np.float32)
@@ -347,7 +352,7 @@ class Cinemagraph:
     def dust_layer(self, t):
         if self.args.dust <= 0:
             return None
-        cx, cy, ax, ay, phx, phy, base, tw = self.motes
+        cx, cy, ax, ay, phx, phy, base, tw, size = self.motes
         phase = TAU * t / self.D
         layer = np.zeros((self.h, self.w), np.float32)
         xs = cx + ax * np.sin(phase + phx)
@@ -355,12 +360,18 @@ class Cinemagraph:
         al = base * (0.35 + 0.65 * (0.5 + 0.5 * np.sin(phase + tw)))
         for i in range(len(cx)):
             xi, yi = int(round(xs[i])), int(round(ys[i]))
-            if 0 < xi < self.w - 1 and 0 < yi < self.h - 1:
-                v = al[i]
+            if not (0 < xi < self.w - 1 and 0 < yi < self.h - 1):
+                continue
+            v = al[i]
+            if size[i] > 0:
+                # 大顆：用柔點（高斯），夠亮又不會有硬邊（與 steam/drops 同一工具）
+                self._add_blob(layer, xs[i], ys[i], size[i], size[i], v)
+            else:
                 layer[yi, xi] = max(layer[yi, xi], v)
                 for ddx, ddy, w in ((-1, 0, .45), (1, 0, .45), (0, -1, .45), (0, 1, .45)):
                     layer[yi + ddy, xi + ddx] = max(layer[yi + ddy, xi + ddx], v * w)
-        return layer * self.args.dust
+        # 大顆柔點會疊加；夾在 1.0 內避免過曝
+        return np.clip(layer, 0.0, 1.0) * self.args.dust
 
     def carlight_layer(self, t):
         a = self.args
@@ -443,9 +454,11 @@ class Cinemagraph:
 # ----------------------------- 主程式 -----------------------------
 
 def parse_rect(s):
+    if s.strip().lower() in ("full", "all"):
+        return [0.0, 0.0, 1.0, 1.0]      # 整個畫面（最省事；填滿就沒有「切齊的框」問題）
     v = [float(x) for x in s.split(",")]
     if len(v) != 4:
-        raise argparse.ArgumentTypeError("需要 x0,y0,x1,y1")
+        raise argparse.ArgumentTypeError("需要 x0,y0,x1,y1（或 full＝整個畫面）")
     return v
 
 
@@ -491,6 +504,8 @@ def main():
     ap.add_argument("--drop-count", type=int, default=14)
     ap.add_argument("--dust", type=float, default=0.0, help="灰塵微粒（預設 0=關）")
     ap.add_argument("--dust-count", type=int, default=40)
+    ap.add_argument("--dust-size", type=float, default=0.0,
+                    help="灰塵粒徑（像素；0=預設細點，1~3 小顆、4~8 明顯、>8 大顆飄塵）")
     ap.add_argument("--sway", type=float, default=0.0, help="盆栽葉片擺幅（預設 0=關）")
     ap.add_argument("--curtain-sway", type=float, default=0.0, help="窗簾輕擺幅度（0=關）")
     ap.add_argument("--rain", type=float, default=0.0, help="窗內雨絲（預設 0=關；易被看成室內下雨）")
@@ -505,7 +520,8 @@ def main():
     ap.add_argument("--plant", type=parse_rect, default=[0.04, 0.52, 0.70, 0.82])
     ap.add_argument("--curtain-region", type=parse_rect, default=[0.51, 0.15, 0.63, 0.66])
     ap.add_argument("--drop-region", type=parse_rect, default=[0.33, 0.045, 0.70, 0.585])
-    ap.add_argument("--dust-region", type=parse_rect, default=[0.33, 0.045, 0.70, 0.585])
+    ap.add_argument("--dust-region", type=parse_rect, default=[0.33, 0.045, 0.70, 0.585],
+                    help="灰塵範圍 x0,y0,x1,y1（0~1；預設同 --window）；full＝整個畫面")
     ap.add_argument("--sheen-region", type=parse_circle, default=[0.55, 0.87, 0.30])
     ap.add_argument("--check-loop", action="store_true", help="只驗證頭尾無縫，不輸出影片")
     args = ap.parse_args()

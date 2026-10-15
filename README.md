@@ -595,7 +595,7 @@ potted plant, lo-fi anime illustration, soft warm lighting, muted colors, master
 | 光線 | 色溫呼吸 | `--temp` | 整體暖↔冷緩慢漂移（預設 0=關） |
 | 物體 | 蒸氣上升 | `--steam` `--steam-pos cx,cy,r` | 咖啡杯/湯的熱氣（背景要暗才明顯）|
 | 物體 | 玻璃水珠 | `--drops` `--drop-region` | 貼在玻璃上的水珠緩慢滑落 |
-| 物體 | 灰塵微粒 | `--dust` `--dust-region` | 光束中飄浮、微微閃爍的光點 |
+| 物體 | 灰塵微粒 | `--dust` `--dust-size` `--dust-region` | 光束中飄浮、微微閃爍的光點（`--dust-size` 可加大粒徑） |
 | 物體 | 盆栽微晃 | `--sway` `--plant x0,y0,x1,y1` | 葉片輕擺，越靠葉尖擺幅越大 |
 | 物體 | 窗簾輕擺 | `--curtain-sway` `--curtain-region` | 布幔緩慢擺動 |
 | 表面 | 書頁光暈 | `--sheen` `--sheen-region cx,cy,r` | 柔光緩慢掃過 |
