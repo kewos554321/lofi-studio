@@ -143,42 +143,59 @@ def synthesize_config(style):
 
 # 專輯內同名時的修飾語池（key 用小寫比對；曲名來自 sidecar 的 mood 經 prettify）。
 # 池子用完才退回 ` (pt. N)`，所以任何風格都不會撞名，只是名字會比較制式。
+# 每個池子至少 12 個：一集 36 首、mood 只會落在少數幾個句子上（實測 5 個），
+# 同一個 base 可能出現 8 次以上，池子太小就會看到 `(pt. 8)` 這種灌水感的名字。
 _TITLE_VARIANTS = {
     "slow weekend": ["Second Cup", "Open Window", "Warm Rug", "Late Sun", "Soft Rain",
-                     "No Plans", "Kettle On", "Sunlit Floor", "Nothing to Do"],
+                     "No Plans", "Kettle On", "Sunlit Floor", "Nothing to Do",
+                     "Long Shadows", "Slow Morning", "Bare Feet"],
     "cozy morning coffee": ["First Sip", "Warm Mug", "Window Seat", "Slow Stir",
                             "Second Cup", "Steam Rising", "Wooden Table", "Quiet Kitchen",
-                            "Morning Light"],
+                            "Morning Light", "Honey Light", "Warm Hands", "Refill"],
     "gentle start of the day": ["First Light", "Soft Steps", "Curtains Open", "Slow Wake",
-                                "Warm Room", "Quiet Morning", "Bare Feet"],
+                                "Warm Room", "Quiet Morning", "Bare Feet",
+                                "Open Curtains", "Sun on the Floor", "Deep Breath",
+                                "Soft Hum", "Still Drowsy"],
     "sunlit window": ["Dust Motes", "Curtain Breeze", "Warm Glass", "Afternoon",
-                      "Plant on the Sill"],
-    "spring morning breeze": ["Open Door", "Early Light"],
+                      "Plant on the Sill", "Lace Shadows", "Bright Sill", "Morning Glow",
+                      "Open Shutters", "Warm Wood", "Quiet Street", "Half Awake"],
+    "spring morning breeze": ["Open Door", "Early Light", "Fresh Air", "Curtain Lift",
+                              "Birds Outside", "Cool Air", "Green Light", "Window Open",
+                              "Soft Wind", "First Warmth", "Petals", "Morning Air"],
 }
 
 
-def unique_titles(titles):
+def unique_titles(titles, avoid=()):
     """專輯內曲名去重：同名者依出現順序加一個**不重複的修飾語**
     （例 `Slow Weekend, Second Cup`），池子用完才退回 ` (pt. N)`。
 
     為什麼：sidecar 的 `mood` 會重複（同風格多首共用同一句），同名會讓 DSP／版稅申報混淆；
     而 `(pt. 2)` 這種純編號在同一張專輯裡看起來像灌水。
     用「出現順序」配發（不隨機），確保重跑結果一致、可重現。
+
+    `avoid`：**這個清單之外已用過的曲名**（例：同一張專輯其他卷的曲名，見
+    `release.sibling_volume_titles`）。撞到就往下一個修飾語找，跨卷才不會撞名。
     """
-    seen = {}
+    used = {str(a or "").strip().lower() for a in (avoid or []) if str(a or "").strip()}
     out = []
     for t in titles:
         key = str(t or "").strip().lower()
-        n = seen.get(key, 0) + 1
-        seen[key] = n
-        if n == 1:
-            out.append(t)                      # 第一次出現：保留原名
-            continue
-        pool = _TITLE_VARIANTS.get(key) or []
-        if n - 2 < len(pool):
-            out.append(f"{t}, {pool[n - 2]}")  # 第二次起：加不重複的修飾語
-        else:
-            out.append(f"{t} (pt. {n})")       # 池子用完：退回原本的編號寫法
+        n = 0
+        while True:
+            n += 1
+            if n == 1:
+                cand = t                          # 第一次出現：保留原名
+            else:
+                pool = _TITLE_VARIANTS.get(key) or []
+                if n - 2 < len(pool):
+                    cand = f"{t}, {pool[n - 2]}"  # 第二次起：加不重複的修飾語
+                else:
+                    cand = f"{t} (pt. {n})"       # 池子用完：退回原本的編號寫法
+            ck = str(cand or "").strip().lower()
+            if ck not in used:                    # 沒被別卷用走（也沒被本卷用走）就採用
+                break
+        used.add(ck)
+        out.append(cand)
     return out
 
 

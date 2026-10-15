@@ -1177,10 +1177,53 @@ class TestRelease(unittest.TestCase):
         self.assertEqual(out, ["Slow Weekend", "Slow Weekend, Second Cup",
                                "Slow Weekend, Open Window"])
         self.assertEqual(len(set(out)), 3)
-        # 池子用完（10 個修飾語之後）仍不得同名
-        many = release.unique_titles(["Slow Weekend"] * 14)
-        self.assertEqual(len(set(many)), 14)
-        self.assertIn("Slow Weekend (pt. 12)", many)
+        # 池子用完之後仍不得同名（退回 `(pt. N)`）
+        pool = meta._TITLE_VARIANTS["slow weekend"]
+        many = release.unique_titles(["Slow Weekend"] * (len(pool) + 4))
+        self.assertEqual(len(set(many)), len(pool) + 4)
+        self.assertIn("Slow Weekend (pt. %d)" % (len(pool) + 2), many)
+
+    def test_unique_titles_avoids_titles_used_by_other_volumes(self):
+        """跨卷去重：別卷已用過的曲名要往下一個修飾語跳（不然同一張專輯會出現同名曲）。
+
+        踩過的坑：同一個 run 拆 Vol. 1/2/3 分三次打包，每卷各自去重 → 36 首只有 15 個唯一曲名。
+        """
+        out = meta.unique_titles(["Slow Weekend"] * 2,
+                                 avoid=["Slow Weekend", "Slow Weekend, Second Cup"])
+        self.assertEqual(out, ["Slow Weekend, Open Window", "Slow Weekend, Warm Rug"])
+        # 一律不得與 avoid 撞名
+        self.assertFalse(set(out) & {"Slow Weekend", "Slow Weekend, Second Cup"})
+        # 沒有 avoid 時行為不變
+        self.assertEqual(meta.unique_titles(["Slow Weekend"]),
+                         ["Slow Weekend"])
+
+    def test_title_variant_pools_are_big_enough_for_a_full_run(self):
+        """一集 36 首只有少數幾個 mood，池子太小就會看到 `(pt. 8)` 這種灌水名。"""
+        for key, pool in meta._TITLE_VARIANTS.items():
+            self.assertGreaterEqual(len(pool), 12, f"{key} 的修飾語池只有 {len(pool)} 個")
+            self.assertEqual(len(set(pool)), len(pool), f"{key} 的修飾語有重複")
+
+    def test_sibling_volume_titles_reads_same_run_only(self):
+        """只收「同一個 run」的其他卷曲名；別的 run（前綴相同也不算）不可以被吃進來。"""
+        with tempfile.TemporaryDirectory() as td:
+            rel = Path(td)
+            for name, run, titles in (("ep_1", "ep", ["A", "B"]),
+                                      ("ep_2", "ep", ["C"]),
+                                      ("ep_99", "ep-other", ["X"]),      # 不同 run → 不收
+                                      ("ep_decoy", "ep", [])):           # 沒有 tracks
+                d = rel / name
+                d.mkdir(parents=True)
+                (d / "release.json").write_text(json.dumps(
+                    {"run": run, "tracks": [{"title": t} for t in titles]}))
+            (rel / "ep_broken").mkdir()
+            (rel / "ep_broken" / "release.json").write_text("{ 壞掉")
+            old = release.RELEASES_DIR
+            release.RELEASES_DIR = rel
+            try:
+                self.assertEqual(release.sibling_volume_titles("ep"), {"A", "B", "C"})
+                self.assertEqual(release.sibling_volume_titles("nope"), set())
+            finally:
+                release.RELEASES_DIR = old
 
     def test_track_title_prefers_mood(self):
         self.assertEqual(release.track_title("x.mp3", {"mood": "rain on the window"}),

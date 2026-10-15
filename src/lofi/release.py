@@ -715,7 +715,7 @@ def _select_tracks(rows, tokens):
 
 
 def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, min_score=None,
-             blocking=None, isrc_overrides=None):
+             blocking=None, isrc_overrides=None, avoid_titles=()):
     """回傳 (來源目錄, [{...}], 被品檢排除的 [(row, 原因)])，曲目依檔名順序（即生成順序）。
 
     選曲優先序：
@@ -724,6 +724,9 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
       3. `min_score`（只留自動品檢分數 ≥ N 的；沒有品檢紀錄的一律排除）
     最後一律套 `blocking`（品檢 flag 黑名單）。
     曲名去重與編號在最後做，所以重跑結果穩定。
+
+    `avoid_titles`：**同一張專輯其他卷已經用過的曲名**（見 `sibling_volume_titles`）。
+    多卷分開打包時，每卷各自去重擋不住跨卷撞名，所以把別卷用過的曲名餵進來避開。
     """
     d = find_run_dir(style, run)
     audios = sorted(p for p in d.iterdir() if p.is_file() and cat.is_audio(p))
@@ -770,11 +773,35 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
                  f"（檢查 --tracks/--limit/--offset/--min-score/--exclude-flags）"
                  + (f"\n  被品檢排除 {len(dropped)} 首；要硬用請加 --exclude-flags ''（空字串＝不過濾）"
                     if dropped else ""))
-    titles = unique_titles([r["title"] for r in rows])
+    titles = unique_titles([r["title"] for r in rows], avoid=avoid_titles)
     for i, (r, t) in enumerate(zip(rows, titles), 1):
         r["title"] = t
         r["no"] = i
     return d, rows, dropped
+
+
+def sibling_volume_titles(run):
+    """同一個 run 的**其他卷**（`output/releases/<run>_N/`）已經用過的曲名。
+
+    為什麼要這支：同一張專輯拆成 Vol. 1/2/3 分三次打包時，每一卷各自只在自己的
+    12 首裡去重 → 跨卷會撞名。實測踩過：36 首只有 15 個唯一曲名，Gumroad 三張專輯
+    的曲目表彼此重複。打包某卷時把別卷用過的曲名餵進 `unique_titles(avoid=...)`。
+
+    只認 `release.json` 裡 `run` 相同的（避免把 `cozy-1hr-021` 當成 `cozy-1hr-02` 的卷）。
+    """
+    used = set()
+    for p in sorted(RELEASES_DIR.glob(f"{run}_*")):
+        rj = p / "release.json"
+        if not rj.exists():
+            continue
+        try:
+            rec = json.loads(rj.read_text())
+        except (OSError, ValueError):
+            continue
+        if (rec.get("run") or "") != run:
+            continue
+        used.update(t["title"] for t in (rec.get("tracks") or []) if t.get("title"))
+    return used
 
 
 def load_prior_tracks(release_json):
@@ -1196,11 +1223,16 @@ def find_orphans(audio_dir, expected, exts=("*.wav", "*.flac")):
 def cmd_plan(args):
     # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
     prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
+    # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
+    avoid = sibling_volume_titles(args.run)
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
                                 tracks=_parse_tracks(args.tracks), min_score=args.min_score,
-                                blocking=_parse_flags(args.exclude_flags))
+                                blocking=_parse_flags(args.exclude_flags),
+                                avoid_titles=avoid)
+    if avoid:
+        print(f"跨卷去重：避開同一 run 其他卷已用的 {len(avoid)} 個曲名")
     cover = Path(args.cover) if args.cover else pick_cover(args.visual_run)
     print(f"來源：{cat.relpath(d)}（取 {len(rows)} 首"
           + (f"，offset {args.offset}" if args.offset else "")
@@ -1270,11 +1302,16 @@ def cmd_package(args):
 
     dest = RELEASES_DIR / args.run
     prior = load_prior_tracks(dest / "release.json")
+    # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
+    avoid = sibling_volume_titles(args.run)
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
                                 tracks=_parse_tracks(args.tracks), min_score=args.min_score,
-                                blocking=_parse_flags(args.exclude_flags))
+                                blocking=_parse_flags(args.exclude_flags),
+                                avoid_titles=avoid)
+    if avoid:
+        print(f"跨卷去重：避開同一 run 其他卷已用的 {len(avoid)} 個曲名")
     artist = args.artist or config.RELEASE_ARTIST
     album = args.album or mm.prettify(rows[0]["style"] or args.run)
 
