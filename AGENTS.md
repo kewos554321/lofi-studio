@@ -154,10 +154,10 @@ python3 -m unittest discover -s tests -v
 - 模型放內部碟 `~/ComfyUI/models`，目前約 37GB（含 ACE-Step 音訊與 SDXL）；**單一 SDXL checkpoint 就 6.5GB**。
 - 內部碟可用空間**建議維持 >20GB**（macOS 與 swap 需要），逼近就清。
 - 大檔（成片、mix、模型）能放外接（`output/` 已在 `WJ_SATA`）就別放內部。
-- **無損母帶（FLAC）一定要放外接**：FLAC 是同長度 mp3 的 **~8 倍**（實測 48kHz 立體 ≈30MB/首 vs mp3 3.6MB）。
-  內接只有 228GB，1000 首 FLAC 就吃掉 ~30GB。`generate --format flac` 只把**工作用 mp3** 留 `assets/tracks`（內接），
-  母帶寫 `output/masters/<style>/<run>/`（外接）；`release package` 會自動優先採用無損母帶。
-  flac 模式下 `--clean-raw` 更重要（ComfyUI 原始 FLAC 也是 30MB 級、先落內接）。詳見 `docs/DISTRIBUTION.md` §6-3。
+- **無損母帶（FLAC）一定要放外接**：FLAC 是同長度 mp3 的 **3.4 倍**（實測 48kHz 立體 16-bit ≈14.7MB/首 vs mp3 4.3MB）。
+  內接只有 228GB，1000 首 FLAC 約吃掉 15GB。`generate --format flac`（**產線音樂段已預設**）只把**工作用 mp3**
+  留 `assets/tracks`（內接），母帶寫 `output/masters/<style>/<run>/`（外接）；`release package` 自動優先採用無損母帶。
+  flac 模式下 `--clean-raw` 更重要（ComfyUI 原始 FLAC 也十幾 MB、先落內接）。詳見 `docs/DISTRIBUTION.md` §6-3。
 - **外接 `WJ_SATA` 是 USB/ExFAT、實測讀取僅 ~86MB/s，不適合放模型**：內部 NVMe 是 ~2.3GB/s，載入 SDXL（6.5GB）內部約 3 秒、外接要 ~80 秒。推理本身吃 RAM 不吃碟，但**載入會重複付**（16GB 下 ACE-Step 9GB 與 SDXL 6.5GB 互斥，切換就會重載）。
 - 所以模型留內部碟，**該控制的是模型數量**（用完的 checkpoint 清掉），不是把模型搬去慢碟。要擴充請換 USB 3.2 / Thunderbolt SSD。
 - **測試性的大模型用完就刪**；長期可考慮 `extra_model_paths.yaml` 把模型指到外接碟（僅限快碟）。

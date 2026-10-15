@@ -114,12 +114,14 @@ output/releases/coastal01/
 
 ### 3.3 兩層存放：為什麼無損母帶不能放內接
 
-實測（48kHz 立體、120 秒）：**mp3 3.6MB vs FLAC 30.8MB（8.6 倍）**。內接碟只有 228GB：
+實測（本產線實際輸出：48kHz 立體 **16-bit**、120 秒）：**mp3 4.3MB vs FLAC 14.7MB（3.4 倍）**。
+（早期文件寫 30.8MB／8.6 倍，那是更早的來源；現在的管線是 16-bit，實測值以此為準。）內接碟只有 228GB：
 
 | 規模 | 工作 mp3（內接） | FLAC（若放內接） |
 |---|---|---|
-| 126 首（現況） | 0.44 GB | ~2.5–3.9 GB |
-| 1000 首 | 3.6 GB | **~20–31 GB** |
+| 126 首（現況） | 0.53 GB | ~1.9 GB |
+| 1000 首 | 4.2 GB | **~15 GB** |
+| 一集（36 首） | 0.15 GB | ~0.53 GB（**放外接**） |
 
 加上 ComfyUI 原始輸出也得先落內接，內接會很快見底。所以：
 
@@ -130,6 +132,10 @@ output/releases/coastal01/
 
 `--format flac` 的實際流程：ACE-Step 存 FLAC（ComfyUI 內接暫存）→ 複製到外接母帶夾 →
 ffmpeg 轉一份 mp3 進工作目錄 → `--clean-raw` 刪掉 ComfyUI 原始檔。
+
+**產線已預設這條路**：`make_episode.sh` 音樂段預設 `--format flac`（要省空間用 `--format mp3`，
+環境變數 `LOFI_AUDIO_FORMAT`）。多出來的成本只有檔案：實測每首多約 **1 秒** CPU（FLAC 編碼 0.17s＋
+轉 mp3 0.76s＋複製外接 0.27s），模型推論時間不變。**外接碟離線時音樂段會 fail-closed**（先檢查母帶夾空間）。
 
 > 註：ComfyUI 的 `SaveAudio` 節點已被官方標記 `(DEPRECATED)`（新版是 `SaveAudioAdvanced`，但其
 > `format` 是 dict 型輸入）。目前用舊節點（簽章已驗證可用），若哪天被移除，改節點時**輸入格式要一起改**。
@@ -289,8 +295,10 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 
 **建議分兩軌（已決定：兩軌都做）：**
 
-1. **未來生成的曲：改輸出格式（✅ 已實作）**
+1. **未來生成的曲：改輸出格式（✅ 已實作，且產線已預設）**
    `generate --format flac`，新曲直接是無損母帶；**母帶放外接 `output/masters/`，內接只留工作 mp3**（§3.3）。
+   `make_episode.sh` 音樂段**預設就是 flac**（`--format mp3` 可退回；`LOFI_AUDIO_FORMAT` 亦可）。
+   已實測：多出來的只有檔案與約 1 秒/首的 CPU，模型推論時間不變（2026-10-15）。
 2. **現有 126 首：先 (a) 再考慮 (b)**
    - **(a) 直接正規化上架**（✅ 已實作）：mp3 248kbps VBR 對 DSP 而言**可接受**（DistroKid 收 mp3）。
      `release package` 會用 `loudnorm` 做 -14 LUFS / -1 dBTP → WAV 母帶。**成本≈0，先用這個把專輯發出去。**

@@ -386,8 +386,9 @@ ComfyUI 安裝在 `~/ComfyUI`，模型放在 `~/ComfyUI/models`。首次設定�
 
 每首在 M4 / 16GB 上約 **4–5 分鐘**，生成後自動複製到 `assets/tracks/`。
 
-> **要不要用 `--format flac`？** ACE-Step 預設直接輸出 mp3（48kHz ≈248kbps，3.6MB/首）。
-> 若要上架串流，母帶最好是無損；但 **FLAC 是同長度 mp3 的 ~8 倍大（≈30MB/首）**，內接碟（228GB）撐不住，
+> **要不要用 `--format flac`？**（**產線已預設開啟**，`make_episode.sh` 音樂段就是 flac）
+> ACE-Step 預設直接輸出 mp3（48kHz ≈248kbps，4.3MB/首）。若要上架串流，母帶最好是無損；
+> 但 **FLAC 是同長度 mp3 的 3.4 倍（實測 14.7MB/首、48kHz 16-bit）**，內接碟（228GB）不適合堆，
 > 所以 `--format flac` 採**兩層存放**：
 >
 > | 位置 | 內容 | 碟 |

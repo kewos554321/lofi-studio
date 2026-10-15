@@ -95,7 +95,8 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 - 每首稍微改 prompt（樂器、調性、BPM、情境），避免「同模板」。
 - 生成空檔去做別的事，別讓機器滿載連續跑好幾小時。
 - **要上架串流的曲請加 `--format flac`**：母帶（無損）寫外接 `output/masters/<style>/<run>/`，
-  內接只留 ffmpeg 轉出的工作 mp3（流程不變）。FLAC 是 mp3 的 ~8 倍大，**不要**放內接（見 `DISTRIBUTION.md` §3.3）。
+  內接只留 ffmpeg 轉出的工作 mp3（流程不變）。FLAC 是 mp3 的 3.4 倍大（實測 14.7MB/首），**不要**放內接（見 `DISTRIBUTION.md` §3.3）。
+  **產線（`make_episode.sh`）音樂段已預設 flac**；外接離線會 fail-closed，臨時用 `--format mp3`。
   批次範例：`./scripts/lofi generate --csv prompts/generated/x.csv --clean-raw --format flac`
 
 ### 2.4 挑選
@@ -434,7 +435,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - 遷移與 ExFAT 注意事項詳見 `README.md` 的「容量管理與外接碟」。
 - `output/episodes/<name>/` 整包視為一支成片，`cleanup_outputs.sh --keep/--older-than` 以資料夾為單位處理；中間檔（`_loop_1080.mp4`、`_video_copy.mp4`、`_mix_raw.wav`）也會一併列入清理。
 - `--comfy` 清的是 **ComfyUI 自己的原始輸出**（圖 `.png/.jpg/.webp`、音 `.flac/.wav/.mp3`，深度 2 層；目錄可用 `LOFI_COMFY_ROOT` 覆寫）。`lofi visual` 沒有 `--clean-raw` 時這些檔會一直留在內接碟（實測曾累積 100+ 張、上百 MB），所以生圖後記得清。
-- 生圖／生音樂當下就刪：`lofi visual --clean-raw`（複製到 `assets/visuals/` 後刪原檔）、`lofi generate --clean-raw`（同理，刪 `output/audio` 原檔）。`--format flac` 時原檔是 30MB 級 FLAC，**更要記得帶**。
+- 生圖／生音樂當下就刪：`lofi visual --clean-raw`（複製到 `assets/visuals/` 後刪原檔）、`lofi generate --clean-raw`（同理，刪 `output/audio` 原檔）。`--format flac` 時原檔是十幾 MB 的 FLAC，**更要記得帶**。
 - `make_long_lofi.sh` 有空間 preflight，不足會中止。
 
 ### 6.6 五段式產線（一條龍 / 分段測試）
