@@ -31,3 +31,9 @@ models/*
 
 # macOS
 .DS_Store
+
+# 本機 agent 設定（MCP server 設定、安裝的技能；純本機、不進版控）
+/opencode.json
+/.opencode/
+/.agents/
+/skills-lock.json
