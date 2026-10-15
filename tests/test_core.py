@@ -1092,31 +1092,24 @@ class TestRelease(unittest.TestCase):
             self.assertEqual(release.probe_wh(dst), (1280, 720))
             self.assertLess(dst.stat().st_size, 2 * 1024 * 1024)      # YouTube 上限 2MB
 
-    def test_gumroad_image_sizes(self):
-        """Gumroad 要「橫式封面 ≥1280×720」與「方形縮圖 ≥600×600」，且 DPI 72。"""
+    def test_square_cover_serves_the_store(self):
+        """方形封面一張到底：DistroKid 封面（要 ≥3000²）＝ Gumroad 縮圖（要 ≥600×600）。"""
         import shutil as _sh
         if not _sh.which("ffmpeg"):
             self.skipTest("沒有 ffmpeg")
         with tempfile.TemporaryDirectory() as td:
-            sq, wide = Path(td) / "sq.jpg", Path(td) / "wide.jpg"
-            for out, color, size in ((sq, "black", "3000x3000"), (wide, "blue", "1920x1080")):
-                subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
-                                "-i", f"color=c={color}:s={size}", "-frames:v", "1", str(out)],
-                               check=True)
-            gc, gt = Path(td) / "gc.jpg", Path(td) / "gt.jpg"
-            release.make_gumroad_cover(sq, gc, wide_src=wide)
-            release.make_gumroad_thumb(sq, gt)
-            self.assertEqual(release.probe_wh(gc), (1920, 1080))   # 橫式
-            self.assertEqual(release.probe_wh(gt), (1080, 1080))   # 方形 ≥600
-            # 沒有橫式原圖時（方圖＋模糊背景）也要生得出來、尺寸一樣
-            gc2 = Path(td) / "gc2.jpg"
-            release.make_gumroad_cover(sq, gc2)
-            self.assertEqual(release.probe_wh(gc2), (1920, 1080))
+            src = Path(td) / "album-art.jpg"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                            "-i", "color=c=black:s=3000x3000", "-frames:v", "1", str(src)],
+                           check=True)
+            dst = Path(td) / "cover_3000x3000.jpg"
+            release.make_cover(src, dst)
+            self.assertEqual(release.probe_wh(dst), (3000, 3000))
 
-    def test_artwork_for_zip_is_hires_16x9(self):
-        """交付 ZIP 的高畫質橫式圖：跟商店封面同一套圖，但解析度更高（4K）。
+    def test_wide_art_is_one_4k_image_for_store_and_zip(self):
+        """16:9 也只出一張 4K：Gumroad 封面（要 ≥1280×720）與交付 ZIP 用的是同一張。
 
-        買家拿到的要跟商店頁看到的一致——商店顯示 1080p，ZIP 給 4K。
+        以前出兩張（商店 1920×1080、ZIP 4K）→ 商店看到的不等於買家拿到的，也白存一組衍生檔。
         """
         import shutil as _sh
         if not _sh.which("ffmpeg"):
@@ -1129,15 +1122,18 @@ class TestRelease(unittest.TestCase):
                                 "-i", f"color=c={color}:s={size}", "-frames:v", "1", str(out)],
                                check=True)
             art = Path(td) / "artwork_3840x2160.jpg"
-            release.make_gumroad_cover(sq, art, size=release.ARTWORK_SIZE, wide_src=wide)
-            self.assertEqual(release.probe_wh(art), (3840, 2160))
-            store = Path(td) / "store.jpg"
-            release.make_gumroad_cover(sq, store, wide_src=wide)      # 商店封面
-            self.assertEqual(release.probe_wh(store), (1920, 1080))
-            # 交付圖要比商店圖大（高畫質才有意義）
-            aw, ah = release.probe_wh(art)
-            sw, sh = release.probe_wh(store)
-            self.assertGreater(aw * ah, sw * sh)
+            release.make_wide_art(sq, art, wide_src=wide)
+            self.assertEqual(release.probe_wh(art), (3840, 2160))     # 4K == Gumroad 封面 == ZIP 內那張
+            # 沒有橫式原圖時（方圖＋模糊背景）也要生得出來、尺寸一樣
+            art2 = Path(td) / "art2.jpg"
+            release.make_wide_art(sq, art2)
+            self.assertEqual(release.probe_wh(art2), (3840, 2160))
+
+    def test_release_defaults_to_flac_delivery(self):
+        """交付格式預設 flac（無損、約 WAV 一半）；--format wav 仍可用。"""
+        self.assertEqual(release.build_parser().parse_args(["package", "--run", "x"]).format, "flac")
+        self.assertEqual(release.build_parser().parse_args(
+            ["package", "--run", "x", "--format", "wav"]).format, "wav")
 
     def test_pick_wide_cover_prefers_highest_resolution(self):
         """挑橫式來源時取「解析度最高」的那張，不是最新的——不然 4K 衍生圖不會被用到。"""
@@ -1222,6 +1218,29 @@ class TestRelease(unittest.TestCase):
             try:
                 self.assertEqual(release.sibling_volume_titles("ep"), {"A", "B", "C"})
                 self.assertEqual(release.sibling_volume_titles("nope"), set())
+            finally:
+                release.RELEASES_DIR = old
+
+    def test_sibling_volume_titles_skips_the_same_album(self):
+        """重打包某一卷時，它自己的舊版（同專輯名）不算「別卷」，否則會白吃修飾語池
+        → 逼出 `Cozy Morning Coffee (pt. 14)` 這種名字（實測踩過）。"""
+        with tempfile.TemporaryDirectory() as td:
+            rel = Path(td)
+            for name, album, titles in (("ep_1", "Album, Vol. 1", ["A"]),
+                                        ("ep_3", "Album, Vol. 3", ["OLD1", "OLD2"]),
+                                        ("ep_2", "Album, Vol. 2", ["B"])):
+                d = rel / name
+                d.mkdir(parents=True)
+                (d / "release.json").write_text(json.dumps(
+                    {"run": "ep", "album": album, "tracks": [{"title": t} for t in titles]}))
+            old = release.RELEASES_DIR
+            release.RELEASES_DIR = rel
+            try:
+                # 重打包 Vol. 3 → 要避開 Vol. 1/2，但不能算進舊的 Vol. 3
+                self.assertEqual(release.sibling_volume_titles("ep", album="Album, Vol. 3"),
+                                 {"A", "B"})
+                # 沒指定 album 時維持舊行為（全部都算）
+                self.assertEqual(release.sibling_volume_titles("ep"), {"A", "B", "OLD1", "OLD2"})
             finally:
                 release.RELEASES_DIR = old
 

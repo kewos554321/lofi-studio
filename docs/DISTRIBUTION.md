@@ -73,7 +73,7 @@ output/releases/coastal01/
 ├── audio/                01_slow-tide.wav …（-14 LUFS / -1 dBTP，ID3 已填）
 ├── cover_3000x3000.jpg   封面（無文字，見 §6-1）；商店縮圖用同一套圖
 ├── artwork_3840x2160.jpg  交付 ZIP 用 4K 高畫質橫式圖（商店 16:9 封面同一套圖、AI 放大）
-├── gumroad_cover_1920x1080.jpg / gumroad_thumb_1080x1080.jpg  商店頁上傳用（72 DPI）
+│  （封面只有兩張：方形給 DistroKid＋Gumroad 縮圖、16:9 給 Gumroad 封面＋交付 ZIP）
 ├── download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
 │                         原則：買家拿到的＝商店頁看到的（同一套圖，ZIP 給高畫質版）
 ├── release.json          機器用：album/artist/track 順序/genre/explicit/songwriter/AI credits/ISRC 欄/授權 provenance/母帶參數
@@ -301,7 +301,8 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
    已實測：多出來的只有檔案與約 1 秒/首的 CPU，模型推論時間不變（2026-10-15）。
 2. **現有 126 首：先 (a) 再考慮 (b)**
    - **(a) 直接正規化上架**（✅ 已實作）：mp3 248kbps VBR 對 DSP 而言**可接受**（DistroKid 收 mp3）。
-     `release package` 會用 `loudnorm` 做 -14 LUFS / -1 dBTP → WAV 母帶。**成本≈0，先用這個把專輯發出去。**
+     `release package` 會用 `loudnorm` 做 -14 LUFS / -1 dBTP → 交付母帶（新預設 **FLAC**、無損；
+     `--format wav` 可改）。**成本≈0，先用這個把專輯發出去。**
    - **(b) 用 sidecar 重生成取無損**（⬜ 未做）：sidecar 有完整 `seed/prompt/steps/cfg/temperature`，可重跑同一首。
      但 126 首要吃很多 GPU 小時，且 ACE-Step 的 `temperature` 可能造成非完全相同。
      **只對「之後要當主打單曲」的少數曲做**，不要一次全跑。

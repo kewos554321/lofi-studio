@@ -23,13 +23,12 @@ songwriter 真名／AI Credits／封面／ISRC）散在好幾頁。這裡一次�
   lofi release package --run coastal01                     # artist 取 config/LOFI_RELEASE_ARTIST
   lofi release package --run coastal01 --artist "Slow Harbour"
   lofi release package --style coastal_guitar --run coastal01 --visual-run sc01
-  lofi release package --run coastal01 --format flac        # 母帶用 FLAC（檔案較小）
+  lofi release package --run coastal01 --format wav         # 交付改 WAV（相容性最廣）
 
 輸出（預設在 output/releases/<run>/，外接碟）:
-  audio/01_<slug>.wav   正規化母帶（ID3 已填）
-  cover_3000x3000.jpg   封面（方形；Gumroad 縮圖用的同一套圖）
-  artwork_3840x2160.jpg 交付 ZIP 用 4K 高畫質橫式圖（Gumroad 16:9 封面用的同一套圖）
-  gumroad_*.jpg         商店頁直接上傳用（封面 1920×1080／縮圖 1080×1080）
+  audio/01_<slug>.flac  正規化母帶（預設無損 FLAC 24-bit；--format wav 可改，標籤已填）
+  cover_3000x3000.jpg   方形封面（DistroKid 封面／Gumroad 縮圖／交付 ZIP 共用）
+  artwork_3840x2160.jpg 16:9 高畫質圖（Gumroad 封面／交付 ZIP 共用）
   download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits，給 Gumroad／Bandcamp）
   release.json          機器用（album/artist/track 順序/genre/explicit/songwriter/AI credits/授權 provenance）
   tracklist.csv         人用（No/Title/Duration/Key/BPM/Mood/ISRC）
@@ -65,7 +64,8 @@ RELEASES_JSONL = CATALOG_DIR / "releases.jsonl"
 SCHEMA_VERSION = 1
 COVER_SIZE = 3000
 # 交付 ZIP 內附的高畫質橫式圖（＝商店 16:9 封面的同一套圖，但解析度更高）。
-# 兩張都給全：方形 3000²（商店縮圖同一套）＋ 橫式 3840×2160（商店封面同一套，4K 高畫質）。
+# 只有兩張，一套圖給所有商店與交付 ZIP 共用（商店端吃得下大圖，不必再出小尺寸衍生檔）：
+#   方形 3000²（DistroKid 封面／Gumroad 縮圖）＋ 16:9 3840×2160（Gumroad 封面／ZIP 橫式圖）。
 # 來源優先用該集 AI 放大過的 `*_fix-4k`（pick_wide_cover 取解析度最高者），所以真的是 4K 細節。
 ARTWORK_SIZE = (3840, 2160)
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
@@ -780,7 +780,7 @@ def load_run(style, run, limit=0, offset=0, title_overrides=None, tracks=None, m
     return d, rows, dropped
 
 
-def sibling_volume_titles(run):
+def sibling_volume_titles(run, album=None):
     """同一個 run 的**其他卷**（`output/releases/<run>_N/`）已經用過的曲名。
 
     為什麼要這支：同一張專輯拆成 Vol. 1/2/3 分三次打包時，每一卷各自只在自己的
@@ -788,6 +788,9 @@ def sibling_volume_titles(run):
     的曲目表彼此重複。打包某卷時把別卷用過的曲名餵進 `unique_titles(avoid=...)`。
 
     只認 `release.json` 裡 `run` 相同的（避免把 `cozy-1hr-021` 當成 `cozy-1hr-02` 的卷）。
+
+    `album` 給了就**排除同名的那一卷**：那是「這一卷的上一版」（重打包時還沒被覆蓋），
+    把它算進來會白白吃掉修飾語池，逼出 `(pt. 14)` 這種名字（實測踩過）。
     """
     used = set()
     for p in sorted(RELEASES_DIR.glob(f"{run}_*")):
@@ -800,6 +803,8 @@ def sibling_volume_titles(run):
             continue
         if (rec.get("run") or "") != run:
             continue
+        if album and (rec.get("album") or "") == album:
+            continue                      # 這是本卷的舊版，不是別卷
         used.update(t["title"] for t in (rec.get("tracks") or []) if t.get("title"))
     return used
 
@@ -1100,16 +1105,15 @@ def set_dpi(path, dpi=72):
         return False
 
 
-def make_gumroad_thumb(src, dst, size=1080):
-    """Gumroad 縮圖：方形 ≥600×600（方圖直接縮小，不裁切）。"""
-    return make_cover(src, dst, size)
+def make_wide_art(src, dst, size=ARTWORK_SIZE, wide_src=None):
+    """16:9 高畫質圖（**一套圖給所有商店與交付 ZIP 共用**）：Gumroad 封面 ＋ 交付 ZIP 的橫式圖。
 
-
-def make_gumroad_cover(src, dst, size=(1920, 1080), wide_src=None):
-    """Gumroad 封面：橫式 ≥1280×720。
-
-    優先用橫式原圖（該集影片封面）；沒有的話用方圖＋同張圖放大模糊當背景補滿，
+    優先用橫式原圖（該集影片封面／其 AI 放大版）；沒有的話用方圖＋同張圖放大模糊當背景補滿，
     避免把方圖硬裁成 16:9 而切掉主角。
+
+    為什麼不做「商店用小尺寸、ZIP 用高畫質」兩套：買家拿到的要和商店頁看到的一致，
+    而商店端本來就吃得下大圖（Gumroad：≥1280×720、<50MB、長邊 >4096px 才自動縮），
+    所以一份 4K 就同時滿足商店與交付，少一組衍生檔、也不會兩邊長得不一樣。
     """
     w, h = size
     wide_ok = bool(wide_src) and bool(probe_wh(wide_src)[0])
@@ -1125,7 +1129,7 @@ def make_gumroad_cover(src, dst, size=(1920, 1080), wide_src=None):
     rc, _, err = _run_ff(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *extra,
                           "-q:v", "2", str(dst)])
     if rc != 0:
-        sys.exit(f"Gumroad 封面產生失敗：{err.strip()[:400]}")
+        sys.exit(f"16:9 高畫質圖產生失敗：{err.strip()[:400]}")
     return dst
 
 
@@ -1224,7 +1228,7 @@ def cmd_plan(args):
     # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
     prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
     # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
-    avoid = sibling_volume_titles(args.run)
+    avoid = sibling_volume_titles(args.run, album=getattr(args, "album", ""))
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
@@ -1303,7 +1307,7 @@ def cmd_package(args):
     dest = RELEASES_DIR / args.run
     prior = load_prior_tracks(dest / "release.json")
     # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
-    avoid = sibling_volume_titles(args.run)
+    avoid = sibling_volume_titles(args.run, album=getattr(args, "album", ""))
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
@@ -1408,25 +1412,20 @@ def cmd_package(args):
         print(f"   （共清掉 {len(orphans)} 個不屬於本專輯的檔）")
         r["audio_out"] = out
 
-    # 2) 封面
+    # 2) 封面：**只有兩張**（一套圖共用）——
+    #    方形 cover_3000x3000.jpg：DistroKid 封面 ＋ Gumroad 縮圖 ＋ 交付 ZIP
+    #    16:9 artwork_3840x2160.jpg：Gumroad 封面 ＋ 交付 ZIP（商店顯示的就是買家拿到的同一套圖）
     if cover_src:
         dest.mkdir(parents=True, exist_ok=True)
         make_cover(cover_src, cover_dst)
-        print(f"封面 → {cover_dst.name}")
-        # Gumroad 商品頁要兩個尺寸：橫式封面（≥1280×720）與方形縮圖（≥600×600），並標 72 DPI
         _wide = pick_wide_cover(rec.get("run") or "")
-        _gc, _gt = dest / "gumroad_cover_1920x1080.jpg", dest / "gumroad_thumb_1080x1080.jpg"
-        make_gumroad_cover(cover_src, _gc, wide_src=_wide)
-        make_gumroad_thumb(cover_src, _gt)
-        # 交付 ZIP 的高畫質橫式圖：同一套設計、更高解析度（買家拿到的和商店頁看到的一致）
         _art = dest / f"artwork_{ARTWORK_SIZE[0]}x{ARTWORK_SIZE[1]}.jpg"
-        make_gumroad_cover(cover_src, _art, size=ARTWORK_SIZE, wide_src=_wide)
-        for _p in (cover_dst, _gc, _gt, _art):
+        make_wide_art(cover_src, _art, wide_src=_wide)
+        for _p in (cover_dst, _art):
             set_dpi(_p)
-        print(f"       → {_gc.name}（Gumroad 封面，橫式" +
+        print(f"       → {cover_dst.name}（方形 {COVER_SIZE}²；DistroKid 封面／Gumroad 縮圖）")
+        print(f"       → {_art.name}（16:9 {ARTWORK_SIZE[0]}×{ARTWORK_SIZE[1]}；Gumroad 封面／交付 ZIP" +
               ("，用該集影片封面）" if _wide else "，方圖＋模糊背景）"))
-        print(f"       → {_gt.name}（Gumroad 縮圖，方形）")
-        print(f"       → {_art.name}（交付 ZIP 用高畫質橫式，同一套設計）")
 
     # 3) 記錄與清單
     # 交付母帶的實際格式（量測，不猜）：credits.txt 要寫「24-bit / 48 kHz」。
@@ -1453,7 +1452,7 @@ def cmd_package(args):
 
     dest.mkdir(parents=True, exist_ok=True)
     # 買家視角的曲目表：帶上檔案大小（買家想知道要下載多少）與實測格式
-    audio_fmt = (f"WAV {rec['master'].get('bits')}-bit / "
+    audio_fmt = (f"{(rec.get('format') or 'flac').upper()} {rec['master'].get('bits')}-bit / "
                  f"{rec['master'].get('sample_rate', 0) / 1000:g} kHz"
                  if rec["master"].get("bits") and rec["master"].get("sample_rate")
                  else (rec.get("format") or "wav").upper())
@@ -1498,7 +1497,8 @@ def cmd_package(args):
         print("   ⚠️  有曲名自動加了「(pt. N)」，建議改成更好聽的名字後重跑。")
 
 
-def main():
+def build_parser():
+    """建 CLI parser（抽出來讓測試驗得到預設值；`main()` 只負責 parse + dispatch）。"""
     ap = argparse.ArgumentParser(description="把一個生成 run 包成可上架的 release（上架包）")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -1551,7 +1551,8 @@ def main():
                     help="Gumroad tags（逗號分隔，可含空白）；預設由 genre/style/專輯名推得")
     p2.add_argument("--no-zip", action="store_true", dest="no_zip",
                     help="不產 download/<album>.zip 交付包")
-    p2.add_argument("--format", default="wav", choices=["wav", "flac"], help="母帶格式（預設 wav）")
+    p2.add_argument("--format", default="flac", choices=["wav", "flac"],
+                    help="交付母帶格式（預設 flac＝無損、約 WAV 一半大小；wav 相容性最廣）")
     p2.add_argument("--lufs", type=float, default=None, help="目標響度（預設 config.MASTER_LUFS）")
     p2.add_argument("--tp", type=float, default=None, help="true peak 上限 dBTP（預設 config.MASTER_TP）")
     p2.add_argument("--force", action="store_true", help="已存在的母帶也重新處理")
@@ -1563,7 +1564,11 @@ def main():
     from lofi import gumroad
     gumroad.add_parser(sub)
 
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = build_parser().parse_args()
     global _THREADS, _NICE
     _THREADS = getattr(args, "threads", _THREADS)
     _NICE = getattr(args, "nice", _NICE)
