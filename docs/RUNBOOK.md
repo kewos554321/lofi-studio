@@ -85,7 +85,7 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
 
 | 參數 | 建議值 |
 |---|---|
-| 長度 | 120 秒（2 分鐘） |
+| 長度 | 每首 **2:00–2:30 隨機**（`--duration-range 120 150`；`make_episode` 預設；要固定用 `--no-duration-range` 或 `--duration 120`） |
 | 品質 | `--quality fast`（預設）／`balanced`／`stable`；要更穩就往上（時間換品質，見 `RECIPES.md` §1） |
 | Steps / CFG | 由 `--quality` 決定（`fast`＝8 步 / cfg 2.0）——ACE-Step turbo **不吃** 30–50 步那種大值 |
 | Seed | 每首換一個；滿意的記下來微調 |
@@ -99,6 +99,8 @@ lofi hip hop, warm tape saturation, rainy night mood, study beats,
   內接只留 ffmpeg 轉出的工作 mp3（流程不變）。FLAC 是 mp3 的 3.4 倍大（實測 14.7MB/首），**不要**放內接（見 `DISTRIBUTION.md` §3.3）。
   **產線（`make_episode.sh`）音樂段已預設 flac**；外接離線會 fail-closed，臨時用 `--format mp3`。
   批次範例：`./scripts/lofi generate --csv prompts/generated/x.csv --clean-raw --format flac`
+- **要沿用某首的律動／音色**：`--init-audio <檔> --init-denoise 0.8`（audio2audio，貼近參考）或
+  `--ref-timbre <檔>`（cover 模式，重構參考；見 `RECIPES.md` §1）。參考檔需在 `ComfyUI/input/`。
 
 ### 2.4 挑選（人工複審）
 只留「能撐 2 分鐘不無聊」的。淘汰的不要省，硬用會讓長片變難聽。

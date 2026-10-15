@@ -99,6 +99,7 @@ docs/SECURITY.md    # 憑證清單與已知風險（接受什麼風險、升級�
 ./scripts/make_episode.sh --style rainy_lofi --minutes 60 --count 40   # 五段產線一條龍
                                                                       # 音樂段預設 --format flac（無損母帶放外接 output/masters；
                                                                       # 外接離線會 fail-closed，臨時可 --format mp3）
+                                                                      # 音樂段預設每首 2:00–2:30 隨機（--duration-range 120 150）
 ./scripts/make_episode.sh --style rainy_lofi --stage video --episode rl01   # 只跑單一段（music/image/video/upload/cleanup）
 ./scripts/make_long_lofi.sh --image assets/visuals/x.png --minutes 60 --episode rainy-01 --style rainy_lofi
 ./scripts/batch_run.sh --csv prompts/generated/x.csv --chunk 50 --sleep 60 --run-id b01 --clean-raw

@@ -912,6 +912,39 @@ class TestWorkflowAssembly(unittest.TestCase):
         blank = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x", negative="  ")
         self.assertEqual(blank["94"]["class_type"], "TextEncodeAceStepAudio1.5")
 
+    def test_generate_pick_duration(self):
+        """長度：CSV 逐列值 > --duration-range 隨機 > --duration；固定種子可重現。"""
+        import random as _r
+        self.assertEqual(generate.pick_duration("", 120, None, _r.Random(0)), 120.0)
+        self.assertEqual(generate.pick_duration("135", 120, (120, 150), _r.Random(0)), 135.0)
+        self.assertEqual(generate.pick_duration("bad", 120, None, _r.Random(0)), 120.0)  # 壞值退回
+        rng = _r.Random(42)
+        vals = [generate.pick_duration("", 120, (120, 150), rng) for _ in range(30)]
+        self.assertTrue(all(120 <= v <= 150 for v in vals))
+        self.assertGreater(len(set(vals)), 1)                       # 真的有變化，不是固定值
+        ra, rb = _r.Random(7), _r.Random(7)                          # 同種子 → 同序列
+        self.assertEqual([generate.pick_duration("", 120, (120, 150), ra) for _ in range(5)],
+                         [generate.pick_duration("", 120, (120, 150), rb) for _ in range(5)])
+
+    def test_generate_ref_timbre_wires_cover_chain(self):
+        """--ref-timbre 走 cover 模式：LoadAudio→VAEEncodeAudio→ReferenceTimbreAudio 掛進 positive，
+        維持空 latent（與 --init-audio 的 latent 起點不同），且自動關掉 LLM 音碼。"""
+        g = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x", ref_timbre="ref.mp3")
+        self.assertEqual(g["110"]["class_type"], "LoadAudio")
+        self.assertEqual(g["110"]["inputs"]["audio"], "ref.mp3")
+        self.assertEqual(g["111"]["class_type"], "VAEEncodeAudio")
+        self.assertEqual(g["111"]["inputs"]["audio"], ["110", 0])
+        self.assertEqual(g["112"]["class_type"], "ReferenceTimbreAudio")
+        self.assertEqual(g["112"]["inputs"]["conditioning"], ["94", 0])
+        self.assertEqual(g["112"]["inputs"]["latent"], ["111", 0])
+        self.assertEqual(g["3"]["inputs"]["positive"], ["112", 0])
+        self.assertEqual(g["3"]["inputs"]["latent_image"], ["98", 0])   # 仍是空 latent
+        self.assertFalse(g["94"]["inputs"]["generate_audio_codes"])      # cover 模式關 LLM 音碼
+        # 沒給就不掛這條鏈（舊行為不變）
+        plain = generate.build_prompt("t", 70, "A minor", 120, 1, "audio/x")
+        self.assertNotIn("112", plain)
+        self.assertEqual(plain["3"]["inputs"]["positive"], ["94", 0])
+
     def test_unique_path_adds_suffix(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "a.mp3"

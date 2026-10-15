@@ -44,6 +44,8 @@
 #                                  想永久改用 LOFI_ZIMAGE_LORA / LOFI_ZIMAGE_LORA_WEIGHT
 #   --seed N                       固定亂數種子（音樂/圖片共用）
 #   --chunk N --sleep N            音樂批次大小 / 散熱秒數（預設 20 / 30）
+#   --duration-range MIN MAX       音樂每首長度隨機區間（秒；預設 120 150＝2:00~2:30）
+#   --no-duration-range            音樂固定長度（回 generate 預設 120 秒）
 #   --xfade N --loop N --fps N --vbitrate N   傳給 make_long_lofi.sh
 #   --cg-args "..."                傳給 make_cinemagraph.py
 #   --privacy private|unlisted|public          上傳可見性（預設 private＝上線手動）
@@ -91,6 +93,7 @@ SEED=""
 FORMAT="${LOFI_AUDIO_FORMAT:-flac}"              # 音檔格式：flac＝另存無損母帶（外接）＋工作用 mp3
 CHUNK=20
 SLEEP=30
+DURATION_RANGE="${LOFI_DURATION_RANGE:-120 150}"   # 音樂每首長度區間（秒）；空＝固定用 generate 預設 120
 XFADE=8
 LOOP=20
 FPS=30
@@ -139,6 +142,8 @@ while [ $# -gt 0 ]; do
     --format)  FORMAT="$2"; shift 2;;
     --chunk)   CHUNK="$2"; shift 2;;
     --sleep)   SLEEP="$2"; shift 2;;
+    --duration-range)    DURATION_RANGE="$2 $3"; shift 3;;
+    --no-duration-range) DURATION_RANGE=""; shift;;
     --xfade)   XFADE="$2"; shift 2;;
     --loop)    LOOP="$2"; shift 2;;
     --fps)     FPS="$2"; shift 2;;
@@ -309,8 +314,14 @@ stage_music() {
   if [ -n "$SEED" ]; then sargs=(--seed "$SEED"); fi
   run ./scripts/lofi expand --style "$STYLE" --count "$COUNT" "${sargs[@]+"${sargs[@]}"}" --out "$csv"
   echo "  音檔格式: ${FORMAT}（flac＝另存無損母帶到外接 output/masters；內接只留工作用 mp3）"
+  # 逐首長度隨機（預設 120~150 秒＝2:00~2:30）；要固定長度用 --no-duration-range
+  local gargs=()
+  if [ -n "$DURATION_RANGE" ]; then
+    gargs=(--gen-args "--duration-range $DURATION_RANGE")
+    echo "  每首長度: 隨機 ${DURATION_RANGE} 秒"
+  fi
   run ./scripts/batch_run.sh --csv "$csv" --chunk "$CHUNK" --sleep "$SLEEP" --run-id "$RUN_ID" \
-      --format "$FORMAT" --clean-raw
+      --format "$FORMAT" --clean-raw "${gargs[@]+"${gargs[@]}"}"
   run ./scripts/lofi qc --all --index
   run ./scripts/lofi library build
   echo "  → 音樂階段完成（run-id=${RUN_ID}）"

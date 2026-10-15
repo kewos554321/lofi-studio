@@ -59,6 +59,23 @@ def sampling_params(quality, steps=None, temperature=None, cfg_scale=None):
     }
 
 
+def pick_duration(row_value, default, dur_range, rng):
+    """決定這首的長度（秒）：CSV 逐列值 > --duration-range 隨機 > --duration 預設。
+
+    dur_range=(min, max) 時在區間內隨機取（一位小數），讓整批長度有變化、不會每首都剛好一樣。
+    rng 傳 random.Random(seed) 時長度就可重現（純函式，方便測試）。
+    """
+    v = str(row_value or "").strip()
+    if v:
+        try:
+            return float(v)
+        except ValueError:
+            pass
+    if dur_range:
+        return round(rng.uniform(float(dur_range[0]), float(dur_range[1])), 1)
+    return float(default)
+
+
 def _unique(p):
     """若路徑已存在，自動加 -2 / -3 序號（防跨批次覆蓋）。"""
     p = Path(p)
@@ -93,10 +110,13 @@ def transcode_to_mp3(src, dst):
 
 def build_prompt(tags, bpm, key, duration, seed, prefix,
                  steps=8, cfg_scale=2.0, temperature=0.85, audio_format="mp3",
-                 init_audio="", init_denoise=1.0, generate_audio_codes=True, negative=""):
+                 init_audio="", init_denoise=1.0, generate_audio_codes=True, negative="",
+                 ref_timbre=""):
     # 有負面 caption 時才換成自訂節點（ComfyUI custom_nodes/lofi_ace_negative）；
     # 沒有就維持內建節點，行為與以前完全相同。
     use_neg = bool(negative and negative.strip())
+    # 給音訊參考（cover 模式）時模型會忽略 LLM 產生的語意音碼 → 直接關掉省時間。
+    codes = bool(generate_audio_codes) and not ref_timbre
     p = {
         "104": {"class_type": "UNETLoader", "inputs": {"unet_name": MUSIC_UNET, "weight_dtype": "default"}},
         "78":  {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["104", 0], "shift": 3.0}},
@@ -107,7 +127,7 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
                                else "TextEncodeAceStepAudio1.5"), "inputs": {
                     "clip": ["105", 0], "tags": tags, "lyrics": "", "seed": seed,
                     "bpm": int(bpm), "duration": float(duration), "timesignature": "4",
-                    "language": "en", "keyscale": key, "generate_audio_codes": bool(generate_audio_codes),
+                    "language": "en", "keyscale": key, "generate_audio_codes": codes,
                     "cfg_scale": cfg_scale, "temperature": temperature, "top_p": 0.9, "top_k": 0, "min_p": 0.0}},
         "47":  {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["94", 0]}},
         "98":  {"class_type": "EmptyAceStep1.5LatentAudio", "inputs": {"seconds": float(duration), "batch_size": 1}},
@@ -122,6 +142,17 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
     }
     if use_neg:
         p["94"]["inputs"]["negative"] = negative
+    if ref_timbre:
+        # 音色參考（cover 模式）：把參考音（需在 ComfyUI/input/）的 latent 掛在 conditioning 上。
+        # 底層（comfy/model_base.py ACEStep15）一旦收到會設 is_covers=True 並忽略 LLM 音碼，
+        # 故維持空 latent＋denoise 1.0（與 --init-audio 的 audio2audio 是不同機制）。
+        # 版權：參考受保護的音訊會有衍生風險；建議只拿自己生成的曲子當參考。
+        p["110"] = {"class_type": "LoadAudio", "inputs": {"audio": ref_timbre}}
+        p["111"] = {"class_type": "VAEEncodeAudio",
+                    "inputs": {"audio": ["110", 0], "vae": ["106", 0]}}
+        p["112"] = {"class_type": "ReferenceTimbreAudio",
+                    "inputs": {"conditioning": ["94", 0], "latent": ["111", 0]}}
+        p["3"]["inputs"]["positive"] = ["112", 0]
     if init_audio:
         # audio2audio：拿參考音檔（需在 ComfyUI/input/）的 latent 當起點。
         # denoise 越低＝越保留參考（旋律輪廓清楚）；越高＝越自由（只留情緒與節奏骨架）。
@@ -140,7 +171,8 @@ def build_prompt(tags, bpm, key, duration, seed, prefix,
     return p
 
 
-def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None, negative=None):
+def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None,
+                 negative=None, duration=None):
     """生成成功後，把可追溯的來源與參數寫進 sidecar + catalog/tracks.jsonl。
 
     `dst` 是**工作檔**（assets/tracks 內的 mp3）；`master_file` 是無損母帶
@@ -169,7 +201,9 @@ def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None, n
             "temperature": args.temperature,
             "quality": getattr(args, "quality", "fast"),
             "generate_audio_codes": getattr(args, "generate_audio_codes", True),
-            "duration": args.duration,
+            "duration": args.duration if duration is None else duration,
+            "duration_range": (list(args.duration_range)
+                               if getattr(args, "duration_range", None) else None),
             "model": MUSIC_UNET,
             "format": getattr(args, "format", "mp3"),
             "model_license": model_license(MUSIC_UNET)["license"],
@@ -177,6 +211,7 @@ def record_track(dst, row, style, rid, seed, args, csv_path, master_file=None, n
             # 衍生來源（audio2audio）：留空代表純文字生成
             "init_audio": getattr(args, "init_audio", "") or None,
             "init_denoise": getattr(args, "init_denoise", None) if getattr(args, "init_audio", "") else None,
+            "ref_timbre": getattr(args, "ref_timbre", "") or None,
         },
         "status": "unreviewed",
         "tags": [],
@@ -193,6 +228,9 @@ def main():
     ap.add_argument("--csv", default=str(CSV_PATH), help="曲目清單 CSV（預設 prompts/prompt_library.csv）")
     ap.add_argument("--limit", type=int, default=0, help="只生成前 N 首（0=全部）")
     ap.add_argument("--duration", type=float, default=120.0)
+    ap.add_argument("--duration-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"),
+                    help="每首在 MIN~MAX 秒之間隨機取長度（讓整批有變化、不每首剛好一樣）。"
+                         "未給＝固定用 --duration（預設 120）；CSV 有 duration 欄時以該列為準")
     ap.add_argument("--quality", default="fast", choices=sorted(QUALITY_PRESETS),
                     help="取樣品質預設（fast=原始預設；balanced/stable=時間換穩定度）。"
                          "個別 --steps/--temperature/--cfg-scale 有給就蓋過此預設（見 docs/RECIPES.md §1）")
@@ -221,6 +259,10 @@ def main():
     ap.add_argument("--init-audio", default="", dest="init_audio",
                     help="audio2audio 參考音檔（檔名需在 ComfyUI/input/）：旋律會受它影響。"
                          "版權提醒：參考受保護的旋律時，成品仍可能有衍生風險，建議搭移調與高 denoise")
+    ap.add_argument("--ref-timbre", default="", dest="ref_timbre",
+                    help="音色參考／cover 模式（檔名需在 ComfyUI/input/）：把參考音掛進 ACE-Step 的 "
+                         "reference_audio_timbre_latents（底層會設 is_covers=True、忽略 LLM 音碼）。"
+                         "與 --init-audio 二選一；版權同上，建議用自己生成的曲子")
     ap.add_argument("--init-denoise", type=float, default=0.8, dest="init_denoise",
                     help="參考音影響度（反指標）：0.3~0.5 旋律明顯跟著走；0.75~0.9 只留情緒與節奏骨架")
     ap.add_argument("--generate-audio-codes", action=argparse.BooleanOptionalAction,
@@ -249,10 +291,22 @@ def main():
     args.cfg_scale = sampling["cfg_scale"]
 
     # LLM 語意音訊碼：ACE-Step 會先跑一段 LLM 產生語意碼再擴散（提升音質、較慢）。
-    # ComfyUI 節點的 tooltip 明講「給模型音訊參考時要關掉」→ audio2audio 預設自動關，
+    # ComfyUI 節點的 tooltip 明講「給模型音訊參考時要關掉」→ audio2audio／音色參考時預設自動關，
     # 需要時用 --generate-audio-codes/--no-generate-audio-codes 強制。
     if args.generate_audio_codes is None:
-        args.generate_audio_codes = not bool(args.init_audio)
+        args.generate_audio_codes = not bool(args.init_audio or args.ref_timbre)
+
+    if args.init_audio and args.ref_timbre:
+        sys.exit("--init-audio 與 --ref-timbre 是兩種不同的參考機制，請二選一。")
+
+    # 逐首長度的隨機來源：固定 --seed 時也讓長度可重現
+    dur_range = None
+    if args.duration_range:
+        lo, hi = args.duration_range
+        if lo <= 0 or hi < lo:
+            sys.exit(f"--duration-range 不合理：{lo} {hi}（需 0 < MIN <= MAX）")
+        dur_range = (lo, hi)
+    rng = random.Random(args.seed) if args.seed is not None else random
 
     # 商用合規守門：檢查模型授權（未知授權預設 fail-closed）
     if os.environ.get("LOFI_IGNORE_LICENSE") != "1":
@@ -320,6 +374,7 @@ def main():
                 neg = args.negative.strip()
             else:
                 neg = (row.get("negative") or "").strip()
+            dur = pick_duration(row.get("duration"), args.duration, dur_range, rng)
             seed = args.seed if args.seed is not None else random.randint(1, 2**31 - 1)
             # 風格 + 批次 id 當檔名前綴（rainy_lofi_01_r2026...），確保唯一、不覆蓋舊曲
             style = (row.get("style") or "").strip().replace(" ", "_")
@@ -330,13 +385,15 @@ def main():
                 print(f"[{i}/{total}] id={rid} 已完成，跳過")
                 continue
 
-            print(f"\n[{i}/{total}] id={rid} | {row.get('mood','')} | {bpm} BPM | {key} | seed={seed}")
+            print(f"\n[{i}/{total}] id={rid} | {row.get('mood','')} | {bpm} BPM | {key} | {dur:g}s | seed={seed}")
             print(f"    {tags[:90]}…")
             print(f"    取樣: steps={args.steps} temperature={args.temperature}"
                   f" cfg_scale={args.cfg_scale} | 品質預設={args.quality}"
                   f" | LLM 語音碼={'開' if args.generate_audio_codes else '關'}")
             if neg:
                 print(f"    負面: {neg[:90]}")
+            if args.ref_timbre:
+                print(f"    音色參考(cover)：{args.ref_timbre}（已關 LLM 音碼）")
             if args.init_audio:
                 print(f"    audio2audio 參考：{args.init_audio}（denoise {args.init_denoise}）")
 
@@ -345,11 +402,12 @@ def main():
 
             try:
                 pid = comfy.submit(args.url, build_prompt(
-                    tags, bpm, key, args.duration, seed, prefix,
+                    tags, bpm, key, dur, seed, prefix,
                     steps=args.steps, cfg_scale=args.cfg_scale, temperature=args.temperature,
                     audio_format=args.format,
                     init_audio=args.init_audio, init_denoise=args.init_denoise,
-                    generate_audio_codes=args.generate_audio_codes, negative=neg),
+                    generate_audio_codes=args.generate_audio_codes, negative=neg,
+                    ref_timbre=args.ref_timbre),
                     client_id="lofi-batch")
             except urllib.error.HTTPError as e:
                 print("    ❌ 提交失敗:", e.read().decode()[:500]); continue
@@ -405,7 +463,7 @@ def main():
 
                 if not args.no_catalog:
                     record_track(dst, row, style, rid, seed, args, csv_path,
-                                 master_file=master, negative=neg)
+                                 master_file=master, negative=neg, duration=dur)
                     if not args.no_qc:
                         _, qcres, _ = qc.qc_file(dst)
                         print(f"       品檢: {qcres['verdict']} (score={qcres['score']})"

@@ -31,7 +31,7 @@
 | DiT | `acestep_v1.5_turbo`（2B） |
 | Text encoder | `qwen_0.6b_ace15` + `qwen_1.7b_ace15` |
 | VAE | `ace_1.5_vae` |
-| 🟡 `--duration` | `120`（安全區） |
+| 🟡 `--duration` / `--duration-range` | `120`；`--duration-range 120 150`＝每首在 **2:00–2:30** 隨機（去機械感）。產線（`make_episode`）預設就帶 `120 150` |
 | 🟡 `--quality` | `fast`（預設）＝原設定 `steps 8 / temp 0.85 / cfg 2.0` |
 | 🟡 `--steps` | 依 `--quality`（`balanced`→10、`stable`→12；要更穩可 12+，較慢） |
 | 🟡 `--cfg-scale` | `2.0`（三個預設都相同） |
@@ -48,6 +48,19 @@
 > 傳進 ACE-Step 的 LLM 語音碼階段做 CFG 對比。`lofi generate` **預設就用每列的 `negative`**
 > （`--negative` 覆寫全部、`--no-negative` 關閉）。
 > 注意：它只影響「LLM 語意音碼」那段，**不是**擴散取樣的負面條件。
+
+> **音訊參考有兩種機制（互斥，檔名都需在 `ComfyUI/input/`）**
+>
+> | 旗標 | 底層 | 行為 |
+> |---|---|---|
+> | `--init-audio X --init-denoise d` | 參考音 latent 當 KSampler 的起點（audio2audio） | `d` 越低越貼近參考（0.3–0.5 旋律明顯跟著走；0.75–0.9 只留骨架） |
+> | `--ref-timbre X` | `ReferenceTimbreAudio` 掛在 conditioning（**cover 模式**，底層設 `is_covers=True`） | 維持空 latent、步數全開，可自由重構；會**忽略 LLM 音碼**（故自動關掉以省時） |
+>
+> 兩者只差一個「起點」概念：audio2audio 從參考出發，cover 則是「重做」參考。參考受版權保護的
+> 音訊有衍生風險，**建議只拿自己生成的曲子當參考**（實測也是拿自家曲做的）。
+>
+> ✅ 實測（同 prompt/seed 對照，Mac M4/16GB）：參考模式因跳過 LLM 音碼，約 **95–104 秒/首**，
+> 純文字生成是 **267 秒**——**約快 2.5 倍**。（`qc` 的能量指紋分不出兩者好壞，得靠人耳。）
 
 ```bash
 ./scripts/lofi generate --csv prompts/generated/rainy_lofi.csv --limit 3 --quality stable --clean-raw
@@ -80,6 +93,9 @@
 ## 2. 影片長度配方
 
 每首 120s、crossfade 8s → 第 N 首結束時間 = `112×(N-1) + 120`。
+
+> 用 `--duration-range`（預設 120–150）時每首長度不一，上式改取**平均**：平均 135s → 每首貢獻
+> ≈ `135-8 = 127s`。反正 `make_long_lofi` 最後會把混音**裁到目標長度**，長度充裕即可，不必剛好。
 
 | 目標長度 | 軌數 | `--minutes` | `--vbitrate` | 預估大小 | `--loop` |
 |---|---|---|---|---|---|
