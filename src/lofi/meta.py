@@ -34,8 +34,8 @@ from pathlib import Path
 from lofi import catalog as cat
 from lofi import config
 from lofi import io
-from lofi.media import ffprobe_duration
-from lofi.paths import PUBLISH_DIR, STYLE_DIR, YT_DIR
+from lofi.media import ffprobe_duration, ffprobe_size
+from lofi.paths import PUBLISH_DIR, STYLE_DIR, VISUALS_DIR, YT_DIR
 
 
 def prettify(name):
@@ -357,6 +357,26 @@ def make_thumbnail(text_lines, art, dst, size=(1280, 720)):
     return dst
 
 
+def find_wide_art(name):
+    """該集（assets/visuals/<name>/）**解析度最高**的橫式圖，當縮圖底圖；沒有就 None。
+
+    取最高解析度而不是最新：AI 放大過的 `<name>_NN_fix-4k.png` 應該勝出
+    （縮圖只到 720p，來源越大越好）。
+    """
+    d = VISUALS_DIR / str(name or "")
+    if not d.is_dir():
+        return None
+    best = None
+    for p in sorted(d.glob("*.png")) + sorted(d.glob("*.jpg")):
+        wh = ffprobe_size(p)
+        if not wh or wh[0] / wh[1] <= 1.2:          # 只要橫式（直式/方圖會把主角裁掉）
+            continue
+        key = (wh[0] * wh[1], p.stat().st_mtime)
+        if best is None or key > best[0]:
+            best = (key, p)
+    return best[1] if best else None
+
+
 def _html_escape(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace('"', "&quot;"))
@@ -435,6 +455,10 @@ def main():
     ap.add_argument("--xfade", type=float, default=8.0, help="crossfade 秒數（預設 8）")
     ap.add_argument("--tracklist", default="", help="改吃 tracklist JSON（含 tracks[]）")
     ap.add_argument("--title", default="", help="覆寫標題")
+    ap.add_argument("--thumb-art", default="", dest="thumb_art",
+                    help="縮圖用的 16:9 底圖（預設自動找 assets/visuals/<名稱>/ 最高解析度的橫式圖）")
+    ap.add_argument("--no-thumbnail", action="store_true",
+                    help="不產生 YouTube 縮圖（publish/<名稱>.thumbnail_1280x720.jpg）")
     ap.add_argument("--print", dest="to_stdout", action="store_true", help="只印出，不寫檔")
     args = ap.parse_args()
 
@@ -523,6 +547,20 @@ def main():
         return
 
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
+    # YouTube 縮圖（1280×720）：底圖＝該集的 16:9 圖（挑解析度最高的那張），
+    # 文字＝標題前三段。本機沒有 Pillow／ffmpeg 沒有 drawtext，走 qlmanage（見 make_thumbnail）。
+    if not args.no_thumbnail:
+        art = Path(args.thumb_art) if args.thumb_art else find_wide_art(stem)
+        if art:
+            thumb = make_thumbnail(build_thumbnail_text(record), art,
+                                   PUBLISH_DIR / f"{stem}.thumbnail_1280x720.jpg")
+            if thumb:
+                record["thumbnail"] = cat.relpath(thumb)
+                print(f"縮圖 → {thumb.name}（{ffprobe_size(thumb) or ''}，底圖 {Path(art).name}）")
+            else:
+                print("縮圖：⚠️  產生失敗（沒有 qlmanage 或渲染失敗）→ 之後可用 --thumb-art 重跑")
+        else:
+            print(f"縮圖：⚠️  找不到橫式底圖（assets/visuals/{stem}/）→ 用 --thumb-art 指定")
     io.atomic_write_json(PUBLISH_DIR / f"{stem}.json", record)
 
     md = [f"# {title}", "", f"- 影片: `{record['video']}`",

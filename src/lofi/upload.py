@@ -146,6 +146,9 @@ def main():
     ap.add_argument("--client-secret", default="", help="OAuth client secret JSON 路徑")
     ap.add_argument("--token", default="", help="token 快取路徑")
     ap.add_argument("--auth-only", action="store_true", help="只做 OAuth 授權並快取 token，不上傳")
+    ap.add_argument("--thumbnail", default="",
+                    help="上傳後設定縮圖（預設用 publish/<名稱>.json 的 thumbnail；1280×720 JPEG）")
+    ap.add_argument("--no-thumbnail", action="store_true", help="不設定縮圖")
     ap.add_argument("--check", action="store_true", help="驗證憑證/上傳權限（開一個可續傳工作階段後取消，不留影片）")
     ap.add_argument("--dry-run", action="store_true", help="只驗證與印出，不上傳")
     args = ap.parse_args()
@@ -224,6 +227,27 @@ def main():
     url = f"https://youtu.be/{vid}"
     print(f"✅ 已上傳（{args.privacy}）: {url}")
 
+    # 縮圖：uploads 的 token 實測也能設縮圖（thumbnails.set）。有縮圖檔就自動設，
+    # 不要留給人手動做——縮圖是點閱率最直接的一環（publish/<名稱>.json 的 thumbnail）。
+    thumb = None
+    if args.thumbnail:
+        thumb = Path(args.thumbnail)
+    elif rec.get("thumbnail"):
+        thumb = ROOT / rec["thumbnail"]
+    if thumb and not args.no_thumbnail:
+        if thumb.exists():
+            try:
+                youtube.thumbnails().set(
+                    videoId=vid,
+                    media_body=MediaFileUpload(str(thumb), mimetype="image/jpeg"),
+                ).execute()
+                print(f"✅ 縮圖已設定：{thumb.name}（{thumb.stat().st_size / 1e6:.2f} MB）")
+                rec["thumbnail_set_at"] = cat.now_iso()
+            except Exception as e:
+                print(f"⚠️  縮圖設定失敗（可到 Studio 手動上傳）：{str(e)[:200]}")
+        else:
+            print(f"⚠️  縮圖檔不存在，略過：{thumb}")
+
     rec["youtube_id"] = vid
     rec["youtube_url"] = url
     rec["privacy"] = args.privacy
@@ -235,7 +259,7 @@ def main():
     print("接下來請手動完成（上線）：")
     print(f"  1. 到 YouTube Studio 把影片設為公開/排程：{url}")
     print("  2. 勾選『變造或合成內容』AI 揭露（API 無法設定）")
-    print("  3. 上傳縮圖、加入播放清單")
+    print("  3. 加入播放清單")
     print(f"  4. 完成後：python3 scripts/upload_status.py --mark-scheduled {args.episode}")
 
 

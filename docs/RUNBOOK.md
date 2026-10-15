@@ -507,13 +507,22 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 ### 8.1 自動產生上片資訊
 
 ```bash
-# 產生 title / 描述（含章節）/ tags → publish/<影片>.json + .md
+# 產生 title / 描述（含章節）/ tags ＋ YouTube 縮圖（1280×720）
+#   → publish/<影片>.json + .md + .thumbnail_1280x720.jpg
 ./scripts/lofi meta --video output/videos/xxx.mp4 --style cozy_morning \
     --tracks assets/tracks/cozy_morning/*/*.mp3 --xfade 8
 
 ./scripts/lofi publish --ready     # 今天可上傳的
 ./scripts/lofi publish --mark-uploaded xxx --url https://youtu.be/...
 ```
+
+- **縮圖自動產生**：文字取自 `prompts/youtube/<style>.json` 的 `thumbnail_text`（本產線＝`COZY / MORNING / LOFI`，
+  系列一致），底圖自動挑 `assets/visuals/<名稱>/` **解析度最高**的橫式圖（AI 放大過的 `_fix-4k` 會勝出）。
+  本機沒有 Pillow、ffmpeg 也沒有 drawtext → 走 `qlmanage` 渲染 HTML 再裁切（`meta.make_thumbnail`）。
+  想換底圖：`--thumb-art <圖>`；不想產生：`--no-thumbnail`。
+- **上傳時自動設定縮圖**：`lofi upload` 讀 `publish/<名稱>.json` 的 `thumbnail` 並呼叫 `thumbnails.set`
+  （這支 token 只有 `youtube.upload`，實測設縮圖可以）。要覆寫：`--thumbnail <檔>`；不要設：`--no-thumbnail`。
+- 產線（`make_episode.sh --stage upload`）會連縮圖一起做完，不必手動上傳。
 
 - metadata 範本在 `prompts/youtube/<style>.json`（title 池/描述段落/tags/hashtags/縮圖文字）；
   頻道層的文案（頻道描述/關鍵字/業務描述）在 `prompts/youtube/_channel.json`。
