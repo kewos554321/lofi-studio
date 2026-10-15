@@ -310,10 +310,20 @@ stage_video() {
   if [ "$TRACKS_SET" = 1 ]; then
     tracks=("${TRACKS[@]}")
   elif [ "$DRY" = 0 ]; then
+    # **只挑這個 run 自己的曲**（依生成順序）：library 預設按「分數」排序，不按 run 篩選
+    # 就會撈到別的 run 分數更高的曲 —— 實測踩過：第 2 集影片 36 首裡 34 首來自第 1 集，
+    # 影片變成上一集的音樂，而且曲目表和本集專輯對不上。
     local t
     while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
-      ./scripts/lofi library query --style "$STYLE" --status keep --limit "$LIMIT" --paths 2>/dev/null || true)
+      ./scripts/lofi library query --style "$STYLE" --run-id "$RUN_ID" --order track \
+        --status keep --limit "$LIMIT" --paths 2>/dev/null || true)
     if [ "${#tracks[@]}" -eq 0 ]; then
+      while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
+        ./scripts/lofi library query --style "$STYLE" --run-id "$RUN_ID" --order track \
+          --limit "$LIMIT" --paths 2>/dev/null || true)
+    fi
+    if [ "${#tracks[@]}" -eq 0 ]; then   # 這個 run 真的沒曲目才退回整個風格（而且要看得出來）
+      echo "  ⚠️  run ${RUN_ID} 沒有可用曲目 → 退回整個風格挑（會混到別的 run 的曲）" >&2
       while IFS= read -r t; do [ -n "$t" ] && tracks+=("$t"); done < <(
         ./scripts/lofi library query --style "$STYLE" --limit "$LIMIT" --paths 2>/dev/null || true)
     fi
@@ -325,7 +335,7 @@ stage_video() {
     fi
     echo "  曲目: ${#tracks[@]} 首"
   else
-    echo "  曲目: （自動從 library 挑 keeper，--limit ${LIMIT}）"
+    echo "  曲目: （自動從 run ${RUN_ID} 挑 keeper／全部，--limit ${LIMIT}）"
   fi
 
   # --- 合成 ---

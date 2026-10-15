@@ -121,8 +121,8 @@ def build_where(args):
         where.append("EXISTS (SELECT 1 FROM tags tg WHERE tg.track_id=t.track_id AND tg.tag=?)")
         params.append(t)
     for col, op, val in (
-        ("style", "=", args.style), ("status", "=", args.status),
-        ("verdict", "=", args.verdict),
+        ("style", "=", args.style), ("run_id", "=", getattr(args, "run_id", "")),
+        ("status", "=", args.status), ("verdict", "=", args.verdict),
     ):
         if val:
             where.append(f"t.{col} {op} ?")
@@ -142,8 +142,11 @@ def cmd_query(args):
     con = connect()
     con.row_factory = sqlite3.Row
     where, params = build_where(args)
+    # 預設按分數排（挑最好的）；--order track 照 track_id＝生成順序，
+    # 給「一個 run 一條產線」用（影片曲目表才會跟著專輯順序）。
+    order = "t.track_id" if getattr(args, "order", "score") == "track" else "t.score DESC"
     sql = ("SELECT t.track_id,t.file,t.style,t.bpm,t.verdict,t.score,t.status,t.rating,t.mood "
-           f"FROM tracks t WHERE {where} ORDER BY t.score DESC")
+           f"FROM tracks t WHERE {where} ORDER BY {order}")
     if args.limit:
         sql += f" LIMIT {int(args.limit)}"
     rows = [dict(r) for r in con.execute(sql, params).fetchall()]
@@ -273,6 +276,10 @@ def main():
 
     q = sub.add_parser("query"); add_filters(q)
     q.add_argument("--limit", type=int, default=30); q.add_argument("--json", action="store_true")
+    q.add_argument("--run-id", default="", dest="run_id",
+                   help="只取這個 run 的曲目（一個 run 一條產線時必用，否則會撈到別的 run 的曲）")
+    q.add_argument("--order", default="score", choices=["score", "track"],
+                   help="排序：score（預設，挑最好的）／track（track_id＝生成順序）")
     q.add_argument("--paths", action="store_true", help="只輸出檔案路徑（給 bash 用）")
 
     sub.add_parser("summary")

@@ -1996,6 +1996,33 @@ class TestMakeEpisodeMusicFormat(unittest.TestCase):
         self.assertIn("--format", out.stderr + out.stdout)
 
 
+class TestVideoTrackScope(unittest.TestCase):
+    """影片段只能用「這個 run」自己的曲。
+
+    踩過的坑：`library query` 預設按分數排序、沒有按 run 篩選，第 2 集的影片就撈到
+    第 1 集分數更高的曲（36 首裡 34 首來自 cozy-1hr-01），影片變成上一集的音樂。
+    """
+
+    SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "make_episode.sh"
+
+    def test_video_stage_scopes_query_to_run(self):
+        src = self.SCRIPT.read_text()
+        self.assertIn('--run-id "$RUN_ID" --order track', src)   # 影片段必須 run-scoped
+        self.assertIn("退回整個風格挑", src)                      # 真沒曲目才退回，而且要看得出來
+
+    def test_library_query_can_filter_by_run(self):
+        """library.query 的 SQL 篩選要支援 run_id（影片段的 run-scoped 選曲靠它）。"""
+        args = argparse.Namespace(tag=None, style="cozy_morning", run_id="cozy-1hr-02",
+                                  status="", verdict="", min_score=None, min_rating=None,
+                                  bpm_min=None, bpm_max=None)
+        where, params = library.build_where(args)
+        self.assertIn("t.run_id = ?", where)
+        self.assertIn("cozy-1hr-02", params)
+        # 沒給 run_id 時不該多這個條件
+        args.run_id = ""
+        self.assertNotIn("run_id", library.build_where(args)[0])
+
+
 class TestThumbnail(unittest.TestCase):
     """YouTube 縮圖：底圖挑選、文字來源、上傳時的檔案解析（純函式／不需 YouTube）。"""
 
