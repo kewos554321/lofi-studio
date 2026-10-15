@@ -137,6 +137,17 @@ def get_credentials(client_secret, token_path):
     return creds
 
 
+def resolve_thumbnail(rec, override="", root=None):
+    """上傳後要設定的縮圖檔：`--thumbnail` 優先，其次 publish json 的 `thumbnail`。
+
+    回傳 Path 或 None（沒指定就 None → 不設縮圖）。
+    """
+    if override:
+        return Path(override)
+    rel = (rec or {}).get("thumbnail")
+    return ((root or ROOT) / rel) if rel else None
+
+
 def main():
     ap = argparse.ArgumentParser(description="上傳成片到 YouTube（上線前自動，之後手動）")
     ap.add_argument("--episode", default="", help="上片識別名（對應 publish/<名稱>.json）")
@@ -229,11 +240,7 @@ def main():
 
     # 縮圖：uploads 的 token 實測也能設縮圖（thumbnails.set）。有縮圖檔就自動設，
     # 不要留給人手動做——縮圖是點閱率最直接的一環（publish/<名稱>.json 的 thumbnail）。
-    thumb = None
-    if args.thumbnail:
-        thumb = Path(args.thumbnail)
-    elif rec.get("thumbnail"):
-        thumb = ROOT / rec["thumbnail"]
+    thumb = resolve_thumbnail(rec, args.thumbnail)
     if thumb and not args.no_thumbnail:
         if thumb.exists():
             try:

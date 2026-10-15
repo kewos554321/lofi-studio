@@ -1906,5 +1906,56 @@ class TestMakeEpisodeImageEngine(unittest.TestCase):
         self.assertIn("--image-engine", out.stderr + out.stdout)
 
 
+class TestThumbnail(unittest.TestCase):
+    """YouTube 縮圖：底圖挑選、文字來源、上傳時的檔案解析（純函式／不需 YouTube）。"""
+
+    def test_build_thumbnail_text_prefers_style_config(self):
+        self.assertEqual(meta.build_thumbnail_text({"thumbnail_text": ["COZY", "MORNING", "LOFI"]}),
+                         ["COZY", "MORNING", "LOFI"])
+        # 沒設定就從標題推：取「|」前那段的最多三個字
+        self.assertEqual(meta.build_thumbnail_text({"title": "Sunlit Window | Warm Morning Lofi"}),
+                         ["SUNLIT", "WINDOW"])
+        self.assertEqual(meta.build_thumbnail_text({}), [])
+
+    def test_find_wide_art_prefers_highest_resolution(self):
+        """底圖取解析度最高的橫式圖：放過 4K 衍生圖就會用它；直式圖不可用（會裁掉主角）。"""
+        import shutil as _sh
+        if not _sh.which("ffmpeg"):
+            self.skipTest("沒有 ffmpeg")
+        with tempfile.TemporaryDirectory() as td:
+            vis = Path(td) / "visuals"
+            run = vis / "ep01"
+            run.mkdir(parents=True)
+            for name, size in (("ep01_01.png", "1920x1080"), ("ep01_02_fix-4k.png", "3840x2160"),
+                               ("ep01_03_portrait.png", "1080x1920"), ("ep01_04_square.png", "1000x1000")):
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                                "-i", f"color=c=red:s={size}", "-frames:v", "1",
+                                str(run / name)], check=True)
+            os.utime(run / "ep01_01.png", None)          # 讓 1080p 變最新 → 取最新就會挑錯
+            old = meta.VISUALS_DIR
+            meta.VISUALS_DIR = vis
+            try:
+                self.assertEqual(meta.find_wide_art("ep01").name, "ep01_02_fix-4k.png")
+                self.assertIsNone(meta.find_wide_art("不存在"))
+            finally:
+                meta.VISUALS_DIR = old
+            (run / "ep01_02_fix-4k.png").unlink()        # 只剩直式／方形 → 不算橫式底圖
+            (run / "ep01_01.png").unlink()
+            meta.VISUALS_DIR = vis
+            try:
+                self.assertIsNone(meta.find_wide_art("ep01"))
+            finally:
+                meta.VISUALS_DIR = old
+
+    def test_resolve_thumbnail(self):
+        """--thumbnail 優先；其次讀 publish json 的 thumbnail（相對專案根）。"""
+        self.assertIsNone(upload.resolve_thumbnail({}))
+        self.assertEqual(upload.resolve_thumbnail({"thumbnail": "publish/x.jpg"}, root=Path("/r")),
+                         Path("/r/publish/x.jpg"))
+        self.assertEqual(upload.resolve_thumbnail({"thumbnail": "publish/x.jpg"}, "--given",
+                                                  root=Path("/r")),
+                         Path("--given"))
+
+
 if __name__ == "__main__":
     unittest.main()
