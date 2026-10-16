@@ -600,6 +600,13 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 ./scripts/lofi release package --run coastal01 --style coastal_guitar --visual-run sc06
 ./scripts/lofi release package --run coastal01 --format wav   # 交付改 WAV（相容性最廣；預設是 FLAC）
 ./scripts/lofi release package --run coastal01 --threads 2 --nice 15   # 與其他工作共存
+
+# 拆卷上架（30+ 首時）：--volume N → output/releases/<run>_N/，專輯名自動接「, Vol. N」
+# --title-source 指向整張專輯先編好的曲名，各卷才接得回人工曲名（見 DISTRIBUTION.md §3.1.1）
+./scripts/lofi release package --run coastal01 --volume 1 --offset 0  --limit 12 \
+    --album "The Windowsill, Vol. 1" --title-source scratch/coastal01_titles.json
+./scripts/lofi release package --run coastal01 --volume 2 --offset 12 --limit 12 \
+    --album "The Windowsill, Vol. 2" --title-source scratch/coastal01_titles.json
 ```
 
 > **一個 run 的 `mood` 通常只有 5–6 種**（同風格量產的必然結果），所以「取前 12 首」會產生一堆 `(pt. 2)`。
@@ -613,7 +620,7 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 |---|---|
 | `audio/NN_<slug>.flac` | 正規化母帶（**-14 LUFS / -1 dBTP**，24-bit 保留取樣率）；內嵌標籤含 title/artist/album/track/genre/date/copyright/**comment（AI 揭露）**——標籤跟著檔案走，買家丟掉 README 也看得到。改標籤要 `--force`。格式預設 **FLAC**（`--format wav` 可改） |
 | `cover_3000x3000.jpg` | **方形封面（純圖不疊字）**：DistroKid 封面 ＋ Gumroad 縮圖 ＋ 交付 ZIP，一張到底 |
-| `artwork_3840x2160.jpg` | **16:9 高畫質圖**：Gumroad 封面 ＋ 交付 ZIP，同一張（來源優先取該集 AI 放大過的 4K 圖） |
+| `artwork_3840x2160.jpg` | **16:9 高畫質圖**：Gumroad 封面 ＋ 交付 ZIP，同一張（來源優先取該集 `assets/visuals/<run>/` 的橫式 4K 圖；沒有才由方圖衍生——`--artwork-fit pad`＝模糊背景補滿／`crop`＝裁成 16:9 填滿） |
 | `download/<album>.zip` | 交付檔（`audio/`＋**方形與橫式兩張圖**＋`tracklist.csv`＋`credits.txt`）；Gumroad／Bandcamp 的「內容」直接傳這個。原則：**買家拿到的要和商店頁看到的一致**（商店顯小尺寸、ZIP 給高畫質版） |
 | `release.json` | 機器用：album/artist/曲序/**genre/explicit/songwriter/AI credits**/`listing`/授權 provenance/每首母帶參數 |
 | `tracklist.csv` | **買家視角**的曲目表：No/Title/Artist/Album/Year/Duration/Vibe/BPM/Key/Instrumental/Explicit/Format/File/Size（不含 ISRC——那是發行商欄位，見 `LISTING.md`） |

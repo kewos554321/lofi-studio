@@ -72,7 +72,9 @@
 output/releases/coastal01/
 ├── audio/                01_slow-tide.wav …（-14 LUFS / -1 dBTP，ID3 已填）
 ├── cover_3000x3000.jpg   封面（無文字，見 §6-1）；商店縮圖用同一套圖
-├── artwork_3840x2160.jpg  交付 ZIP 用 4K 高畫質橫式圖（商店 16:9 封面同一套圖、AI 放大）
+├── artwork_3840x2160.jpg  交付 ZIP 用 4K 高畫質橫式圖（商店 16:9 封面同一套圖；來源優先用該集
+│                          `assets/visuals/<run>/` 的橫式圖，沒有才由方圖衍生：`--artwork-fit`
+│                          `pad`＝模糊背景補滿左右（預設）／`crop`＝裁成 16:9 填滿）
 │  （封面只有兩張：方形給 DistroKid＋Gumroad 縮圖、16:9 給 Gumroad 封面＋交付 ZIP）
 ├── download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
 │                         原則：買家拿到的＝商店頁看到的（同一套圖，ZIP 給高畫質版）
@@ -103,14 +105,25 @@ output/releases/coastal01/
 |---|---|---|
 | Gumroad | `Kitchen at Dawn, Vol. 1` | `release.json` 的 `album`（`--album`）|
 | DistroKid／DSP | 同上 | 表單是人工填的，平台以表單為準 |
-| 本機上架包目錄 | `output/releases/<run>_N/` | **內部識別**，不必跟顯示名一致（`release gumroad --run` 用它找檔）|
+| 本機上架包目錄 | `output/releases/<run>_N/` | `--volume N` |
 
 **不要用 `_1/_2/_3` 當顯示名**——`Vol. N` 買家與平台都一看就懂是同一系列，`_1` 讀起來像檔名。
 
-**曲名要在整張專輯內唯一**（跨卷也不能重複）：`unique_titles` 會把重複的 mood 名加上可讀修飾語
-（`Slow Weekend, Second Cup`），池子用完才退回 `(pt. N)`。但 **`release package` 一次只看得到一卷**，
-所以跨卷的唯一性要由呼叫端負責：打包每一卷前，先把整張專輯算好的唯一曲名寫進
-`output/releases/<run>/release.json` 當 prior，工具才會沿用（見 `scratch/_tmp_cozy_prod.sh`）。
+**工具支援（✅ 2026-10 實作）**：`release package --volume N`
+
+```bash
+TS=scratch/<run>_titles.json          # 整張專輯先編好的唯一曲名（file → title）
+lofi release package --run nujab02 --volume 1 --offset 0  --limit 12 \
+    --album "Night Library, Vol. 1" --title-source $TS …
+lofi release package --run nujab02 --volume 2 --offset 12 --limit 12 \
+    --album "Night Library, Vol. 2" --title-source $TS …
+```
+
+- `--volume N`：輸出目錄＝`output/releases/<run>_N/`；`--album` 省略時自動接「, `Vol. N`」。
+- `--title-source PATH`：**人工曲名從哪份 `release.json` 沿用**（拆卷時指向原本那張完整的上架包）。
+  沒有它，每一卷只讀自己目錄的 prior → 曲名會退回自動命名、滿是 `(pt. N)`。
+- **跨卷去重**：`sibling_volume_titles()` 會把同 run 其他卷用過的曲名餵進 `unique_titles(avoid=…)`。
+- 拆卷也讓「被商店退某一首」時只需重上那一卷（見 §6-4）。
 
 ### 3.3 兩層存放：為什麼無損母帶不能放內接
 
@@ -213,7 +226,7 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 
 ---
 
-## 6. 三個決策（已定案）
+## 6. 決策與 SOP（已定案）
 
 ### 6-1. 封面要不要疊字？→ **決定：不疊字（純圖）**
 
@@ -309,6 +322,51 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 
 ⚠️ 不論走哪條，`release.json` 都要記「母帶來源＝重生成／mp3 正規化」（`master_source` 欄位），
 別讓半年後的人（或你自己）誤以為那是原始無損。
+
+### 6-4. 被商店指認「抄襲／未授權素材」時（SOP）
+
+**案例（2026-10-16）**：`Night Library`（35 首 ACE-Step 全生成）送 DistroKid 被退 3 首：
+「Track 3 / 4 / 35 appears to contain elements of another artist's music（"Perfect World" by Other Side 等）」。
+
+**為什麼會發生**：ACE-Step **不會真的取樣**（管線沒有任何外部音訊來源），但生成音訊可能與既有錄音
+**指紋相近**（模型記憶、或和弦進行／節奏型態／音色組合剛好撞上），被 DistroKid／商店的指紋比對
+（Content ID 類）標記。**也可能是假陽性**——AI 生成音的典型語彙容易踩到既有曲的指紋。這在 AI 音樂上架已是常態。
+
+**處理原則：不要跟系統硬碰，直接換掉那幾首最快。**（申訴可行，但要附 AI 揭露／`credits.txt`，來回數天）
+
+#### 換歌 SOP（可重複執行）
+
+```bash
+RUN=nujab02; STYLE=nujabes_night; RD=assets/tracks/$STYLE/$RUN; MST=output/masters/$STYLE/$RUN
+# 1) 查被指的 Track N 對應哪個來源檔
+python3 -c "import json;d=json.load(open('output/releases/$RUN/release.json'));\
+[print(t['no'],t['title'],t['file']) for t in d['tracks'] if t['no'] in (3,4,35)]"
+
+# 2) 原檔（mp3＋sidecar＋flac 母帶）移出產線 → 保留證據，不要刪
+mkdir -p scratch/rejected/${RUN}_flagged
+for n in 03 04 35; do B=${STYLE}_${n}_${RUN}_00001
+  mv "$RD/$B.mp3" "$RD/$B.mp3.json" "$MST/$B.flac" scratch/rejected/${RUN}_flagged/ 2>/dev/null; done
+
+# 3) 用「同 mood／編制、換 key／BPM」的替代清單重新生成（檔名會補回被移走的空位）
+lofi generate --csv prompts/generated/${RUN}_repair.csv --run-id $RUN --format flac --quality stable --clean-raw
+lofi qc --all --index && lofi library build
+
+# 4) 重產上架包（--force 才會重算換掉那幾首的母帶；ZIP 一併重建）
+lofi release package --run $RUN --limit 35 --album "…" --force …
+```
+
+**替代清單怎麼做**：從 `prompts/generated/<style>.csv` 挑那幾列，**保留 `mood`／`instruments`**（曲名才對得上），
+把 `key`／`bpm` 換成風格池裡的其他值，再用 `expand.build_prompt()` 重組 prompt。
+換 key／BPM（而不只是換 seed）才能讓新曲與被指認的版本明顯不同。
+
+#### 事前降低機率（量產守則）
+
+1. **拆卷上架**（`Vol. 1/2/3`，各 10–12 首）：一次 35 首被退 3 首＝整張要重來；拆卷則只需重上被退那卷。
+2. **拉開多樣性**：同張專輯的 key／BPM／編制要分散（`expand` 的多維度組合），別讓整張指紋太像。
+3. **不拿別人的音訊當參考**：`--init-audio`／`--ref-timbre` 只餵**自家生成的曲子**（既有守則）。
+4. **被退過的錄音不要再交**：換掉的原檔留在 `scratch/rejected/`；重新提交同一顆檔一定再被擋。
+5. **上架前自檢（⬜ 未做）**：本專案**沒有**音樂相似度比對——`qc` 的能量指紋鑑別力不足（同風格常 0.99，
+   作者已註明不可用作警示）。要補得裝 `chromaprint`／`fpcalc`（AcoustID 指紋）或接商用 Content ID 檢測。
 
 ---
 

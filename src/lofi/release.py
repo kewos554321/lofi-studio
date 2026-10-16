@@ -690,6 +690,26 @@ def find_run_dir(style, run):
     return hits[0]
 
 
+def release_dir(run, volume=0):
+    """上架包目錄：單卷 `output/releases/<run>/`；多卷 `output/releases/<run>_<N>/`（見 DISTRIBUTION.md §3.1.1）."""
+    return RELEASES_DIR / (f"{run}_{int(volume)}" if volume else str(run))
+
+
+def _base_album(args, run):
+    """這張專輯的**主名**（不含 Vol）＝ `--album` 優先，否則風格美化名。"""
+    if getattr(args, "album", ""):
+        return args.album
+    name = args.style or find_run_dir(args.style, run).parent.name
+    return mm.prettify(name or run)
+
+
+def _release_album(args, run):
+    """這一卷的專輯名：拆卷（`--volume N`）且沒自訂 `--album` 時自動接 `, Vol. N`。"""
+    vol = int(getattr(args, "volume", 0) or 0)
+    base = _base_album(args, run)
+    return f"{base}, Vol. {vol}" if (vol and not getattr(args, "album", "")) else base
+
+
 def _select_tracks(rows, tokens):
     """依選擇器挑曲目：1-based 序號、`track_id`、或檔名片段（可混用）。"""
     picked = []
@@ -1061,7 +1081,7 @@ def master_track(src, dst, *, lufs, tp, fmt="wav", metadata=None):
 
 
 def make_cover(src, dst, size=COVER_SIZE):
-    """方形封面：置中裁切再放大（lanczos）。純圖、不疊字。"""
+    """方形封面：置中裁切再放大（lanczos）。純圖、不疊字（見 DISTRIBUTION.md §6-1）。"""
     w, h = probe_wh(src)
     if not w or not h:
         sys.exit(f"讀不到圖片尺寸：{src}")
@@ -1105,11 +1125,14 @@ def set_dpi(path, dpi=72):
         return False
 
 
-def make_wide_art(src, dst, size=ARTWORK_SIZE, wide_src=None):
+def make_wide_art(src, dst, size=ARTWORK_SIZE, wide_src=None, fit="pad"):
     """16:9 高畫質圖（**一套圖給所有商店與交付 ZIP 共用**）：Gumroad 封面 ＋ 交付 ZIP 的橫式圖。
 
-    優先用橫式原圖（該集影片封面／其 AI 放大版）；沒有的話用方圖＋同張圖放大模糊當背景補滿，
-    避免把方圖硬裁成 16:9 而切掉主角。
+    優先順序：
+      1. 橫式原圖（該集影片封面／其 AI 放大版）→ 直接 scale-to-cover 裁成 16:9。
+      2. 沒有橫式原圖時，依 `fit`：
+         - `pad`（預設）：方圖置中＋同張圖放大模糊當背景補滿左右（**不裁掉主角**）。
+         - `crop`：把來源放大裁成 16:9 填滿（**沒有填補邊**，代價是裁掉上下）。
 
     為什麼不做「商店用小尺寸、ZIP 用高畫質」兩套：買家拿到的要和商店頁看到的一致，
     而商店端本來就吃得下大圖（Gumroad：≥1280×720、<50MB、長邊 >4096px 才自動縮），
@@ -1119,6 +1142,10 @@ def make_wide_art(src, dst, size=ARTWORK_SIZE, wide_src=None):
     wide_ok = bool(wide_src) and bool(probe_wh(wide_src)[0])
     if wide_ok:
         extra = ["-i", str(wide_src), "-vf",
+                 f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}"]
+    elif fit == "crop":
+        # 填滿：放大到覆蓋整個 16:9 再置中裁切（無左右填補）
+        extra = ["-i", str(src), "-vf",
                  f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}"]
     else:
         extra = ["-i", str(src), "-filter_complex",
@@ -1325,10 +1352,14 @@ def cmd_prune(args):
 
 
 def cmd_plan(args):
+    vol = int(getattr(args, "volume", 0) or 0)
+    album = _release_album(args, args.run)
     # 與 package 看同一份既有 release.json，否則「預覽」會跟「實際產出」不一樣
-    prior = load_prior_tracks(RELEASES_DIR / args.run / "release.json")
+    # （拆卷時用 --title-source 指向原本那份完整的上架包，人工曲名才接得過來）
+    _ts = getattr(args, "title_source", "")
+    prior = load_prior_tracks(_ts if _ts else (release_dir(args.run, vol) / "release.json"))
     # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
-    avoid = sibling_volume_titles(args.run, album=getattr(args, "album", ""))
+    avoid = sibling_volume_titles(args.run, album=album)
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
@@ -1394,10 +1425,13 @@ def cmd_package(args):
 
     media.require("ffmpeg", "ffprobe")
 
-    dest = RELEASES_DIR / args.run
-    prior = load_prior_tracks(dest / "release.json")
+    vol = int(getattr(args, "volume", 0) or 0)
+    album = _release_album(args, args.run)
+    dest = release_dir(args.run, vol)
+    _ts = getattr(args, "title_source", "")
+    prior = load_prior_tracks(_ts if _ts else (dest / "release.json"))
     # 跨卷去重：同一張專輯拆 Vol. 1/2/3 時，別卷用過的曲名要避開（不然會撞名）
-    avoid = sibling_volume_titles(args.run, album=getattr(args, "album", ""))
+    avoid = sibling_volume_titles(args.run, album=album)
     d, rows, dropped = load_run(args.style, args.run, limit=args.limit, offset=args.offset,
                                 title_overrides={k: v["title"] for k, v in prior.items()},
                                 isrc_overrides={k: v["isrc"] for k, v in prior.items() if v.get("isrc")},
@@ -1407,7 +1441,6 @@ def cmd_package(args):
     if avoid:
         print(f"跨卷去重：避開同一 run 其他卷已用的 {len(avoid)} 個曲名")
     artist = args.artist or config.RELEASE_ARTIST
-    album = args.album or mm.prettify(rows[0]["style"] or args.run)
 
     audio_dir = dest / "audio"
     cover_src = Path(args.cover) if args.cover else pick_cover(args.visual_run)
@@ -1509,13 +1542,16 @@ def cmd_package(args):
         dest.mkdir(parents=True, exist_ok=True)
         make_cover(cover_src, cover_dst)
         _wide = pick_wide_cover(rec.get("run") or "")
+        _fit = getattr(args, "artwork_fit", "pad")
         _art = dest / f"artwork_{ARTWORK_SIZE[0]}x{ARTWORK_SIZE[1]}.jpg"
-        make_wide_art(cover_src, _art, wide_src=_wide)
+        make_wide_art(cover_src, _art, wide_src=_wide, fit=_fit)
         for _p in (cover_dst, _art):
             set_dpi(_p)
         print(f"       → {cover_dst.name}（方形 {COVER_SIZE}²；DistroKid 封面／Gumroad 縮圖）")
         print(f"       → {_art.name}（16:9 {ARTWORK_SIZE[0]}×{ARTWORK_SIZE[1]}；Gumroad 封面／交付 ZIP" +
-              ("，用該集影片封面）" if _wide else "，方圖＋模糊背景）"))
+              ("，用該集影片封面）" if _wide
+               else "，方圖裁成 16:9 填滿）" if _fit == "crop"
+               else "，方圖＋模糊背景）"))
 
     # 3) 記錄與清單
     # 交付母帶的實際格式（量測，不猜）：credits.txt 要寫「24-bit / 48 kHz」。
@@ -1596,8 +1632,17 @@ def build_parser():
         p.add_argument("--run", required=True, help="生成批次的 run-id（例如 coastal01）")
         p.add_argument("--style", default="", help="風格名（同名 run 有多個時必填）")
         p.add_argument("--cover", default="", help="指定封面來源圖（預設挑 sc 場景 run）")
+        p.add_argument("--artwork-fit", choices=["pad", "crop"], default="pad", dest="artwork_fit",
+                       help="16:9 交付圖怎麼補滿：pad（預設；方圖＋模糊背景，不裁主角）／"
+                            "crop（裁成 16:9 填滿，左右不留填補邊，但會裁掉上下）")
         p.add_argument("--visual-run", default="", dest="visual_run",
                        help="從指定 visuals run（例如 sc01）挑封面")
+        p.add_argument("--volume", type=int, default=0,
+                       help="拆卷：這張專輯的第幾卷（1..N）。目錄＝output/releases/<run>_<N>/，"
+                            "專輯名自動接「, Vol. N」，跨卷曲名自動去重（見 DISTRIBUTION.md §3.1.1）")
+        p.add_argument("--title-source", default="", dest="title_source",
+                       help="人工曲名從哪份 release.json 沿用（拆卷時指向原本那張完整的上架包；"
+                            "預設讀這一卷自己的 release.json）")
         p.add_argument("--limit", type=int, default=0, help="只取前 N 首（0=全部）")
         p.add_argument("--offset", type=int, default=0, help="從第幾首開始（0-based）")
         p.add_argument("--tracks", default="",

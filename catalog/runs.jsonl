@@ -1,3 +1,8 @@
 {"ts": "2026-10-15T15:33:09+08:00", "schema_version": 1, "event": "stage_start", "run_id": "nujab01", "kind": "batch", "stage": "music", "log": "logs/batch_nujab01.log", "total": 5, "unit": "tracks", "pid": 13279, "host": "weichiehdeMac-mini.local", "started_at": "2026-10-15T15:33:09+08:00"}
 {"ts": "2026-10-15T15:59:35+08:00", "schema_version": 1, "event": "progress", "run_id": "nujab01", "stage": "music", "done": 5, "total": 5, "unit": "tracks"}
 {"ts": "2026-10-15T15:59:35+08:00", "schema_version": 1, "event": "stage_end", "run_id": "nujab01", "stage": "music", "status": "ok", "elapsed_s": 1587.0}
+{"ts": "2026-10-15T21:52:22+08:00", "schema_version": 1, "event": "stage_start", "run_id": "nujab02", "kind": "batch", "stage": "music", "log": "logs/batch_nujab02.log", "total": 36, "unit": "tracks", "pid": 17544, "host": "weichiehdeMac-mini.local", "started_at": "2026-10-15T21:52:22+08:00"}
+{"ts": "2026-10-15T22:59:08+08:00", "schema_version": 1, "event": "progress", "run_id": "nujab02", "stage": "music", "done": 12, "total": 36, "unit": "tracks"}
+{"ts": "2026-10-16T00:15:47+08:00", "schema_version": 1, "event": "progress", "run_id": "nujab02", "stage": "music", "done": 24, "total": 36, "unit": "tracks"}
+{"ts": "2026-10-16T01:28:32+08:00", "schema_version": 1, "event": "progress", "run_id": "nujab02", "stage": "music", "done": 36, "total": 36, "unit": "tracks"}
+{"ts": "2026-10-16T01:28:32+08:00", "schema_version": 1, "event": "stage_end", "run_id": "nujab02", "stage": "music", "status": "ok", "elapsed_s": 12970.0}
