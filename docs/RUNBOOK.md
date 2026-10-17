@@ -574,6 +574,12 @@ THREADS=4 NICE=15 ./scripts/make_long_lofi.sh --image assets/visuals/sc01/sc01_0
 - 章節時間戳是 YouTube 需要的「策展痕跡」，務必帶上。
 - **描述尾段會自動帶 AI 揭露與模型授權**（`meta.build_credits_block()`，由 sidecar 的模型彙整）：
   這樣「授權清單隨每次發行附上」在 YouTube 也成立（不再只有 Gumroad 的下載包有）。沒有模型紀錄時不加水段。
+  ⚠️ 影片用**無損母帶**（`output/masters/…`）混音時，sidecar 在工作檔那邊 → `catalog.working_copy()`
+  會換回工作檔查；少了這步 credits 會靜默消失。
+- **商店導流自動帶**：描述尾段（hashtags 之前）會加「🛒 Own the music」＋
+  `prompts/youtube/_channel.json` 的 `store_url`（目前＝Gumroad 商店首頁），不必每支手貼。
+- 章節曲名要**人看得懂**：`--tracks` 是由檔名推（會變成 `Nujabes Night 01 Nujab02`）；
+  要正式曲名就寫一份 tracklist JSON（`{"tracks":[{file,title,start,duration}]}`）走 `--tracklist`。
 - `make_long_lofi.sh --style <name>` 會在渲染後自動產生上片資訊。
 
 ### 8.2 YouTube 以外的出路（上架包）

@@ -225,8 +225,16 @@ def track_sidecar_meta(audio):
 
 
 def track_model_credit(audio):
-    """回傳該曲的模型來源（for 商用 provenance）；沒有記錄回 None。"""
+    """回傳該曲的模型來源（for 商用 provenance）；沒有記錄回 None。
+
+    影片優先用無損母帶（`output/masters/...`），但 sidecar 只跟著工作檔走 →
+    母帶查不到時換回工作檔再查，否則 AI 揭露段落會**靜默消失**（查不到等於沒有）。
+    """
     gen = (cat.load_sidecar(audio) or {}).get("gen") or {}
+    if not gen.get("model"):
+        w = cat.working_copy(audio)
+        if w:
+            gen = (cat.load_sidecar(w) or {}).get("gen") or {}
     model = gen.get("model")
     if not model:
         return None
@@ -411,7 +419,20 @@ def build_thumbnail_text(rec):
     return [w for w in head.upper().split() if w][:3]
 
 
-def build_description(cfg, duration, chapters, credits=None):
+def channel_store_url():
+    """商店網址（`prompts/youtube/_channel.json` 的 `store_url`）；沒有就回空字串。
+
+    影片描述要導流到 Gumroad（頻道唯一的直接變現通路）；放這裡是為了**一處設定、
+    所有上片資訊共用**，不要在每支影片手動貼。
+    """
+    p = YT_DIR / "_channel.json"
+    try:
+        return str(json.loads(p.read_text(encoding="utf-8")).get("store_url") or "").strip()
+    except (json.JSONDecodeError, OSError):
+        return ""
+
+
+def build_description(cfg, duration, chapters, credits=None, store_url=""):
     features = cfg.get("features") or []
     lines = []
     lines.append(f"{cfg.get('emoji','')} {cfg.get('intro','')}".strip())
@@ -456,6 +477,13 @@ def build_description(cfg, duration, chapters, credits=None):
     if credits:
         lines.append("")
         lines.extend(build_credits_block(credits))
+
+    if store_url:
+        lines.append("")
+        lines.append("—")
+        lines.append("")
+        lines.append("🛒 Own the music")
+        lines.append(f"Lossless album downloads (FLAC), pay what you want: {store_url}")
 
     if cfg.get("hashtags"):
         lines.append("")
@@ -528,7 +556,8 @@ def main():
             credits[(c["model"], c["license"], c["source"])] = c
     credits = sorted(credits.values(), key=lambda x: x["model"])
 
-    description = build_description(cfg, duration, chapters, credits)
+    description = build_description(cfg, duration, chapters, credits,
+                                    store_url=channel_store_url())
 
     record = {
         "video": cat.relpath(video),

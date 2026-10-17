@@ -11,6 +11,7 @@ catalog.py — 音樂目錄（catalog）共用工具。
 """
 import hashlib
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -159,6 +160,28 @@ def append_event(event, record):
     ev.update(summarize_event(event, record))
     io.append_jsonl(JSONL_PATH, ev)
     return ev
+
+
+def working_copy(master, must_exist=True):
+    """母帶 → 工作檔（`assets/tracks/<style>/<run>/<stem>.mp3`）；不是母帶路徑就回 None。
+
+    為什麼需要：sidecar 跟著**工作檔**走（`assets/tracks/...`），母帶夾裡只有音檔。
+    影片／release 優先用無損母帶時，查生成參數與模型授權就得換回工作檔，
+    否則 credits（AI 揭露）會靜默消失。
+    """
+    p = Path(os.path.abspath(Path(master)))
+    try:
+        # 用 abspath 而非 resolve：output/ 是外接碟 symlink，resolve 會把連結解掉對不上
+        rel = p.relative_to(Path(os.path.abspath(MASTERS_DIR)))   # <style>/<run>/<stem>.<ext>
+    except ValueError:
+        return None
+    for ext in (".mp3", ".flac", ".wav", ".m4a"):
+        cand = TRACKS_DIR / rel.with_suffix(ext)
+        if cand.exists():
+            return cand
+    if must_exist:
+        return None
+    return TRACKS_DIR / rel.with_suffix(".mp3")
 
 
 def load_sidecar(audio):

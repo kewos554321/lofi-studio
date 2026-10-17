@@ -36,6 +36,15 @@ def _png_with_prompt(path, workflow):
 
 
 class TestMetaFormat(unittest.TestCase):
+    def test_working_copy_maps_master_back_to_sidecar_owner(self):
+        """母帶夾沒有 sidecar（sidecar 跟著工作檔）→ 查得到 credits 才不會靜默漏掉 AI 揭露。"""
+        from lofi.paths import MASTERS_DIR, TRACKS_DIR
+        master = MASTERS_DIR / "demo_style" / "r01" / "demo_style_01_r01_00001.flac"
+        self.assertEqual(catalog.working_copy(master, must_exist=False),
+                         TRACKS_DIR / "demo_style" / "r01" / "demo_style_01_r01_00001.mp3")
+        self.assertIsNone(catalog.working_copy(master))                 # 工作檔不存在 → None
+        self.assertIsNone(catalog.working_copy(TRACKS_DIR / "x.mp3"))   # 不是母帶 → None
+
     def test_fmt_ts(self):
         self.assertEqual(meta.fmt_ts(0), "00:00")
         self.assertEqual(meta.fmt_ts(112), "01:52")
@@ -1032,6 +1041,9 @@ class TestWorkflowAssembly(unittest.TestCase):
                "genre_phrase": "lofi"}
         with_c = meta.build_description(cfg, 120, [], credits)
         without = meta.build_description(cfg, 120, [], [])
+        with_store = meta.build_description(cfg, 120, [], [], store_url="https://x.example")
+        self.assertIn("https://x.example", with_store)                 # 商店導流（_channel.json）
+        self.assertNotIn("🛒", without)
         self.assertIn("AI disclosure & licences", with_c)
         self.assertIn("ace_step", with_c.replace("acestep", "ace_step"))
         self.assertNotIn("AI disclosure", without)

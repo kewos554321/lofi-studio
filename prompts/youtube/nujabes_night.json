@@ -1,0 +1,33 @@
+{
+  "name": "nujabes_night",
+  "emoji": "🌙",
+  "title_pool": [
+    "Night Library",
+    "Night Library | Late Night Lofi",
+    "Late Night Lofi Hip Hop",
+    "Night Library Sessions"
+  ],
+  "descriptor_pool": [
+    "Late Night Lofi Hip Hop for Study & Sleep",
+    "Warm Jazzhop for Quiet Hours",
+    "Mellow Lofi for Reading After Midnight",
+    "Soft Lofi Beats to End the Day"
+  ],
+  "intro": "The library is closed, but one lamp is still on. Dust drifts through the light, a record turns, and the rest of the world goes quiet enough to hear it.",
+  "genre_phrase": "late night lofi hip hop",
+  "features": [
+    "Felt piano and dusty Rhodes chords, played slow",
+    "Boom-bap drums sampled from old vinyl, warm and unhurried",
+    "Upright bass holding the low end together",
+    "Ideal for studying after midnight, reading, or falling asleep"
+  ],
+  "immersion": "No vocals, no drops, nothing that asks for your attention. Just thirty-six quiet rooms you can walk into one after another.",
+  "sip": "Turn the lamp down a little. Let the night keep you company.",
+  "question": "Where do you usually listen — desk, couch, or bed?",
+  "subscribe": "Subscribe for more long-form lofi mixes every week.",
+  "hashtags": ["#lofihiphop", "#nightlofi", "#jazzhop", "#studymusic", "#lofimix", "#vinylcrackle", "#lofibeats", "#chillhop", "#sleepmusic", "#lofijazz", "#instrumentalbeats", "#latenightlofi", "#focusmusic", "#readingmusic", "#backgroundmusic"],
+  "tags": ["lofi hip hop", "late night lofi", "lofi mix", "jazzhop", "chillhop", "study music", "sleep music", "lofi beats", "instrumental beats", "felt piano", "vinyl crackle", "dusty drums", "upright bass", "chill music", "focus music", "relaxing music", "background music", "one hour lofi", "night music", "mellow beats"],
+  "category": "Music",
+  "category_id": 10,
+  "thumbnail_text": ["NIGHT", "LIBRARY", "LOFI"]
+}
