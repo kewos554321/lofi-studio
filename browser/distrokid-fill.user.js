@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.3.7
+// @version      0.3.8
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -21,12 +21,15 @@
  *    逐首欄位的 uuid 每次進站都不同 → 執行時從 input[name^="tracknum_"] 動態解出。
  * 4. 音檔路徑用資料夾裡的實際檔名解，不用 release.json 的 tracks[].audio
  *    （該欄位在拆卷改名後會失效，見 docs/DISTRIBUTION.md）。
+ * 5. 付費加購（「Extras (optional but awesome)」）永遠不勾。必勾區塊與 Extras 在 DOM 上
+ *    常是同一個容器的相鄰兄弟，靠「往上找容器」很容易把加購一起勾起來 → 多收錢。
+ *    所以勾必勾時要排除 Extras，勾完還要再主動取消一次（見 fillMandatory／uncheckExtras）。
  */
 
 (function () {
   'use strict';
 
-  const VER = '0.3.7';
+  const VER = '0.3.8';
 
   // ---------- 狀態 ----------
   const state = {
@@ -501,23 +504,164 @@
   // ---------- 頁尾「Important checkboxes (mandatory)」全部勾選 ----------
   // 用「區塊標題」定位，再勾該區塊裡每一個 checkbox：
   // 不需要知道個別 id（recon 時這些欄位被 400 筆上限截斷，本來就沒有它們的資料）。
-  function mandatorySection() {
-    const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,legend,[class*="heading"],[class*="title"]'));
-    const h = heads.find((el) => /important checkboxes/i.test(el.textContent || '') && el.children.length <= 1);
+  //
+  // ⚠️ 大坑（0.3.8 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
+  //    但「Important checkboxes (mandatory)」與「Extras (optional but awesome)」（付費加購）
+  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「8. 必勾項目全選」會**勾到要付錢的加購**。
+  //    現在改成：① 用文件順序切「標題 → 下一個標題」之間的 checkbox（不靠容器，天生互不重疊），
+  //    ② 勾選時再排除一次 Extras 的 checkbox，③ 勾完主動把 Extras 全部取消（三重保險）。
+  const MANDATORY_HEAD_RE = /important checkboxes/i;
+  const EXTRAS_HEAD_RE = /extras[\s\S]{0,40}?optional|optional but awesome/i;
+  const HEAD_SEL = 'h1,h2,h3,h4,h5,h6,legend,[class*="heading"],[class*="title"]';
+  const HEAD_TAG_RE = /^(H[1-6]|LEGEND)$/;
+
+  // 真正的「區塊邊界」只認標籤型標題（h1-h6/legend）或 class 像 section title 的元素；
+  // 選項自己的小標題（多半是 div + class 含 title）不算，否則會把區塊切碎。
+  const isSectionHeading = (el) => HEAD_TAG_RE.test(el.tagName)
+    || /section[-_ ]?(title|heading)|sectionTitle|sectionHeading/i.test(String(el.className || ''));
+
+  function findSectionHeading(re) {
+    return Array.from(document.querySelectorAll(HEAD_SEL))
+      .find((el) => re.test(el.textContent || '') && el.children.length <= 1) || null;
+  }
+
+  // 標題層級：h1→1 … h6→6；legend／class 型標題當成第 2 層（區塊層級）。
+  // 用途：往下的「子標題」（例如加購項目自己的 h4）不該把區塊切斷。
+  const headLevel = (el) => {
+    const m = /^H([1-6])$/.exec(el.tagName);
+    return m ? Number(m[1]) : 2;
+  };
+
+  // 依文件順序收集「這個標題之後、下一個區塊標題之前」的所有 checkbox。
+  // querySelectorAll 回傳的就是文件順序，所以同一容器裡的相鄰區塊也能乾淨切開。
+  function boxesAfterHeading(h) {
+    const myLevel = headLevel(h);
+    const seq = Array.from(document.querySelectorAll(HEAD_SEL + ',input[type="checkbox"]'));
+    const start = seq.indexOf(h);
+    if (start < 0) return [];
+    const out = [];
+    for (let i = start + 1; i < seq.length; i++) {
+      const el = seq[i];
+      if (el.type === 'checkbox') { out.push(el); continue; }
+      if (!(el.textContent || '').trim()) continue;
+      if (el.closest('label')) continue;         // 選項自己的小標題，不是區塊邊界
+      if (!isSectionHeading(el)) continue;
+      if (headLevel(el) > myLevel) continue;      // 子標題（如加購項目 h4）不算邊界
+      break;                                      // 下一個區塊開始
+    }
+    return out;
+  }
+
+  // 退路：標題後抓不到 checkbox 時，才用「從標題往上找容器」的舊方法。
+  // avoidRe：若容器把別的區塊標題也吃進來，就往裡收斂到只包住本標題的子容器。
+  function sectionBox(headRe, avoidRe) {
+    const h = findSectionHeading(headRe);
     if (!h) return null;
     let box = h;
     for (let k = 0; k < 8 && box.parentElement; k++) {
       box = box.parentElement;
-      if (box.querySelectorAll('input[type="checkbox"]').length >= 2) break;
+      if (!box.querySelector('input[type="checkbox"]')) continue;
+      let cur = box;
+      for (let m = 0; m < 6 && avoidRe && avoidRe.test(cur.textContent || ''); m++) {
+        const next = Array.from(cur.children)
+          .find((ch) => ch.contains(h) && ch.querySelector('input[type="checkbox"]'));
+        if (!next) break;
+        cur = next;
+      }
+      return cur;
     }
-    return box;
+    return null;
+  }
+
+  // 某區塊的 checkbox 清單：優先用順序切法，找不到才退回容器法。
+  function sectionBoxes(headRe, avoidRe) {
+    const h = findSectionHeading(headRe);
+    if (h) {
+      const after = boxesAfterHeading(h);
+      if (after.length) return { boxes: after, how: 'heading-order', box: null };
+    }
+    const box = sectionBox(headRe, avoidRe);
+    if (box) return { boxes: Array.from(box.querySelectorAll('input[type="checkbox"]')), how: 'container', box };
+    return { boxes: [], how: 'none', box: null };
+  }
+
+  function mandatorySection() {
+    return sectionBox(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
+  }
+
+  function extrasSection() {
+    return sectionBox(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
+  }
+
+  // Extras 的 checkbox 清單。兩區塊共用同一個容器、又切不出順序時回傳空陣列：
+  // 寧可「不去動」，也不要把必勾的法律聲明取消掉。
+  function extrasBoxes() {
+    const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
+    if (sec.how === 'container' && sec.box && sec.box === mandatorySection()) return [];
+    return sec.boxes;
+  }
+
+  // 診斷：Extras 區塊抓到什麼、每個 checkbox 的標籤與勾選狀態。
+  // 換版／改文案後若抓不到，按「檢查 Extras」把這串貼回來就能修選擇器。
+  function extrasProbe() {
+    const h = findSectionHeading(EXTRAS_HEAD_RE);
+    if (!h) {
+      const near = Array.from(document.querySelectorAll(HEAD_SEL))
+        .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
+        .filter((t) => /extra|awesome|optional/i.test(t))
+        .map((t) => t.slice(0, 70));
+      return 'Extras 標題：找不到（頁面上疑似標題 ' + JSON.stringify(near) + '）';
+    }
+    const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
+    const boxes = extrasBoxes();
+    const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE).boxes;
+    const guards = sec.boxes.length - boxes.length;
+    return 'Extras 標題：「' + (h.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) + '」\n' +
+      '定位方式=' + sec.how + '，Extras 抓到 ' + boxes.length + ' 個 checkbox，必勾區塊 ' + mand.length + ' 個' +
+      (guards > 0 ? '（共用容器保護：忽略 ' + guards + ' 個重疊的）' : '') + '\n' +
+      boxes.map((cb) => {
+        const label = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').slice(0, 90);
+        return '  [' + (cb.checked ? '✓' : ' ') + '] ' + label +
+          '  (name=' + (cb.getAttribute('name') || '-') + ', id=' + (cb.id || '-') + ')';
+      }).join('\n');
+  }
+
+  // 把 Extras（付費加購）全部取消勾選。只在 Extras 的 checkbox 上動手，不碰必勾區塊。
+  async function uncheckExtras() {
+    const boxes = extrasBoxes();
+    if (!boxes.length) {
+      if (!findSectionHeading(EXTRAS_HEAD_RE)) {
+        log('ℹ️ 頁面上找不到「Extras (optional but awesome)」標題 → 沒有加購可取消（若畫面確實有，按「檢查 Extras」回報）', 'warn');
+      } else {
+        log('ℹ️ 找到 Extras 標題但抓不到 checkbox → 請手動確認（按「檢查 Extras」回報）', 'warn');
+      }
+      return false;
+    }
+    for (const cb of boxes) {
+      const was = cb.checked;
+      const good = await setCheckboxVerified(cb, false, null);
+      const label = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').slice(0, 88);
+      log('  [' + (good ? '✓' : '✗') + '] ' + (was ? '已取消勾選' : '本來就沒勾') + '：' + label, good ? 'ok' : 'warn');
+      await sleep(90);
+    }
+    const still = boxes.filter((cb) => cb.checked).length;
+    log('Extras（付費加購）' + (still === 0 ? '全部未勾 ✓' : '⚠️ 還有 ' + still + ' 個被勾著 → 請手動取消'),
+      still === 0 ? 'ok' : 'err');
+    return still === 0;
   }
 
   async function fillMandatory() {
-    const box = mandatorySection();
-    if (!box) { log('❌ 找不到「Important checkboxes (mandatory)」區塊', 'err'); return false; }
-    const boxes = Array.from(box.querySelectorAll('input[type="checkbox"]'));
-    if (!boxes.length) { log('❌ 找到了區塊，但裡面沒有 checkbox', 'err'); return false; }
+    const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
+    if (mand.how === 'none') { log('❌ 找不到「Important checkboxes (mandatory)」區塊', 'err'); return false; }
+
+    // ⛔ Extras（付費加購）一律不勾（即使偵測被共用容器搞混，這裡也會把它濾掉）
+    const extrasSet = new Set(extrasBoxes());
+    const boxes = mand.boxes.filter((cb) => !extrasSet.has(cb));
+    if (!boxes.length) { log('❌ 找到區塊但沒有可勾的 checkbox（Extras 一律不勾）', 'err'); return false; }
+    if (boxes.length !== mand.boxes.length) {
+      log('  ⛔ 排除 ' + (mand.boxes.length - boxes.length) + ' 個 Extras checkbox（付費加購，不勾）', 'warn');
+    }
+
     let ok = 0;
     for (const cb of boxes) {
       const good = await setCheckboxVerified(cb, true, null);
@@ -528,6 +672,9 @@
     }
     log('必勾項目 ' + ok + '/' + boxes.length, ok === boxes.length ? 'ok' : 'warn');
     log('⚠️ 這幾條是法律聲明（授權、非抄襲、同意條款）。程式只是幫你打勾——內容請你自己確認過。', 'warn');
+
+    // 最後再掃一次 Extras，確保沒有任何加購被勾起來
+    await uncheckExtras();
     return true;
   }
 
@@ -912,7 +1059,9 @@
     '    <button id="dkf-credits">6. Apple credits</button>',
     '    <button id="dkf-fixexp" style="cursor:pointer;background:#4a2b2b;color:#ffd7d7;border:1px solid #7a3b3b;border-radius:4px">7. 修復 explicit</button>',
     '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">8. 必勾項目全選</button>',
+    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">9. 取消 Extras（付費加購）</button>',
     '    <button id="dkf-state">檢查狀態</button>',
+    '    <button id="dkf-extrasprobe" style="cursor:pointer">檢查 Extras</button>',
     '  </div>',
     '  <textarea id="dkf-preview" readonly placeholder="選取上架包後這裡會顯示讀到什麼" style="width:100%;height:170px;padding:8px;background:#0b0f13;color:#cfe3f5;border:1px solid #2a3540;border-radius:4px;resize:vertical"></textarea>',
     '  <div id="dkf-log" style="height:220px;overflow:auto;background:#0b0f13;border:1px solid #2a3540;border-radius:4px;padding:8px"></div>',
@@ -981,6 +1130,8 @@
   $('dkf-credits').onclick = () => guard(async () => { if (need()) await fillAppleCredits(); });
   $('dkf-fixexp').onclick = () => guard(async () => { if (need()) await fixExplicit(); });
   $('dkf-mandatory').onclick = () => guard(async () => { await fillMandatory(); });
+  $('dkf-extras').onclick = () => guard(async () => { await uncheckExtras(); });
+  $('dkf-extrasprobe').onclick = () => guard(async () => { log(extrasProbe()); });
   $('dkf-state').onclick = () => guard(async () => {
     if (!need()) return;
     log('── 目前欄位狀態 ──');
@@ -1003,6 +1154,7 @@
     audio: fillAudio, ai: fillAi, credits: fillAppleCredits,
     fixExplicit, radioState, creditsProbe,
     fillMandatory, mandatorySection, setSongCount, formIsEmpty,
+    extrasSection, uncheckExtras, extrasProbe,
     trackMap, preview,
     panel: () => { if (!panel.isConnected) document.body.appendChild(panel); return panel; },
   };
