@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.3.8
+// @version      0.3.9
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -23,13 +23,17 @@
  *    （該欄位在拆卷改名後會失效，見 docs/DISTRIBUTION.md）。
  * 5. 付費加購（「Extras (optional but awesome)」）永遠不勾。必勾區塊與 Extras 在 DOM 上
  *    常是同一個容器的相鄰兄弟，靠「往上找容器」很容易把加購一起勾起來 → 多收錢。
- *    所以勾必勾時要排除 Extras，勾完還要再主動取消一次（見 fillMandatory／uncheckExtras）。
+ *    recon（browser/distrokid-recon-main-12tracks-*.json）證實加購是 input[name="extras"].extras，
+ *    共 6 項：Social Media Pack ($14.95/yr)、Leave a Legacy ($49)、Discovery Pack ($11.88/yr)、
+ *    Store Maximizer ($7.95/yr)、DistroVid ($99/yr)、Loudness Normalization ($2.99×12)。
+ *    免費商店則是 input[name="store"]（Spotify/Apple/…），兩者 name 不同，可精準分辨。
+ *    勾必勾時要排除加購，勾完還要再主動取消一次（見 fillMandatory／uncheckExtras）。
  */
 
 (function () {
   'use strict';
 
-  const VER = '0.3.8';
+  const VER = '0.3.9';
 
   // ---------- 狀態 ----------
   const state = {
@@ -505,15 +509,37 @@
   // 用「區塊標題」定位，再勾該區塊裡每一個 checkbox：
   // 不需要知道個別 id（recon 時這些欄位被 400 筆上限截斷，本來就沒有它們的資料）。
   //
-  // ⚠️ 大坑（0.3.8 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
+  // ⚠️ 大坑（0.3.9 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
   //    但「Important checkboxes (mandatory)」與「Extras (optional but awesome)」（付費加購）
   //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「8. 必勾項目全選」會**勾到要付錢的加購**。
-  //    現在改成：① 用文件順序切「標題 → 下一個標題」之間的 checkbox（不靠容器，天生互不重疊），
-  //    ② 勾選時再排除一次 Extras 的 checkbox，③ 勾完主動把 Extras 全部取消（三重保險）。
+  //
+  //    2026-10-17 recon（browser/distrokid-recon-main-12tracks-1792219901787.json）證實：
+  //    付費加購是固定特徵 → input[name="extras"].extras（例如 #socialmediapack
+  //    "Social Media Pack ($14.95/yr …)"），免費商店則是 input[name="store"]。
+  //    同一區塊實際有 6 個加購：Social Media Pack / Leave a Legacy / Discovery Pack /
+  //    Store Maximizer / DistroVid / Loudness Normalization（全部標籤都帶價格）。
+  //
+  // 現在的做法（三重保險）：
+  //   ① 用文件順序切「標題 → 下一個標題」之間的 checkbox（不靠容器，天生互不重疊）
+  //   ② 用 name="extras" / class="extras" 精準抓出加購（不依賴文案，改版也不會漏）
+  //   ③ 勾選時排除加購、勾完再主動全部取消
   const MANDATORY_HEAD_RE = /important checkboxes/i;
   const EXTRAS_HEAD_RE = /extras[\s\S]{0,40}?optional|optional but awesome/i;
+  const EXTRAS_SEL = 'input[name="extras"],input.extras';
   const HEAD_SEL = 'h1,h2,h3,h4,h5,h6,legend,[class*="heading"],[class*="title"]';
   const HEAD_TAG_RE = /^(H[1-6]|LEGEND)$/;
+
+  // recon 證實的加購特徵（name="extras" / class="extras"）。這是最可靠的一條，優先使用。
+  const extrasByAttr = () => Array.from(document.querySelectorAll(EXTRAS_SEL));
+
+  // 加購的共通文字特徵：標籤含價格（"$14.95/yr"、"$49 one-time fee"…）或已知加購名稱。
+  // 為什麼還需要這層：recon 的 400 筆上限只抓到 1 個 checkbox 的 name="extras"，
+  // 但同一區塊實際有 6 個加購（Social Media Pack / Leave a Legacy / Discovery Pack /
+  // Store Maximizer / DistroVid / Loudness Normalization）。法律聲明不會出現價格，
+  // 所以「標籤裡有 $ 金額或加購名稱」是安全的付費訊號，平台加新加購也接得住。
+  const PAID_LABEL_RE = /\$\s?\d|social media pack|leave a legacy|discovery pack|store maximizer|distrovid|loudness normalization/i;
+  const looksPaid = (cb) => PAID_LABEL_RE.test((labText(cb) || '').replace(/\s+/g, ' '));
+  const extrasByLabel = () => Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(looksPaid);
 
   // 真正的「區塊邊界」只認標籤型標題（h1-h6/legend）或 class 像 section title 的元素；
   // 選項自己的小標題（多半是 div + class 含 title）不算，否則會把區塊切碎。
@@ -593,37 +619,48 @@
     return sectionBox(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
   }
 
-  // Extras 的 checkbox 清單。兩區塊共用同一個容器、又切不出順序時回傳空陣列：
-  // 寧可「不去動」，也不要把必勾的法律聲明取消掉。
+  // Extras 的 checkbox 清單（三路合併，去重）：
+  //   ① name="extras" / class="extras"（recon 實測最可靠）
+  //   ② 標籤含價格或加購名稱（接住 recon 沒抓到的另外 5 個、以及平台未來新增的加購）
+  //   ③ 標題「Extras (optional but awesome)」到下一個區塊之間的 checkbox（文案改版時的退路）
+  // ② 只會命中 checkbox 的標籤，法律聲明沒有價格 → 不會誤判。
   function extrasBoxes() {
+    const out = [];
+    const add = (el) => { if (el && out.indexOf(el) === -1) out.push(el); };
+    extrasByAttr().forEach(add);
+    extrasByLabel().forEach(add);
+
     const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
-    if (sec.how === 'container' && sec.box && sec.box === mandatorySection()) return [];
-    return sec.boxes;
+    if (!(sec.how === 'container' && sec.box && sec.box === mandatorySection())) {
+      sec.boxes.forEach(add);
+    }
+    return out;
   }
 
   // 診斷：Extras 區塊抓到什麼、每個 checkbox 的標籤與勾選狀態。
   // 換版／改文案後若抓不到，按「檢查 Extras」把這串貼回來就能修選擇器。
   function extrasProbe() {
     const h = findSectionHeading(EXTRAS_HEAD_RE);
-    if (!h) {
+    const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
+    const byAttr = extrasByAttr().length;
+    const byLabel = extrasByLabel().length;
+    const boxes = extrasBoxes();
+    const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE).boxes;
+    const lines = boxes.map((cb) => {
+      const label = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').slice(0, 90);
+      return '  [' + (cb.checked ? '✓' : ' ') + '] ' + label +
+        '  (name=' + (cb.getAttribute('name') || '-') + ', id=' + (cb.id || '-') + ')';
+    });
+    if (!h && !byAttr && !byLabel) {
       const near = Array.from(document.querySelectorAll(HEAD_SEL))
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
         .filter((t) => /extra|awesome|optional/i.test(t))
         .map((t) => t.slice(0, 70));
-      return 'Extras 標題：找不到（頁面上疑似標題 ' + JSON.stringify(near) + '）';
+      return 'Extras：三個線索都找不到（name="extras"、標籤價格、區塊標題）。頁面疑似標題 ' + JSON.stringify(near) + '（請回報此段 DOM）';
     }
-    const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
-    const boxes = extrasBoxes();
-    const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE).boxes;
-    const guards = sec.boxes.length - boxes.length;
-    return 'Extras 標題：「' + (h.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) + '」\n' +
-      '定位方式=' + sec.how + '，Extras 抓到 ' + boxes.length + ' 個 checkbox，必勾區塊 ' + mand.length + ' 個' +
-      (guards > 0 ? '（共用容器保護：忽略 ' + guards + ' 個重疊的）' : '') + '\n' +
-      boxes.map((cb) => {
-        const label = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').slice(0, 90);
-        return '  [' + (cb.checked ? '✓' : ' ') + '] ' + label +
-          '  (name=' + (cb.getAttribute('name') || '-') + ', id=' + (cb.id || '-') + ')';
-      }).join('\n');
+    return 'Extras 定位：name法 ' + byAttr + '、標籤法 ' + byLabel + '、標題法(' + sec.how + ') ' +
+      (h ? '「' + (h.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 50) + '」' : '無標題') +
+      ' → 去重後 ' + boxes.length + ' 個；必勾區塊 ' + mand.length + ' 個\n' + lines.join('\n');
   }
 
   // 把 Extras（付費加購）全部取消勾選。只在 Extras 的 checkbox 上動手，不碰必勾區塊。
@@ -654,7 +691,7 @@
     const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
     if (mand.how === 'none') { log('❌ 找不到「Important checkboxes (mandatory)」區塊', 'err'); return false; }
 
-    // ⛔ Extras（付費加購）一律不勾（即使偵測被共用容器搞混，這裡也會把它濾掉）
+    // ⛔ Extras（付費加購）一律不勾（name="extras" 精準特徵 ＋ 標題區塊雙重防護）
     const extrasSet = new Set(extrasBoxes());
     const boxes = mand.boxes.filter((cb) => !extrasSet.has(cb));
     if (!boxes.length) { log('❌ 找到區塊但沒有可勾的 checkbox（Extras 一律不勾）', 'err'); return false; }
