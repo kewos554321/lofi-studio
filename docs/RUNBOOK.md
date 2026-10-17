@@ -707,6 +707,7 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 ./scripts/lofi release gumroad --run forest-1hr-01 --publish   # 檢查完再發佈
 ./scripts/lofi release gumroad --run forest-1hr-01 --no-upload # 只更新文案/價格
 ./scripts/lofi release gumroad --run forest-1hr-01 --price 5   # 固定價（price 是**最低價**）
+./scripts/lofi release gumroad --run forest-1hr-01 --no-thumbnail # 不自動設縮圖（預設用方形封面）
 
 # 自由訂價（pay-what-you-want）＋建議價：買家看到預填金額、可自行加減
 ./scripts/lofi release gumroad --run forest-1hr-01 --price 0 --suggested-price 2
