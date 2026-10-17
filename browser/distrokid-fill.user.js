@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.4.3
+// @version      0.5.0
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -21,6 +21,8 @@
  *    「2. 填專輯＋曲目」的逐首段結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
  *    （DistroKid 重繪會把設定洗掉），所以沒有獨立的「修復 explicit」按鈕。
  *    「總檢查」是一次列出 1-7 各步結果的總檢查，不必回頭翻 log。
+ *    「■ 中止」可中斷正在跑的流程（在每個動作前檢查），重複按同一顆只會被忽略、不會重跑；
+ *    「3. 上傳音檔」另外防連按：已有檔案時第一次按只警告，10 秒內再按才重傳。
  * 2. 絕不按 #doneButton（Continue）。程式只負責填，送出由人決定。
  * 3. 選擇器來自真實 recon（browser/distrokid-recon-*.json），不是猜的。
  *    逐首欄位的 uuid 每次進站都不同 → 執行時從 input[name^="tracknum_"] 動態解出。
@@ -38,7 +40,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.4.3';
+  const VER = '0.5.0';
 
   // ---------- 狀態 ----------
   const state = {
@@ -48,7 +50,30 @@
     audio: [],        // [{name, file}] 依檔名排序
     plan: [],         // [{no, title, file, srcName, uuid?}]
     busy: false,
+    busyName: null,   // 目前在跑哪一顆按鈕（重複按下時顯示）
+    abort: false,     // 使用者按了「■ 中止」
+    confirmAudioUntil: 0,  // 上傳音檔的重按確認期限（避免連按兩次重傳）
   };
+
+  // ---------- 中止機制 ----------
+  // 為什麼需要：每個動作都是「點一下 DOM」，無法 undo；長流程（12 首上傳、AI 對話框）
+  // 跑到一半想停，只能靠「下一個動作前就不要再做」。所以所有迴圈都在安全點呼叫 tick()。
+  // 用例外往外拋，才能從任意深度的 await 乾淨退出（guard 會接住並顯示「已中止」）。
+  const abortError = () => {
+    const e = new Error('使用者中止');
+    e.name = 'AbortError';
+    return e;
+  };
+  const tick = (where) => {
+    if (!state.abort) return;
+    if (where) state.abortWhere = where;
+    throw abortError();
+  };
+  function requestAbort() {
+    if (!state.busy) { log('目前沒有在跑任何流程（中止不需要按）', 'warn'); return; }
+    state.abort = true;
+    log('⏹ 收到中止：會在目前這一個動作結束後停下（已完成的欄位不會回復）', 'warn');
+  }
 
   // ---------- 小工具 ----------
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -253,6 +278,7 @@
     state.audio = [];
     const audioDir = await dir.getDirectoryHandle('audio');
     for await (const [name, handle] of audioDir.entries()) {
+      tick('讀取上架包・音檔 ' + name);
       if (handle.kind !== 'file') continue;
       if (!/\.(flac|wav|mp3|m4a|aif|aiff|wma|ogg|aac)$/i.test(name)) continue;
       state.audio.push({ name, file: await handle.getFile() });
@@ -358,6 +384,7 @@
     // 全部商店
     let stores = 0;
     for (const cb of qa('input[name="store"]')) {
+      tick('專輯層・商店全選');
       if (cb.checked) { stores++; continue; }
       cb.click();
       await sleep(CLICK);
@@ -388,6 +415,7 @@
     const newIds = ['spotifyArtistID', 'appleArtistID', 'googleArtistID',
       'instagramProfileArtistID', 'facebookProfileArtistID'];
     for (const nm of newIds) {
+      tick('專輯層・藝人頁');
       const cands = qa('input[name="' + nm + '"]');
       const pick = cands.find((el) => visible(el) && el.value === 'new' && /zero-matches|First|NoArtistIDFirst/.test(el.id))
         || cands.find((el) => visible(el) && el.value === 'new');
@@ -425,6 +453,7 @@
     for (const t of p.tracks || []) {
       const uuid = tmap[t.no];
       const i = t.no;
+      tick('逐首・第 ' + i + ' 首');
       const bits = [];
 
       if (setValue(q('#title_' + CSS.escape(uuid)), t.title)) bits.push('曲名');
@@ -478,6 +507,7 @@
     const bad = [];
     for (const t of tracks) {
       const i = t.no;
+      tick('逐首驗證・第 ' + i + ' 首');
       if (!tmap[i]) { bad.push(i + '（找不到區塊）'); continue; }
       const want = [
         { el: q('#js-instrumental-radio-button-' + i), name: 'instrumental=Yes' },
@@ -798,6 +828,7 @@
       return false;
     }
     for (const cb of boxes) {
+      tick('取消付費加購');
       const was = cb.checked;
       const good = await setCheckboxVerified(cb, false, null);
       const label = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').slice(0, 88);
@@ -824,6 +855,7 @@
 
     let ok = 0;
     for (const cb of boxes) {
+      tick('法律聲明');
       const good = await setCheckboxVerified(cb, true, null);
       const label = labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)';
       log('  [' + (good ? '✓' : '✗') + '] ' + label.replace(/\s+/g, ' ').slice(0, 95), good ? 'ok' : 'warn');
@@ -839,10 +871,23 @@
   }
 
   // ---------- 步驟 3：音檔（最需要單獨觀察的一步）----------
-  async function fillAudio() {
-    const tmap = trackMap();
+  async function fillAudio(confirmed) {
+    // 防連按：音檔欄位已經有檔案時，再按一次會重傳同一批（浪費頻寬、也可能重複）
+    // 所以第一次按只警告，10 秒內再按一次才真的重傳。
+    const already = state.plan.filter((t) => {
+      const el = q('#js-track-upload-' + t.no);
+      return el && el.files && el.files.length;
+    }).length;
+    if (already && !confirmed) {
+      log('⚠️ 已經有 ' + already + '/' + state.plan.length + ' 首掛著音檔了（可能是你剛按過）。', 'warn');
+      log('   再跑一次會重傳同一批檔。確定要重傳，請在 10 秒內再按一次「3. 上傳音檔」。', 'warn');
+      state.confirmAudioUntil = Date.now() + 10000;
+      return false;
+    }
+
     let ok = 0;
     for (const t of state.plan) {
+      tick('上傳音檔・第 ' + t.no + ' 首');
       if (!t.file) { log('  ' + t.no + ' 沒有對應音檔，跳過', 'warn'); continue; }
       const input = q('#js-track-upload-' + t.no);
       if (!input) { log('❌ 找不到第 ' + t.no + ' 首的上傳欄位', 'err'); continue; }
@@ -974,6 +1019,7 @@
     let ok = 0;
     const bad = [];
     for (const t of tracks) {
+      tick('AI Credits・驗證第 ' + t.no + ' 首');
       const s = aiState(tmap[t.no]);
       log(aiLine(t.no, s), aiOk(s) ? 'ok' : 'warn');
       if (aiOk(s)) ok++; else bad.push(t.no);
@@ -986,6 +1032,7 @@
     if (ok < total) {
       log('🔁 Apply to all 沒完全生效，改為逐首補設定…', 'warn');
       for (const no of bad) {
+        tick('AI Credits・逐首補第 ' + no + ' 首');
         const u = tmap[no];
         const gy = qa('input[name="ai_gate_' + u + '"]').find((el) => el.value === '1');
         await setRadioVerified(gy, null);
@@ -1158,6 +1205,7 @@
     if (dRole) jobs.push({ sel: dRole, kind: 'producer',  role: 'Engineer', who: 'Producer',  copyRe: /copy this producer to all tracks/i,  fallbackRe: null });
 
     for (const job of jobs) {
+      tick('Apple credits・' + job.who);
       // 1) 先選 role（底層 select 雖然隱藏，setSelect 直接改值 + 送 change 可行）
       const okRole = setSelect(job.sel, job.role);
       await jitter(350, 650);
@@ -1206,10 +1254,12 @@
   panel.innerHTML = [
     '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#161d24;border-bottom:1px solid #2a3540">',
     '  <strong style="flex:1">DistroKid 填表助手 v' + VER + '</strong>',
+    '  <button id="dkf-abort" style="cursor:pointer;background:#5a1f1f;color:#ffd7d7;border:1px solid #8a3030;border-radius:4px">■ 中止</button>',
     '  <button id="dkf-toggle" style="cursor:pointer">收合</button>',
     '</div>',
     '<div id="dkf-body" style="padding:10px;display:flex;flex-direction:column;gap:8px;overflow:auto">',
     '  <div style="color:#ffd479">只填不送：本程式不會按 Continue。</div>',
+    '  <div style="color:#9fb0c0">長流程跑到一半可按右上「■ 中止」；連按同一顆不會重複執行。</div>',
     '  <div style="display:flex;gap:6px;flex-wrap:wrap">',
     '    <button id="dkf-pick" style="cursor:pointer;font-weight:bold">1. 讀取上架包</button>',
     '    <button id="dkf-basic" style="cursor:pointer;font-weight:bold">2. 填專輯＋曲目</button>',
@@ -1227,11 +1277,30 @@
 
   const $ = (id) => panel.querySelector('#' + id);
 
-  async function guard(fn) {
-    if (state.busy) { log('⏳ 還在跑，稍等', 'warn'); return; }
+  async function guard(fn, label) {
+    if (state.busy) {
+      log('⏳ 「' + (state.busyName || '前一個動作') + '」還在跑，這次按下已忽略（不會重複執行）。', 'warn');
+      log('   要中途停止請按「■ 中止」，等它顯示「已中止」再按你要的步驟。', 'warn');
+      return;
+    }
     state.busy = true;
-    try { await fn(); } catch (e) { log('❌ ' + e.message, 'err'); console.error(e); }
+    state.busyName = label || null;
+    state.abort = false;
+    state.abortWhere = null;
+    try {
+      await fn();
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        log('⏹ 已中止「' + (state.busyName || '流程') + '」' +
+          (state.abortWhere ? '（停在：' + state.abortWhere + '）' : '') +
+          '。已完成的欄位會留在表單上，不會回復。', 'warn');
+      } else {
+        log('❌ ' + e.message, 'err');
+        console.error(e);
+      }
+    }
     state.busy = false;
+    state.busyName = null;
   }
 
   $('dkf-toggle').onclick = () => {
@@ -1273,7 +1342,7 @@
       log('   ⚠️ 表單仍是 ' + formN + ' 首、上架包是 ' + n + ' 首 — 這一步沒對上，先別按 2。', 'err');
       log('   常見原因：選到同名的舊包（例如修補前的原版，曲數更多）。請確認專輯名與曲數。', 'warn');
     }
-  });
+  }, '1. 讀取上架包');
 
   const need = () => {
     if (!state.pkg) { log('請先按「1. 讀取上架包」', 'warn'); return false; }
@@ -1285,17 +1354,24 @@
     // 專輯層填失敗就不要往下填逐首（例如曲數沒對上，逐首會全部找不到區塊）
     if (!await fillAlbum()) return;
     await fillTracks();     // 內含 explicit/instrumental/cleaned 驗證與就地修正
-  });
-  $('dkf-audio').onclick = () => guard(async () => { if (need()) await fillAudio(); });
-  $('dkf-ai').onclick = () => guard(async () => { if (need()) await fillAi(); });
-  $('dkf-credits').onclick = () => guard(async () => { if (need()) await fillAppleCredits(); });
-  $('dkf-mandatory').onclick = () => guard(async () => { await fillMandatory(); });
-  $('dkf-extras').onclick = () => guard(async () => { await uncheckExtras(); });
+  }, '2. 填專輯＋曲目');
+  $('dkf-audio').onclick = () => guard(async () => {
+    if (!need()) return;
+    const confirmed = state.confirmAudioUntil && Date.now() < state.confirmAudioUntil;
+    state.confirmAudioUntil = 0;
+    await fillAudio(confirmed);
+  }, '3. 上傳音檔');
+  $('dkf-ai').onclick = () => guard(async () => { if (need()) await fillAi(); }, '4. 填 AI 使用聲明');
+  $('dkf-credits').onclick = () => guard(async () => { if (need()) await fillAppleCredits(); }, '5. 填 Apple 製作名單');
+  $('dkf-mandatory').onclick = () => guard(async () => { await fillMandatory(); }, '6. 勾法律聲明');
+  $('dkf-extras').onclick = () => guard(async () => { await uncheckExtras(); }, '7. 取消付費加購');
   $('dkf-state').onclick = () => guard(async () => {
     log('──── 總檢查 ────');
     if (state.pkg) await verifyTracks();   // 先驗（只修錯的），再印狀態，數字才是最終值
     log(statusReport());
-  });
+  }, '總檢查');
+
+  $('dkf-abort').onclick = () => requestAbort();
 
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
@@ -1310,9 +1386,10 @@
   window.__lofiFill = {
     version: VER, state,
     pick: pickPackage, album: fillAlbum, tracks: fillTracks,
-    audio: fillAudio, ai: fillAi, credits: fillAppleCredits,
+    audio: fillAudio, audioForce: () => fillAudio(true), ai: fillAi, credits: fillAppleCredits,
     basic: async () => { if (!await fillAlbum()) return false; return fillTracks(); },
     fixExplicit: verifyTracks, verifyTracks, statusReport, radioState, creditsProbe,
+    abort: requestAbort,
     fillMandatory, mandatorySection, setSongCount, formIsEmpty,
     extrasSection, uncheckExtras, extrasProbe,
     trackMap, preview,
