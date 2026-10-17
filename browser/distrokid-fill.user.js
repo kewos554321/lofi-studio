@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.5.0
+// @version      0.5.1
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.5.0';
+  const VER = '0.5.1';
 
   // ---------- 狀態 ----------
   const state = {
@@ -274,14 +274,16 @@
       }
     }
 
-    // 音檔
+    // 音檔（12 個 flac 加起來數百 MB，讀檔會停頓一下 → 印進度）
     state.audio = [];
     const audioDir = await dir.getDirectoryHandle('audio');
+    log('📂 讀取 audio/ 音檔（' + ((pkg.tracks || []).length) + ' 首，無損檔較大，請稍等）…');
     for await (const [name, handle] of audioDir.entries()) {
       tick('讀取上架包・音檔 ' + name);
       if (handle.kind !== 'file') continue;
       if (!/\.(flac|wav|mp3|m4a|aif|aiff|wma|ogg|aac)$/i.test(name)) continue;
       state.audio.push({ name, file: await handle.getFile() });
+      if (state.audio.length % 3 === 0) log('  …已讀 ' + state.audio.length + ' 個音檔');
     }
     state.audio.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
 
@@ -339,6 +341,27 @@
   }
 
   // 設定 Number of songs，並等 DistroKid 真的長出對應數量的曲目區塊
+  // 等 DistroKid 依曲數重繪曲目區塊。12 首的 flac 專輯重繪常要 5-15 秒，
+  // 所以這裡會定期印進度（不然畫面看起來像卡住），而且可以按「■ 中止」。
+  async function waitTrackBlocks(n, timeoutMs) {
+    const t0 = Date.now();
+    const limit = timeoutMs || 20000;
+    let nextLog = 1000;
+    let count = document.querySelectorAll('input[name^="tracknum_"]').length;
+    while (Date.now() - t0 < limit) {
+      tick('等待曲目區塊重繪');
+      count = document.querySelectorAll('input[name^="tracknum_"]').length;
+      if (count === n) return { ready: true, count, waited: Date.now() - t0 };
+      const waited = Date.now() - t0;
+      if (waited >= nextLog) {
+        log('  ⏳ 等表單長出曲目區塊… ' + count + '/' + n + '（已等 ' + (waited / 1000).toFixed(1) + ' 秒）');
+        nextLog += 2000;
+      }
+      await sleep(200);
+    }
+    return { ready: false, count, waited: Date.now() - t0 };
+  }
+
   async function setSongCount(n) {
     const sel = q('#howManySongsOnThisAlbum');
     if (!sel) return { ok: false, reason: '找不到 Number of songs 下拉' };
@@ -351,20 +374,21 @@
     if (!opt) return { ok: false, reason: '下拉裡找不到 ' + n + ' 首的選項' };
 
     const before = sel.value;
-    if (before === want) return { ok: true, changed: false, value: want };
+
+    // 曲數本來就對，但區塊還沒長齊（例如剛重新載入）→ 只等，不動下拉
+    if (before === want) {
+      const w0 = await waitTrackBlocks(n, 8000);
+      return { ok: true, changed: false, value: want, ready: w0.ready, count: w0.count, waited: w0.waited };
+    }
 
     const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
     if (desc && desc.set) desc.set.call(sel, want); else sel.value = want;
     sel.dispatchEvent(new Event('input', { bubbles: true }));
     sel.dispatchEvent(new Event('change', { bubbles: true }));
+    log('🔧 曲數 ' + before + ' → ' + want + '，等 DistroKid 重繪曲目區塊（最多 20 秒，可按「■ 中止」）');
 
-    // 等曲目區塊長出來（最多 8 秒）
-    let ready = false;
-    for (let i = 0; i < 40; i++) {
-      await sleep(200);
-      if (document.querySelectorAll('input[name^="tracknum_"]').length === n) { ready = true; break; }
-    }
-    return { ok: true, changed: true, before: before, value: sel.value, ready: ready };
+    const w = await waitTrackBlocks(n, 20000);
+    return { ok: true, changed: true, before: before, value: sel.value, ready: w.ready, count: w.count, waited: w.waited };
   }
 
   // ---------- 步驟 1：專輯層 ----------
@@ -1320,15 +1344,32 @@
       return;
     }
     const before = Number(q('#howManySongsOnThisAlbum') && q('#howManySongsOnThisAlbum').value);
-    if (before && before !== n) {
+    if (!before) {
+      log('⚠️ 找不到 Number of songs → 請手動選 ' + n + ' 首再按 2。', 'warn');
+    } else if (before !== n) {
       if (!formIsEmpty()) {
         log('⚠️ 表單已有內容，不自動改曲數（會洗掉已填的資料）。請手動把 Number of songs 改成 ' + n + '。', 'warn');
       } else {
-        log('🔧 表單曲數 ' + before + ' → ' + n + '（上架包是 ' + n + ' 首，自動對齊）');
         const r = await setSongCount(n);
         if (!r.ok) log('❌ 自動改曲數失敗：' + r.reason, 'err');
-        else if (!r.ready) log('⚠️ 已改成 ' + n + ' 首，但曲目區塊還沒長齊，稍等一下再按 2。', 'warn');
-        else log('✅ 曲數已改為 ' + n + ' 首，曲目區塊已重生。', 'ok');
+        else if (!r.ready) {
+          log('⚠️ 已改成 ' + n + ' 首，但等了 ' + ((r.waited || 0) / 1000).toFixed(0) + ' 秒只長出 ' +
+            (r.count == null ? '?' : r.count) + '/' + n + ' 個曲目區塊。', 'warn');
+          log('   DistroKid 有時重繪很慢：先不要重按 1（會重讀整包），等畫面出現全部曲目再按 2。', 'warn');
+        } else {
+          log('✅ 曲數已改為 ' + n + ' 首，曲目區塊已重生（等了 ' + ((r.waited || 0) / 1000).toFixed(1) + ' 秒）。', 'ok');
+        }
+      }
+    } else {
+      // 曲數本來就對：只確認曲目區塊有沒有長齊（重新載入或剛剛中止過常見）
+      const blocks = document.querySelectorAll('input[name^="tracknum_"]').length;
+      if (blocks !== n) {
+        log('ℹ️ 曲數已是 ' + n + ' 首，但曲目區塊只長出 ' + blocks + '/' + n + ' → 等它補齊（可按「■ 中止」）');
+        const w = await waitTrackBlocks(n, 20000);
+        log(w.ready
+          ? '✅ 曲目區塊已齊 ' + n + '/' + n + '（等了 ' + (w.waited / 1000).toFixed(1) + ' 秒）'
+          : '⚠️ 等了 ' + (w.waited / 1000).toFixed(0) + ' 秒仍只有 ' + w.count + '/' + n + ' 個 → 先別按 2',
+          w.ready ? 'ok' : 'warn');
       }
     }
 
@@ -1390,7 +1431,7 @@
     basic: async () => { if (!await fillAlbum()) return false; return fillTracks(); },
     fixExplicit: verifyTracks, verifyTracks, statusReport, radioState, creditsProbe,
     abort: requestAbort,
-    fillMandatory, mandatorySection, setSongCount, formIsEmpty,
+    fillMandatory, mandatorySection, setSongCount, waitTrackBlocks, formIsEmpty,
     extrasSection, uncheckExtras, extrasProbe,
     trackMap, preview,
     panel: () => { if (!panel.isConnected) document.body.appendChild(panel); return panel; },
