@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.4.1
+// @version      0.4.3
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -14,13 +14,13 @@
  * 設計原則
  * ---------
  * 1. 分段執行，不給「一鍵全填」。每一步都是獨立按鈕，跑完看 log 再跑下一步。
- *    例外：「2. 填專輯層＋逐首」把兩個純文字步驟串在一起（專輯層失敗就不往下填逐首）；
+ *    例外：「2. 填專輯＋曲目」把兩個純文字步驟串在一起（專輯層失敗就不往下填逐首）；
  *    音檔上傳仍獨立成第 3 步，因為要觀察 DistroKid 的 S3 上傳有沒有真的開始跑。
  *    理由：「把音檔塞進上傳欄位」要靠 DistroKid 自己的 JS 接手（它走 S3 表單上傳），
  *    這步無法離線驗證，必須能單獨觀察。
- *    「2. 填專輯層＋逐首」的逐首段結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
+ *    「2. 填專輯＋曲目」的逐首段結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
  *    （DistroKid 重繪會把設定洗掉），所以沒有獨立的「修復 explicit」按鈕。
- *    「檢查狀態」是一次列出 1-7 各步結果的總檢查，不必回頭翻 log。
+ *    「總檢查」是一次列出 1-7 各步結果的總檢查，不必回頭翻 log。
  * 2. 絕不按 #doneButton（Continue）。程式只負責填，送出由人決定。
  * 3. 選擇器來自真實 recon（browser/distrokid-recon-*.json），不是猜的。
  *    逐首欄位的 uuid 每次進站都不同 → 執行時從 input[name^="tracknum_"] 動態解出。
@@ -38,7 +38,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.4.1';
+  const VER = '0.4.3';
 
   // ---------- 狀態 ----------
   const state = {
@@ -537,7 +537,7 @@
     return rows.join('\n');
   }
 
-  // ---------- 檢查狀態：一次列出「1-8 每一步的結果」 ----------
+  // ---------- 總檢查：一次列出「1-7 每一步的結果」 ----------
   // 目的：不用一步按一次、也不用回頭翻 log。按一次就看到哪一步還沒完成、
   // 哪個欄位被 DistroKid 重繪洗掉、以及付費加購有沒有被勾。
   function statusReport() {
@@ -584,7 +584,7 @@
         aiRows.push(aiLine(t.no, s));
       }
       out.push('── ④ AI Credits（gate=Yes／Music✓／Lyrics✗／AllAudio✗）──');
-      out.push('  符合 ' + aiOkCount + '/' + pkgN + (aiOkCount === pkgN ? ' ✅' : ' ⚠️ 按「4. AI Credits」可補'));
+      out.push('  符合 ' + aiOkCount + '/' + pkgN + (aiOkCount === pkgN ? ' ✅' : ' ⚠️ 按「4. 填 AI 使用聲明」可補'));
       out.push(aiRows.join('\n'));
     }
 
@@ -608,7 +608,7 @@
         out.push('  [' + (cb.checked ? '✓' : '✗') + '] ' + label);
       });
       const miss = mand.boxes.filter((cb) => !cb.checked).length;
-      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「6. 必勾項目全選」' : '全部已勾 ✅'));
+      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「6. 勾法律聲明（不含付費加購）」' : '全部已勾 ✅'));
     }
 
     // ⑦ Extras（付費加購）
@@ -622,7 +622,7 @@
         out.push('  [' + (cb.checked ? '＄已勾' : '✓未勾') + '] ' + label);
       });
       const on = extras.filter((cb) => cb.checked).length;
-      out.push('  ' + (on ? '❌ 有 ' + on + ' 個付費加購被勾著 → 按「7. 取消 Extras」' : '全部未勾 ✅'));
+      out.push('  ' + (on ? '❌ 有 ' + on + ' 個付費加購被勾著 → 按「7. 取消付費加購」' : '全部未勾 ✅'));
     }
 
     return out.join('\n');
@@ -634,7 +634,7 @@
   //
   // ⚠️ 大坑（0.3.9 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
   //    但「Important checkboxes (mandatory)」與「Extras (optional but awesome)」（付費加購）
-  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「6. 必勾項目全選」會**勾到要付錢的加購**。
+  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，舊版的「必勾項目全選」會**勾到要付錢的加購**。
   //
   //    2026-10-17 recon（browser/distrokid-recon-main-12tracks-1792219901787.json）證實：
   //    付費加購是固定特徵 → input[name="extras"].extras（例如 #socialmediapack
@@ -1211,16 +1211,16 @@
     '<div id="dkf-body" style="padding:10px;display:flex;flex-direction:column;gap:8px;overflow:auto">',
     '  <div style="color:#ffd479">只填不送：本程式不會按 Continue。</div>',
     '  <div style="display:flex;gap:6px;flex-wrap:wrap">',
-    '    <button id="dkf-pick" style="cursor:pointer;font-weight:bold">1. 選取上架包</button>',
-    '    <button id="dkf-basic" style="cursor:pointer;font-weight:bold">2. 填專輯層＋逐首</button>',
-    '    <button id="dkf-audio">3. 塞音檔</button>',
-    '    <button id="dkf-ai">4. AI Credits</button>',
-    '    <button id="dkf-credits">5. Apple credits</button>',
-    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">6. 必勾項目全選</button>',
-    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">7. 取消 Extras（付費加購）</button>',
-    '    <button id="dkf-state" style="cursor:pointer;font-weight:bold">檢查狀態（總檢查）</button>',
+    '    <button id="dkf-pick" style="cursor:pointer;font-weight:bold">1. 讀取上架包</button>',
+    '    <button id="dkf-basic" style="cursor:pointer;font-weight:bold">2. 填專輯＋曲目</button>',
+    '    <button id="dkf-audio">3. 上傳音檔</button>',
+    '    <button id="dkf-ai">4. 填 AI 使用聲明</button>',
+    '    <button id="dkf-credits">5. 填 Apple 製作名單</button>',
+    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">6. 勾法律聲明（不含付費加購）</button>',
+    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">7. 取消付費加購（Extras）</button>',
+    '    <button id="dkf-state" style="cursor:pointer;font-weight:bold">總檢查（1-7 進度）</button>',
     '  </div>',
-    '  <textarea id="dkf-preview" readonly placeholder="選取上架包後這裡會顯示讀到什麼" style="width:100%;height:170px;padding:8px;background:#0b0f13;color:#cfe3f5;border:1px solid #2a3540;border-radius:4px;resize:vertical"></textarea>',
+    '  <textarea id="dkf-preview" readonly placeholder="讀取上架包後這裡會顯示讀到什麼" style="width:100%;height:170px;padding:8px;background:#0b0f13;color:#cfe3f5;border:1px solid #2a3540;border-radius:4px;resize:vertical"></textarea>',
     '  <div id="dkf-log" style="height:220px;overflow:auto;background:#0b0f13;border:1px solid #2a3540;border-radius:4px;padding:8px"></div>',
     '</div>',
   ].join('');
@@ -1276,7 +1276,7 @@
   });
 
   const need = () => {
-    if (!state.pkg) { log('請先按「1. 選取上架包」', 'warn'); return false; }
+    if (!state.pkg) { log('請先按「1. 讀取上架包」', 'warn'); return false; }
     return true;
   };
 
@@ -1304,7 +1304,7 @@
   }, true);
 
   document.body.appendChild(panel);
-  log('待命。把 Number of songs 選好，然後按「1. 選取上架包」。');
+  log('待命。把 Number of songs 選好，然後按「1. 讀取上架包」。');
 
   // 偵錯入口
   window.__lofiFill = {
