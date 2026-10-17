@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.4.1
+// @version      0.4.2
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -38,7 +38,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.4.1';
+  const VER = '0.4.2';
 
   // ---------- 狀態 ----------
   const state = {
@@ -603,12 +603,16 @@
     if (!mand.boxes.length) {
       out.push('  ❌ 找不到「Important checkboxes (mandatory)」區塊');
     } else {
+      const missing = [];
       mand.boxes.forEach((cb) => {
-        const label = (labText(cb) || cb.id || '(無標籤)').replace(/\s+/g, ' ').slice(0, 76);
-        out.push('  [' + (cb.checked ? '✓' : '✗') + '] ' + label);
+        const raw = (labText(cb) || cb.id || '(無標籤)').replace(/\s+/g, ' ').trim();
+        const name = mandatoryName(raw) || (raw.slice(0, 60) + '（未命名）');
+        out.push('  [' + (cb.checked ? '✓' : '✗') + '] ' + name);
+        if (!cb.checked) missing.push(name);
       });
-      const miss = mand.boxes.filter((cb) => !cb.checked).length;
-      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「6. 必勾項目全選」' : '全部已勾 ✅'));
+      out.push('  ' + (missing.length
+        ? '⚠️ 還有 ' + missing.length + ' 條沒勾 → 按「6. 必勾項目全選」'
+        : '全部已勾 ✅'));
     }
 
     // ⑦ Extras（付費加購）
@@ -810,6 +814,26 @@
     return still === 0;
   }
 
+  // 必勾聲明的「人話」名稱：log 只顯示中文短名，完整原文留在 console。
+  // 對照 2026-10-17 recon（browser/distrokid-recon-main-12tracks-*.json）的 labels：
+  //   YouTube Music／大小寫／promo services／錄製與販售授權／他人藝人名義／Distribution Agreement
+  // 平台若新增條文，會顯示原文開頭並標「未命名」，看到就回來補一條對照。
+  const MANDATORY_NAMES = [
+    { re: /youtube music/i, name: '同意上傳 YouTube Music（之後別再寫信問為什麼在 YouTube）' },
+    { re: /non-standard capitalization|non-standard cApiTaliZatiOn/i, name: '大小寫警告：Apple Music 可能改成標準大小寫' },
+    { re: /promo services|guarantee streams|playlisting/i, name: '聲明：不用「保證串流／上歌單」的促銷服務' },
+    { re: /i recorded this music|authorized to sell it|collect all royalties/i, name: '聲明：我錄製這首歌，有權全球上架並收版稅' },
+    { re: /other artist'?s name/i, name: '聲明：未經同意不使用其他藝人的名字' },
+    { re: /distribution agreement|read and agree/i, name: '同意 DistroKid Distribution Agreement（發行合約）' },
+    { re: /cover art|artwork/i, name: '聲明：封面圖我有使用權' },
+  ];
+
+  function mandatoryName(raw) {
+    const t = String(raw || '').replace(/\s+/g, ' ');
+    const hit = MANDATORY_NAMES.find((m) => m.re.test(t));
+    return hit ? hit.name : '';
+  }
+
   async function fillMandatory() {
     const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
     if (mand.how === 'none') { log('❌ 找不到「Important checkboxes (mandatory)」區塊', 'err'); return false; }
@@ -825,8 +849,11 @@
     let ok = 0;
     for (const cb of boxes) {
       const good = await setCheckboxVerified(cb, true, null);
-      const label = labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)';
-      log('  [' + (good ? '✓' : '✗') + '] ' + label.replace(/\s+/g, ' ').slice(0, 95), good ? 'ok' : 'warn');
+      const raw = (labText(cb) || cb.id || cb.getAttribute('name') || '(無標籤)').replace(/\s+/g, ' ').trim();
+      const name = mandatoryName(raw);
+      log('  [' + (good ? '✓' : '✗') + '] ' + (name || (raw.slice(0, 72) + '（未命名，請回報這段文字）')),
+        good ? 'ok' : 'warn');
+      if (name) log('      原文：' + raw.slice(0, 90));
       if (good) ok++;
       await sleep(120);
     }
