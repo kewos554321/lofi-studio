@@ -552,12 +552,6 @@ def deliverable_paths(run):
     return (zips[0] if zips else None), (covers[0] if covers else None)
 
 
-def artwork_path(run):
-    """16:9 交付圖（Gumroad 的 thumbnail／社群預覽用）。"""
-    arts = [p for p in sorted((RELEASES_DIR / run).glob("artwork_*.*")) if p.is_file()]
-    return arts[0] if arts else None
-
-
 def cmd_gumroad(args):
     rec = load_release(args.run)
     token = load_token()
@@ -639,8 +633,9 @@ def cmd_gumroad(args):
             except GumroadError as e:
                 print(f"  ⚠️  封面附加失敗（{e}）→ 請在 dashboard 手動上傳")
         else:
+            # 只掛**一張**封面（方形）。16:9 artwork 不上傳：Gumroad 商品頁的圖庫
+            # 多一張只是重複曝光，而且縮圖本身也要求正方形（見下）。
             _try_img(cover, "cover", "已附上封面", "封面自動上傳失敗")
-            _try_img(artwork_path(args.run), "cover", "已附上 16:9 圖庫圖", "16:9 圖庫圖上傳失敗")
             if not args.no_thumbnail:
                 _try_img(cover, "thumbnail", "已設定縮圖（方形）", "縮圖自動上傳失敗")
 
