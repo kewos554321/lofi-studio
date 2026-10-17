@@ -703,10 +703,14 @@ printf '%s' 'YOUR_TOKEN' > .secrets/gumroad_token.txt && chmod 600 .secrets/gumr
 export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 
 ./scripts/lofi release gumroad --run forest-1hr-01 --dry-run   # 只印會送出的參數
-./scripts/lofi release gumroad --run forest-1hr-01             # 建立/更新 draft ＋上傳檔案與封面
+./scripts/lofi release gumroad --run forest-1hr-01             # 建立/更新 draft ＋上傳檔案、封面、圖庫
 ./scripts/lofi release gumroad --run forest-1hr-01 --publish   # 檢查完再發佈
 ./scripts/lofi release gumroad --run forest-1hr-01 --no-upload # 只更新文案/價格
-./scripts/lofi release gumroad --run forest-1hr-01 --price 5   # 指定售價（0＝pay-what-you-want）
+./scripts/lofi release gumroad --run forest-1hr-01 --price 5   # 固定價（price 是**最低價**）
+
+# 自由訂價（pay-what-you-want）＋建議價：買家看到預填金額、可自行加減
+./scripts/lofi release gumroad --run forest-1hr-01 --price 0 --suggested-price 2
+./scripts/lofi release gumroad --run forest-1hr-01 --customizable-price   # 只開自由訂價
 ```
 
 實作與踩過的坑（`src/lofi/gumroad.py`）：
@@ -719,7 +723,10 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 | **列表一頁只回 10 筆** | 其餘在 `next_page_url` → 判斷「是否已上架」必須翻頁，否則會重複建立商品 |
 | **檔案要 multipart 上傳** | `POST /files/presign`（要 `filename`/`content_type`/`file_size`）→ 逐 part PUT（收 ETag）→ `POST /files/complete`（要 `upload_id`/`key`/`parts`）→ 把回傳 URL 放進 `files[][url]` |
 | **發佈會被帳號狀態擋** | 沒完成 payout settings 或 email 未確認 → 只停 draft 並回 `warning`（程式照實印，不假裝成功） |
-| **封面／縮圖 API 吃不到** | `/covers` 只收**公開可讀**的圖片 URL 或 `signed_blob_id`（ActiveStorage 簽章 id）。我們的 presign 是私有 S3（GET 會 403）也拿不到 signed id → **封面與縮圖要在 dashboard 手動上傳**（一張 10 秒）；若有公開圖床可用 `--cover-url` |
+| **圖片可以從本機上傳** | `POST /v2/direct_uploads`（`blob[filename]`/`byte_size`/`checksum`＝**base64(MD5)**/`content_type`）→ 拿 `signed_id` ＋預簽網址 → PUT bytes → `POST /products/:id/covers` 帶 `signed_blob_id`。**這支回傳沒有 `success` 欄位**，不能用 `api()`（會誤判失敗），要走 `raw()` |
+| **縮圖必須正方形** | 16:9 的 artwork 會被退 `Please upload a square thumbnail.` → 縮圖一律用方形封面；16:9 那張改掛 `/covers` 圖庫第二張 |
+| **`/covers` 是 append** | 重跑會多掛一張（實測同一張封面掛兩次）→ 用 `logs/.gumroad-covers.json`（商品 id＋圖片 sha1 → cover id）判斷，已在圖庫就跳過 |
+| **建議價 API 只寫不讀** | `customizable_price`／`suggested_price_cents` 在 `create_permitted_params` 內、更新也會套用，但**商品 JSON 不回傳 `suggested_price_cents`** → 無法用 API 驗證，只能到 dashboard 商品頁確認 |
 | **描述要送 HTML** | Gumroad 商品頁吃 HTML：`description` 預設送 `listing.html`（有 `<h3>`／`<ul>`／`<ol>` 才會排版）。純文字會變成一堆換行。要退回純文字用 `--text-description` |
 
 - 商品 id／URL 會 append 一筆 `event="gumroad"` 到 `catalog/releases.jsonl`（append-only）。

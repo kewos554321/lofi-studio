@@ -1796,6 +1796,80 @@ class TestGumroad(unittest.TestCase):
         self.assertEqual(p["custom_permalink"], "custom-slug")
         self.assertEqual(len(p["tags[]"]), 10)                       # Gumroad 上限 10
 
+    def test_build_params_pay_what_you_want(self):
+        """自由訂價：price 是**最低價**，建議價走 suggested_price_cents。
+
+        Gumroad 的 `suggested_price_cents` 在 create_permitted_params 內（有 API，
+        見 links_controller.rb）；沒開 customizable_price 就只是固定價商品。
+        """
+        self.assertNotIn("customizable_price", gumroad.build_params(self._rec()))
+        self.assertNotIn("suggested_price_cents", gumroad.build_params(self._rec()))
+
+        p = gumroad.build_params(self._rec(), suggested_price=2)     # 建議價自動開自由訂價
+        self.assertEqual(p["price"], 0)                              # 最低價 0＝可免費下載
+        self.assertEqual(p["customizable_price"], "true")
+        self.assertEqual(p["suggested_price_cents"], 200)
+
+        p = gumroad.build_params(self._rec(), customizable=True)      # 只開自由訂價、不給建議價
+        self.assertEqual(p["customizable_price"], "true")
+        self.assertNotIn("suggested_price_cents", p)
+
+        rec = self._rec(listing={"short": "s", "long": "l", "tags": ["lofi"],
+                                 "price_usd": 0.0, "suggested_price_usd": 2.5})
+        self.assertEqual(gumroad.suggested_price_cents(rec), 250)     # 讀 release.json
+        self.assertEqual(gumroad.build_params(rec)["suggested_price_cents"], 250)
+        self.assertEqual(gumroad.suggested_price_cents(rec, 0), 0)
+
+    def test_direct_upload_attaches_local_image(self):
+        """本機圖片走 /direct_uploads → signed_blob_id（不是只有公開 URL 一條路）。
+
+        checksum 必須是 **base64(MD5)**（hex 會被 ActiveStorage 回 422）；
+        content_type 只收 image/jpeg|png|gif。
+        """
+        import base64
+        import hashlib
+        blob = b"\xff\xd8fake-jpeg-bytes"
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(blob)
+            path = Path(f.name)
+        seen = {"calls": []}
+        orig_raw, orig_api, orig_put = gumroad.raw, gumroad.api, gumroad.put_bytes
+
+        def fake_raw(method, p, params=None, token=None):
+            seen["calls"].append((method, p, params))
+            return {"signed_id": "SID-1",                     # 這支沒有 success 欄位
+                    "direct_upload": {"url": "https://s3.example/put",
+                                      "headers": {"Content-Type": "image/jpeg"}}}
+
+        def fake_api(method, p, params=None, token=None):
+            seen["calls"].append((method, p, params))
+            return {"success": True}
+
+        def fake_put(url, data, headers=None, timeout=300):
+            seen["put"] = (url, data, headers)
+            return 200
+
+        gumroad.raw, gumroad.api, gumroad.put_bytes = fake_raw, fake_api, fake_put
+        try:
+            gumroad.attach_image_file("PID", path, "cover", token="T")
+            gumroad.attach_image_file("PID", path, "thumbnail", token="T")
+        finally:
+            gumroad.raw, gumroad.api, gumroad.put_bytes = orig_raw, orig_api, orig_put
+            path.unlink()
+
+        du = [c for c in seen["calls"] if c[1] == "/direct_uploads"][0][2]
+        self.assertEqual(du["blob[checksum]"],
+                         base64.b64encode(hashlib.md5(blob).digest()).decode())
+        self.assertEqual(du["blob[content_type]"], "image/jpeg")
+        self.assertEqual(du["blob[byte_size]"], len(blob))
+        self.assertEqual(seen["put"], ("https://s3.example/put", blob,
+                                       {"Content-Type": "image/jpeg"}))
+        posts = [c for c in seen["calls"] if c[0] == "POST" and "cover" in c[1] or
+                 c[0] == "POST" and "thumbnail" in c[1]]
+        self.assertEqual(posts[0][1], "/products/PID/covers")
+        self.assertEqual(posts[0][2], {"signed_blob_id": "SID-1"})
+        self.assertEqual(posts[1][1], "/products/PID/thumbnail")
+
     def test_encode_repeats_list_keys(self):
         body = gumroad._encode({"access_token": "T", "tags[]": ["a", "b"],
                                 "name": "x"}).decode()

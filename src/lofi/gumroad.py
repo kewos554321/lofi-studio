@@ -23,6 +23,8 @@
 憑證：`LOFI_GUMROAD_TOKEN` 或 `.secrets/gumroad_token.txt`（`.secrets/` 不進版控）。
 """
 import argparse
+import base64
+import hashlib
 import json
 import mimetypes
 import re
@@ -282,17 +284,94 @@ def attach_file(product_id, file_url, filename="", token=None):
 
 
 def attach_cover(product_id, image_url, token=None):
-    """封面只能建立後再補：POST /products/:id/covers。"""
+    """封面只能建立後再補：POST /products/:id/covers（吃公開 URL）。"""
     return api("POST", f"/products/{product_id}/covers", {"url": image_url}, token)
 
 
-def attach_thumbnail(product_id, signed_blob_id, token=None):
-    """縮圖：POST /products/:id/thumbnail。
+def direct_upload(path, token=None, content_type=None):
+    """把本機圖片預約成 ActiveStorage blob：POST /v2/direct_uploads。
 
-    ⚠️ 只吃 `signed_blob_id`（Rails ActiveStorage 的簽章 id），而公開 API 的
-    presign 流程**不會**產生它（實測：加 `purpose`/`type` 等參數都拿不到）。
-    所以縮圖目前**只能**在 dashboard 設定，別依賴這支。留著是為了日後 API 補上時可用。
+    回 `(signed_blob_id, presigned_url, headers)`；把 bytes PUT 到該網址後，
+    就能用 `signed_blob_id` 附到 /covers 或 /thumbnail（本機檔案不用先丟到公網）。
+
+    `blob[checksum]` 是 **base64(MD5(內容))**——ActiveStorage 的規格，不是 hex，
+    給錯會回 422。`content_type` 只收 image/jpeg|png|gif（見 direct_uploads_controller）。
     """
+    path = Path(path)
+    data = path.read_bytes()
+    ct = content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    # ⚠️ 這支回的是 blob JSON、**沒有 `success` 欄位**，不能用 api()（會被誤判失敗）。
+    body = raw("POST", "/direct_uploads", {
+        "blob[filename]": path.name,
+        "blob[byte_size]": len(data),
+        "blob[checksum]": base64.b64encode(hashlib.md5(data).digest()).decode(),
+        "blob[content_type]": ct,
+    }, token)
+    up = body.get("direct_upload") or {}
+    if not body.get("signed_id") or not up.get("url"):
+        raise GumroadError(f"direct_uploads 回應不完整：{body}")
+    return body["signed_id"], up["url"], up.get("headers") or {}
+
+
+def put_bytes(url, blob, headers=None, timeout=300):
+    """把 bytes PUT 到預簽網址（S3，不帶 token）。"""
+    req = urllib.request.Request(url, data=blob, method="PUT")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        raise GumroadError(f"圖片上傳失敗 HTTP {e.code}：{e.read()[:200]!r}") from None
+
+
+COVER_CACHE = ROOT / "logs" / ".gumroad-covers.json"   # logs/ 不進版控
+
+
+def _cover_key(product_id, path):
+    return f"{product_id}:{cat.sha1_file(Path(path))}"
+
+
+def has_cover(product_id, path, token=None):
+    """同一張圖（內容指紋）是否已掛在商品圖庫上。
+
+    `/covers` 是 **append**、不是 replace——重跑指令會多掛一張（實際踩過：同一張
+    3000² 封面掛了兩次）。所以先看本地快取的 cover id 還在不在該商品的 covers 裡。
+    """
+    cid = _load(COVER_CACHE, {}).get(_cover_key(product_id, path))
+    if not cid:
+        return False
+    product = api("GET", f"/products/{product_id}", token=token).get("product") or {}
+    return any((c or {}).get("id") == cid for c in product.get("covers") or [])
+
+
+def _remember_cover(product_id, path, cover_id):
+    if not cover_id:
+        return
+    data = _load(COVER_CACHE, {})
+    data[_cover_key(product_id, path)] = cover_id
+    io.atomic_write_json(COVER_CACHE, data)
+
+
+def attach_image_file(product_id, path, kind="cover", token=None):
+    """本機圖片 → 直傳 → 附到商品。`kind`：`cover`（圖庫，可多張）或 `thumbnail`（正方形）。"""
+    signed_id, url, headers = direct_upload(path, token)
+    put_bytes(url, Path(path).read_bytes(), headers)
+    endpoint = "covers" if kind == "cover" else "thumbnail"
+    body = api("POST", f"/products/{product_id}/{endpoint}",
+               {"signed_blob_id": signed_id}, token)
+    if kind == "cover":
+        _remember_cover(product_id, path, body.get("main_cover_id"))
+    return body
+
+
+def delete_cover(product_id, cover_id, token=None):
+    """DELETE /products/:id/covers/:cover_id（清掉重複掛上的圖）。"""
+    return api("DELETE", f"/products/{product_id}/covers/{cover_id}", {}, token)
+
+
+def attach_thumbnail(product_id, signed_blob_id, token=None):
+    """縮圖：POST /products/:id/thumbnail（signed_blob_id 或 url）。"""
     return api("POST", f"/products/{product_id}/thumbnail",
                {"signed_blob_id": signed_blob_id}, token)
 
@@ -348,6 +427,19 @@ def price_cents(rec, override=None):
         return 0, "usd"
 
 
+def suggested_price_cents(rec, override=None):
+    """自由訂價時的「建議價」（分）。0/None＝不設建議價。
+
+    對應 Gumroad 的 `suggested_price_cents`（`price` 才是**最低價**）：
+    開自由訂價要同時送 `customizable_price=true`，否則是固定價商品。
+    """
+    usd = (rec.get("listing") or {}).get("suggested_price_usd") if override is None else override
+    try:
+        return max(0, int(round(float(usd or 0) * 100)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def description_for(rec, fmt="html"):
     """商品描述。
 
@@ -368,10 +460,15 @@ def tags_for(rec, override=None):
     return list(t)[:10]
 
 
-def build_params(rec, *, price=None, permalink="", tags=None, publish=False, desc_format="html"):
+def build_params(rec, *, price=None, permalink="", tags=None, publish=False,
+                 desc_format="html", suggested_price=None, customizable=False):
     """把 release.json 轉成 POST /v2/products 的參數（純函式）。
 
     只帶「建立時能帶、且我們有值」的欄位；封面與檔案一律建立後再補（API 限制）。
+
+    `price` 是**最低價**；要「自由訂價（pay-what-you-want）」得再加
+    `customizable_price=true`。`suggested_price`（USD）→ `suggested_price_cents`，
+    買家會看到建議金額但可自行改；沒給就沿用 `listing.suggested_price_usd`。
     """
     cents, currency = price_cents(rec, price)
     params = {
@@ -384,6 +481,11 @@ def build_params(rec, *, price=None, permalink="", tags=None, publish=False, des
         "custom_summary": (rec.get("listing") or {}).get("short") or "",
         "published": "false" if not publish else "true",   # 一律先 draft，發佈用 enable
     }
+    suggested = suggested_price_cents(rec, suggested_price)
+    if suggested or customizable or (rec.get("listing") or {}).get("customizable"):
+        params["customizable_price"] = "true"
+        if suggested:
+            params["suggested_price_cents"] = suggested
     t = tags_for(rec, tags)
     if t:
         params["tags[]"] = t
@@ -450,15 +552,26 @@ def deliverable_paths(run):
     return (zips[0] if zips else None), (covers[0] if covers else None)
 
 
+def artwork_path(run):
+    """16:9 交付圖（Gumroad 的 thumbnail／社群預覽用）。"""
+    arts = [p for p in sorted((RELEASES_DIR / run).glob("artwork_*.*")) if p.is_file()]
+    return arts[0] if arts else None
+
+
 def cmd_gumroad(args):
     rec = load_release(args.run)
     token = load_token()
     zip_path, cover = deliverable_paths(args.run)
     params = build_params(rec, price=args.price, permalink=args.permalink,
                           tags=_parse_tags(args.tags) or None, publish=False,
-                          desc_format="text" if args.text_description else "html")
+                          desc_format="text" if args.text_description else "html",
+                          suggested_price=args.suggested_price,
+                          customizable=args.customizable_price)
 
     price_txt = f"US${params['price'] / 100:g}" if params.get("price") else "pay-what-you-want"
+    if params.get("customizable_price"):
+        sug = params.get("suggested_price_cents")
+        price_txt += f"（自由訂價；建議 US${sug / 100:g}）" if sug else "（自由訂價）"
     zip_txt = (f"{zip_path.name}（{zip_path.stat().st_size / 1e6:.0f} MB）"
                if zip_path else "⚠️ 沒有 zip（先跑 release package）")
     print("─" * 64)
@@ -500,19 +613,36 @@ def cmd_gumroad(args):
             url = upload_file(zip_path, token=token, label=zip_path.name)
             attach_file(pid, url, zip_path.name, token)
             print(f"  ✅ 已附上 {zip_path.name}")
-        # 封面：公開 API **吃不到我們私有的 S3 網址**（那會 403，Gumroad 回
-        # "Cover must be an image"），也不給 presign 產生 signed_blob_id。
-        # 所以只能 (a) 在 dashboard 手動拖一張，或 (b) 給一個公開可讀的圖片 URL。
+        # 封面／縮圖只能建立後再補（API 限制）。兩種來源：
+        #   (a) `--cover-url`：公開可讀網址 → /covers 吃 url
+        #   (b) 本機檔案：/direct_uploads 取 signed_blob_id → PUT → /covers 掛上
+        #       （不需要先把圖丟到公網；舊版註解說「只能手動」是錯的）
+        # 圖庫：方形封面一定是第一張（主圖），16:9 artwork 再加一張當商品頁圖庫。
+        # 縮圖（thumbnail）**必須正方形**（16:9 會被退 "Please upload a square thumbnail"），
+        # 所以拿方形封面去設，不要用 artwork。
+        def _try_img(path, kind, label_ok, label_fail):
+            if not path:
+                return
+            try:
+                if kind == "cover" and has_cover(pid, path, token):
+                    print(f"  （{path.name} 已在圖庫，跳過）")
+                    return
+                attach_image_file(pid, path, kind, token)
+                print(f"  ✅ {label_ok}（{path.name}，直傳）")
+            except (GumroadError, OSError) as e:
+                print(f"  ⚠️  {label_fail}（{e}）→ 可在 dashboard 手動補")
+
         if args.cover_url:
             try:
                 attach_cover(pid, args.cover_url, token)
                 print("  ✅ 已附上封面（外部 URL）")
             except GumroadError as e:
                 print(f"  ⚠️  封面附加失敗（{e}）→ 請在 dashboard 手動上傳")
-        elif cover:
-            print(f"  ⚠️  封面要手動：公開 API 只收**公開可讀**的圖片 URL，"
-                  f"我們的 S3 是私有。\n"
-                  f"      → 在 Gumroad 商品頁把 {cover.name} 拖進去（或下次給 --cover-url）")
+        else:
+            _try_img(cover, "cover", "已附上封面", "封面自動上傳失敗")
+            _try_img(artwork_path(args.run), "cover", "已附上 16:9 圖庫圖", "16:9 圖庫圖上傳失敗")
+            if not args.no_thumbnail:
+                _try_img(cover, "thumbnail", "已設定縮圖（方形）", "縮圖自動上傳失敗")
 
     if args.publish:
         body = enable_product(pid, token)
@@ -537,14 +667,21 @@ def add_parser(sub):
     p = sub.add_parser("gumroad", help="把上架包送進 Gumroad（API v2；有 API，可自動化）")
     p.add_argument("--run", required=True, help="已產出的 release run（output/releases/<run>/）")
     p.add_argument("--price", type=float, default=None,
-                   help="售價 USD（0＝pay-what-you-want；預設讀 release.json 的 listing.price_usd）")
+                   help="售價 USD（**最低價**；0＝可免費下載；預設讀 release.json 的 listing.price_usd）")
+    p.add_argument("--customizable-price", action="store_true",
+                   help="開啟自由訂價（Gumroad 的 customizable_price；price 變成最低價）")
+    p.add_argument("--suggested-price", type=float, default=None, metavar="USD",
+                   help="自由訂價的建議價（US$；會自動開啟 --customizable-price，"
+                        "預設讀 release.json 的 listing.suggested_price_usd）")
     p.add_argument("--permalink", default="", help="商品網址 slug（預設由專輯名推得）")
     p.add_argument("--tags", default="", help="覆寫 tags（逗號分隔；預設讀 release.json）")
     p.add_argument("--dry-run", action="store_true", help="只印會送出的參數，不呼叫 API")
     p.add_argument("--no-upload", action="store_true", dest="no_upload",
                    help="只建立/更新商品，不上傳交付檔與封面")
     p.add_argument("--cover-url", default="", dest="cover_url",
-                   help="封面圖的**公開可讀** URL（API 不吃私有 S3；沒有就請在 dashboard 手動上傳）")
+                   help="封面圖的**公開可讀** URL（沒給就自動直傳本機封面；本機檔案不用先上公網）")
+    p.add_argument("--no-thumbnail", action="store_true", dest="no_thumbnail",
+                   help="不要自動設定商品縮圖（預設用方形封面；失敗只警告）")
     p.add_argument("--publish", action="store_true",
                    help="上傳完成後直接發佈（預設只建 draft，讓你檢查）")
     p.add_argument("--text-description", action="store_true", dest="text_description",

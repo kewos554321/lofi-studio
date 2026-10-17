@@ -219,10 +219,28 @@ Spotify（Song Credits）也都在收同一組旗標（經 DDEX）。本產線�
 | `ai_credits.persona` | `True`（artist 是 AI 角色） | `config.RELEASE_AI_PERSONA` |
 | `listing.tags` | 由 genre/style/專輯名推得（Gumroad 上限 10） | `release.listing_tags()` |
 | `listing.price_usd` | `0`（名稱你的價錢） | `config.RELEASE_PRICE_USD`／`--price` |
+| `listing.suggested_price_usd` | 未設（有值才送；例：`2`） | `release gumroad --suggested-price` |
 
 > `songwriter` 是**版權標示**用的真名（DistroKid 會顯示在 credits／歌詞）。
 > 帳號層的 KYC（Stripe／Gumroad 的 payout settings）要另外填**護照上的姓／名**
 > （護照 `WANG, WEI-CHIEH` → Surname `WANG`、Given `WEI-CHIEH`），兩者要對得上以免審查卡住。
+
+### 5-2. Gumroad 定價：`price` 是最低價，「建議價」是另一個欄位
+
+Gumroad 沒有「售價＋建議售價」這種單一欄位，而是三個一起決定：
+
+| 參數 | 意義 | 本產線 |
+|---|---|---|
+| `price` | **最低價**（買家最少要付多少） | `0` → 可免費下載 |
+| `customizable_price` | 開啟「自由訂價」（pay-what-you-want） | `--customizable-price`（給建議價時自動開）|
+| `suggested_price_cents` | **建議價**（買家看到的預填金額，可自行加減） | `--suggested-price 2` → `200` |
+
+兩者在 API 的 `create_permitted_params` 內（Gumroad 開源原始碼 `links_controller.rb`），
+所以**可以全自動設定**。但要注意：**商品 JSON 不回傳 `suggested_price_cents`**，
+API 無法驗證它有沒有生效，只能到 dashboard 商品頁確認。
+
+> 實務上：`price=0` 建出來的商品 `formatted_price` 就是 `$0+`（已具備自由訂價），
+> 再加 `suggested_price_cents` 只是把「建議金額」預填給買家。
 
 ---
 
