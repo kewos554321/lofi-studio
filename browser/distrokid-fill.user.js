@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.3.9
+// @version      0.4.0
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -16,6 +16,9 @@
  * 1. 分段執行，不給「一鍵全填」。每一步都是獨立按鈕，跑完看 log 再跑下一步。
  *    理由：「把音檔塞進上傳欄位」要靠 DistroKid 自己的 JS 接手（它走 S3 表單上傳），
  *    這步無法離線驗證，必須能單獨觀察。
+ *    「3. 填逐首」結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
+ *    （DistroKid 重繪會把設定洗掉），所以沒有獨立的「修復 explicit」按鈕。
+ *    「檢查狀態」是一次列出 1-8 各步結果的總檢查，不必回頭翻 log。
  * 2. 絕不按 #doneButton（Continue）。程式只負責填，送出由人決定。
  * 3. 選擇器來自真實 recon（browser/distrokid-recon-*.json），不是猜的。
  *    逐首欄位的 uuid 每次進站都不同 → 執行時從 input[name^="tracknum_"] 動態解出。
@@ -33,7 +36,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.3.9';
+  const VER = '0.4.0';
 
   // ---------- 狀態 ----------
   const state = {
@@ -452,30 +455,57 @@
       await jitter();
     }
     log('✅ 逐首文字欄位完成', 'ok');
+
+    // 填完不等於填對：DistroKid 回答某些題目時會重繪整列、把先前的選擇重置。
+    // 所以這裡立刻讀回真實狀態，錯的就地重設（原本的「7. 修復 explicit」已併進這一步）。
+    await verifyTracks();
     return true;
   }
 
-  // ---------- 修復：只處理 explicit（給已被填壞的 12 首用）----------
-  // DistroKid 的錯誤：「A track can't be marked both explicit AND instrumental」
-  // 純器樂曲永遠是「非 explicit」，所以把 explicit=No 重設一次即可。
-  async function fixExplicit() {
+  // ---------- 逐首驗證＋自動修正（explicit / instrumental / cleaned）----------
+  // 為什麼要獨立跑一次：DistroKid 回答某些題目時會重繪整個 track 區塊，
+  // 「設完」不等於「還在」——explicit 就是這樣壞的（會變成「同時 explicit 又 instrumental」）。
+  // 本產線全部是純器樂曲 → instrumental = Yes、explicit = No、cleaned = No，
+  // 所以直接讀回狀態，不對的就地重設。
+  async function verifyTracks() {
     const tmap = trackMap();
-    let ok = 0, bad = [];
-    const total = (state.pkg.tracks || []).length;
-    for (const t of state.pkg.tracks || []) {
+    const tracks = (state.pkg && state.pkg.tracks) || [];
+    if (!tracks.length) { log('（沒有上架包資料，跳過逐首驗證）', 'warn'); return { fixed: 0, bad: [] }; }
+
+    let fixed = 0;
+    const bad = [];
+    for (const t of tracks) {
       const i = t.no;
-      if (!tmap[i]) continue;
-      const noBtn = q('#js-not-explicit-radio-button-' + i);
-      const yesBtn = q('#js-explicit-radio-button-' + i);
-      const wasBad = (yesBtn && yesBtn.checked) || !(noBtn && noBtn.checked);
-      const good = await setRadioVerified(noBtn, '第 ' + i + ' 首');
-      log('  ' + String(i).padStart(2, '0') + ' explicit=No ' +
-        (good ? (wasBad ? '✅ 已修正' : '✅ 本來就對') : '❌ 失敗'), good ? 'ok' : 'err');
-      if (good) ok++; else bad.push(i);
+      if (!tmap[i]) { bad.push(i + '（找不到區塊）'); continue; }
+      const want = [
+        { el: q('#js-instrumental-radio-button-' + i), name: 'instrumental=Yes' },
+        { el: q('#js-not-explicit-radio-button-' + i), name: 'explicit=No' },
+        { el: q('#js-not-cleaned-radio-button-' + i), name: 'cleaned=No' },
+      ];
+      if (!want.some((w) => !w.el || !w.el.checked)) continue;   // 三個都對 → 完全不動
+
+      // 順序：instrumental 先（設它才會觸發重繪，後面兩個要壓在它之後）
+      for (const w of want) {
+        if (w.el && w.el.checked) continue;
+        await setRadioVerified(w.el, '第 ' + i + ' 首 ' + w.name);
+      }
+      const still = want.filter((w) => !w.el || !w.el.checked).map((w) => w.name);
+      if (still.length) {
+        bad.push(i + '（' + still.join('/') + '）');
+        log('  ' + String(i).padStart(2, '0') + ' ❌ ' + still.join('/') + ' 設不上去', 'err');
+      } else {
+        fixed++;
+        log('  ' + String(i).padStart(2, '0') + ' ✅ 已修正（重繪把設定洗掉了）', 'ok');
+      }
       await jitter();
     }
-    log('explicit 修正 ' + ok + '/' + total + (bad.length ? '（失敗：' + bad.join(',') + '，請手動處理）' : ''), bad.length ? 'warn' : 'ok');
-    return true;
+
+    const ok = tracks.length - bad.length;
+    log('逐首欄位驗證（explicit/instrumental/cleaned）：' +
+      (bad.length ? '⚠️ ' + ok + '/' + tracks.length + '；失敗 ' + bad.join('、')
+        : '✅ ' + tracks.length + '/' + tracks.length + ' 全部正確') +
+      (fixed ? '（本次修正 ' + fixed + ' 首）' : ''), bad.length ? 'warn' : 'ok');
+    return { fixed, bad };
   }
 
   // 診斷：dump 每一首的 explicit / cleaned / instrumental / ai_gate 目前狀態
@@ -505,13 +535,104 @@
     return rows.join('\n');
   }
 
+  // ---------- 檢查狀態：一次列出「1-8 每一步的結果」 ----------
+  // 目的：不用一步按一次、也不用回頭翻 log。按一次就看到哪一步還沒完成、
+  // 哪個欄位被 DistroKid 重繪洗掉、以及付費加購有沒有被勾。
+  function statusReport() {
+    const p = state.pkg;
+    const out = [];
+    const val = (sel) => { const el = q(sel); return el ? el.value : ''; };
+
+    // ① 專輯／表單
+    const formN = Number(val('#howManySongsOnThisAlbum') || 0);
+    const pkgN = p ? (p.tracks || []).length : 0;
+    out.push('── ① 專輯／表單 ──');
+    out.push('  曲數：表單 ' + formN + (p ? '／上架包 ' + pkgN + (formN === pkgN ? ' ✅' : ' ❌') : '（尚未選上架包）'));
+    out.push('  專輯名：' + (val('#albumTitleInput') || '（空）'));
+    out.push('  風格：' + (val('#genrePrimary') || '（未選）') + '　語言：' + (val('#language') || '（未選）'));
+    const art = q('#artwork');
+    out.push('  封面：' + (art && art.files && art.files.length ? '✅ ' + art.files[0].name : '❌ 未選'));
+    const stores = qa('input[name="store"]');
+    out.push('  商店：' + stores.filter((c) => c.checked).length + '/' + stores.length + ' 已勾' +
+      (stores.some((c) => !c.checked) ? '（未勾：' + stores.filter((c) => !c.checked).map((c) => labText(c).slice(0, 18)).join('、') + '）' : ' ✅'));
+
+    // ② 逐首欄位
+    out.push('── ② 逐首欄位（explicit / cleaned / instrumental）──');
+    out.push(radioState() || '  ❌ 找不到曲目區塊');
+
+    if (p) {
+      // ③ 音檔
+      let files = 0;
+      (p.tracks || []).forEach((t) => {
+        const el = q('#js-track-upload-' + t.no);
+        if (el && el.files && el.files.length) files++;
+      });
+      out.push('── ③ 音檔 ──');
+      out.push('  已塞入 ' + files + '/' + pkgN + (files === pkgN ? ' ✅' : ' ⚠️ 還有 ' + (pkgN - files) + ' 首沒塞'));
+
+      // ④ AI Credits
+      const tmap = trackMap();
+      const aiRows = [];
+      let aiOkCount = 0;
+      for (const t of p.tracks || []) {
+        const u = tmap[t.no];
+        if (!u) continue;
+        const s = aiState(u);
+        if (aiOk(s)) aiOkCount++;
+        aiRows.push(aiLine(t.no, s));
+      }
+      out.push('── ④ AI Credits（gate=Yes／Music✓／Lyrics✗／AllAudio✗）──');
+      out.push('  符合 ' + aiOkCount + '/' + pkgN + (aiOkCount === pkgN ? ' ✅' : ' ⚠️ 按「5. AI Credits」可補'));
+      out.push(aiRows.join('\n'));
+    }
+
+    // ⑤ 必勾聲明
+    const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
+    out.push('── ⑤ 必勾聲明 ──');
+    if (!mand.boxes.length) {
+      out.push('  ❌ 找不到「Important checkboxes (mandatory)」區塊');
+    } else {
+      mand.boxes.forEach((cb) => {
+        const label = (labText(cb) || cb.id || '(無標籤)').replace(/\s+/g, ' ').slice(0, 76);
+        out.push('  [' + (cb.checked ? '✓' : '✗') + '] ' + label);
+      });
+      const miss = mand.boxes.filter((cb) => !cb.checked).length;
+      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「7. 必勾項目全選」' : '全部已勾 ✅'));
+    }
+
+    // ⑥ Extras（付費加購）
+    const extras = extrasBoxes();
+    out.push('── ⑥ Extras（付費加購，應全部不勾）──');
+    if (!extras.length) {
+      out.push('  ℹ️ 沒抓到加購項目（若畫面上確實有，console 執行 __lofiFill.extrasProbe() 回報）');
+    } else {
+      extras.forEach((cb) => {
+        const label = (labText(cb) || cb.id || '(無標籤)').replace(/\s+/g, ' ').slice(0, 76);
+        out.push('  [' + (cb.checked ? '＄已勾' : '✓未勾') + '] ' + label);
+      });
+      const on = extras.filter((cb) => cb.checked).length;
+      out.push('  ' + (on ? '❌ 有 ' + on + ' 個付費加購被勾著 → 按「8. 取消 Extras」' : '全部未勾 ✅'));
+    }
+
+    // ⑦ Apple credits（有這個區塊才顯示）
+    const pRole = q('#track-1-performer-1-role');
+    const dRole = q('#track-1-producer-1-role');
+    if (pRole || dRole) {
+      out.push('── ⑦ Apple credits ──');
+      if (pRole) out.push('  performer role=' + pRole.value + (pRole.value === 'Unknown' ? ' ✅' : ''));
+      if (dRole) out.push('  producer  role=' + dRole.value + (dRole.value === 'Engineer' ? ' ✅' : ''));
+    }
+
+    return out.join('\n');
+  }
+
   // ---------- 頁尾「Important checkboxes (mandatory)」全部勾選 ----------
   // 用「區塊標題」定位，再勾該區塊裡每一個 checkbox：
   // 不需要知道個別 id（recon 時這些欄位被 400 筆上限截斷，本來就沒有它們的資料）。
   //
   // ⚠️ 大坑（0.3.9 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
   //    但「Important checkboxes (mandatory)」與「Extras (optional but awesome)」（付費加購）
-  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「8. 必勾項目全選」會**勾到要付錢的加購**。
+  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「7. 必勾項目全選」會**勾到要付錢的加購**。
   //
   //    2026-10-17 recon（browser/distrokid-recon-main-12tracks-1792219901787.json）證實：
   //    付費加購是固定特徵 → input[name="extras"].extras（例如 #socialmediapack
@@ -638,7 +759,7 @@
   }
 
   // 診斷：Extras 區塊抓到什麼、每個 checkbox 的標籤與勾選狀態。
-  // 換版／改文案後若抓不到，按「檢查 Extras」把這串貼回來就能修選擇器。
+  // 換版／改文案後若抓不到，console 執行 __lofiFill.extrasProbe() 把結果貼回來就能修選擇器。
   function extrasProbe() {
     const h = findSectionHeading(EXTRAS_HEAD_RE);
     const sec = sectionBoxes(EXTRAS_HEAD_RE, MANDATORY_HEAD_RE);
@@ -668,9 +789,9 @@
     const boxes = extrasBoxes();
     if (!boxes.length) {
       if (!findSectionHeading(EXTRAS_HEAD_RE)) {
-        log('ℹ️ 頁面上找不到「Extras (optional but awesome)」標題 → 沒有加購可取消（若畫面確實有，按「檢查 Extras」回報）', 'warn');
+        log('ℹ️ 頁面上找不到「Extras (optional but awesome)」標題 → 沒有加購可取消（若畫面確實有，console 執行 __lofiFill.extrasProbe() 回報）', 'warn');
       } else {
-        log('ℹ️ 找到 Extras 標題但抓不到 checkbox → 請手動確認（按「檢查 Extras」回報）', 'warn');
+        log('ℹ️ 找到 Extras 標題但抓不到 checkbox → 請手動確認（console 執行 __lofiFill.extrasProbe() 回報）', 'warn');
       }
       return false;
     }
@@ -1094,11 +1215,9 @@
     '    <button id="dkf-audio">4. 塞音檔</button>',
     '    <button id="dkf-ai">5. AI Credits</button>',
     '    <button id="dkf-credits">6. Apple credits</button>',
-    '    <button id="dkf-fixexp" style="cursor:pointer;background:#4a2b2b;color:#ffd7d7;border:1px solid #7a3b3b;border-radius:4px">7. 修復 explicit</button>',
-    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">8. 必勾項目全選</button>',
-    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">9. 取消 Extras（付費加購）</button>',
-    '    <button id="dkf-state">檢查狀態</button>',
-    '    <button id="dkf-extrasprobe" style="cursor:pointer">檢查 Extras</button>',
+    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">7. 必勾項目全選</button>',
+    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">8. 取消 Extras（付費加購）</button>',
+    '    <button id="dkf-state" style="cursor:pointer;font-weight:bold">檢查狀態（總檢查）</button>',
     '  </div>',
     '  <textarea id="dkf-preview" readonly placeholder="選取上架包後這裡會顯示讀到什麼" style="width:100%;height:170px;padding:8px;background:#0b0f13;color:#cfe3f5;border:1px solid #2a3540;border-radius:4px;resize:vertical"></textarea>',
     '  <div id="dkf-log" style="height:220px;overflow:auto;background:#0b0f13;border:1px solid #2a3540;border-radius:4px;padding:8px"></div>',
@@ -1165,14 +1284,12 @@
   $('dkf-audio').onclick = () => guard(async () => { if (need()) await fillAudio(); });
   $('dkf-ai').onclick = () => guard(async () => { if (need()) await fillAi(); });
   $('dkf-credits').onclick = () => guard(async () => { if (need()) await fillAppleCredits(); });
-  $('dkf-fixexp').onclick = () => guard(async () => { if (need()) await fixExplicit(); });
   $('dkf-mandatory').onclick = () => guard(async () => { await fillMandatory(); });
   $('dkf-extras').onclick = () => guard(async () => { await uncheckExtras(); });
-  $('dkf-extrasprobe').onclick = () => guard(async () => { log(extrasProbe()); });
   $('dkf-state').onclick = () => guard(async () => {
-    if (!need()) return;
-    log('── 目前欄位狀態 ──');
-    log(radioState());
+    log('──── 總檢查 ────');
+    if (state.pkg) await verifyTracks();   // 先驗（只修錯的），再印狀態，數字才是最終值
+    log(statusReport());
   });
 
   window.addEventListener('keydown', (e) => {
@@ -1189,7 +1306,7 @@
     version: VER, state,
     pick: pickPackage, album: fillAlbum, tracks: fillTracks,
     audio: fillAudio, ai: fillAi, credits: fillAppleCredits,
-    fixExplicit, radioState, creditsProbe,
+    fixExplicit: verifyTracks, verifyTracks, statusReport, radioState, creditsProbe,
     fillMandatory, mandatorySection, setSongCount, formIsEmpty,
     extrasSection, uncheckExtras, extrasProbe,
     trackMap, preview,
