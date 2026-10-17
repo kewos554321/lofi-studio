@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lofi-studio · DistroKid 填表助手
 // @namespace    lofi-studio
-// @version      0.4.0
+// @version      0.4.1
 // @description  讀取 output/releases/<run>/ 上架包（release.json + 封面 + audio/），自動填入 DistroKid 上傳表單。停在 Continue 之前，不送出。
 // @author       lofi-studio
 // @match        https://distrokid.com/new/*
@@ -14,11 +14,13 @@
  * 設計原則
  * ---------
  * 1. 分段執行，不給「一鍵全填」。每一步都是獨立按鈕，跑完看 log 再跑下一步。
+ *    例外：「2. 填專輯層＋逐首」把兩個純文字步驟串在一起（專輯層失敗就不往下填逐首）；
+ *    音檔上傳仍獨立成第 3 步，因為要觀察 DistroKid 的 S3 上傳有沒有真的開始跑。
  *    理由：「把音檔塞進上傳欄位」要靠 DistroKid 自己的 JS 接手（它走 S3 表單上傳），
  *    這步無法離線驗證，必須能單獨觀察。
- *    「3. 填逐首」結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
+ *    「2. 填專輯層＋逐首」的逐首段結尾會自動驗一次 explicit／instrumental／cleaned 並就地修正
  *    （DistroKid 重繪會把設定洗掉），所以沒有獨立的「修復 explicit」按鈕。
- *    「檢查狀態」是一次列出 1-8 各步結果的總檢查，不必回頭翻 log。
+ *    「檢查狀態」是一次列出 1-7 各步結果的總檢查，不必回頭翻 log。
  * 2. 絕不按 #doneButton（Continue）。程式只負責填，送出由人決定。
  * 3. 選擇器來自真實 recon（browser/distrokid-recon-*.json），不是猜的。
  *    逐首欄位的 uuid 每次進站都不同 → 執行時從 input[name^="tracknum_"] 動態解出。
@@ -36,7 +38,7 @@
 (function () {
   'use strict';
 
-  const VER = '0.4.0';
+  const VER = '0.4.1';
 
   // ---------- 狀態 ----------
   const state = {
@@ -457,7 +459,7 @@
     log('✅ 逐首文字欄位完成', 'ok');
 
     // 填完不等於填對：DistroKid 回答某些題目時會重繪整列、把先前的選擇重置。
-    // 所以這裡立刻讀回真實狀態，錯的就地重設（原本的「7. 修復 explicit」已併進這一步）。
+    // 所以這裡立刻讀回真實狀態，錯的就地重設（原本的「修復 explicit」按鈕已併進這一步）。
     await verifyTracks();
     return true;
   }
@@ -582,13 +584,22 @@
         aiRows.push(aiLine(t.no, s));
       }
       out.push('── ④ AI Credits（gate=Yes／Music✓／Lyrics✗／AllAudio✗）──');
-      out.push('  符合 ' + aiOkCount + '/' + pkgN + (aiOkCount === pkgN ? ' ✅' : ' ⚠️ 按「5. AI Credits」可補'));
+      out.push('  符合 ' + aiOkCount + '/' + pkgN + (aiOkCount === pkgN ? ' ✅' : ' ⚠️ 按「4. AI Credits」可補'));
       out.push(aiRows.join('\n'));
     }
 
-    // ⑤ 必勾聲明
+    // ⑤ Apple credits（有這個區塊才顯示）
+    const pRole = q('#track-1-performer-1-role');
+    const dRole = q('#track-1-producer-1-role');
+    if (pRole || dRole) {
+      out.push('── ⑤ Apple credits ──');
+      if (pRole) out.push('  performer role=' + pRole.value + (pRole.value === 'Unknown' ? ' ✅' : ''));
+      if (dRole) out.push('  producer  role=' + dRole.value + (dRole.value === 'Engineer' ? ' ✅' : ''));
+    }
+
+    // ⑥ 必勾聲明
     const mand = sectionBoxes(MANDATORY_HEAD_RE, EXTRAS_HEAD_RE);
-    out.push('── ⑤ 必勾聲明 ──');
+    out.push('── ⑥ 必勾聲明 ──');
     if (!mand.boxes.length) {
       out.push('  ❌ 找不到「Important checkboxes (mandatory)」區塊');
     } else {
@@ -597,12 +608,12 @@
         out.push('  [' + (cb.checked ? '✓' : '✗') + '] ' + label);
       });
       const miss = mand.boxes.filter((cb) => !cb.checked).length;
-      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「7. 必勾項目全選」' : '全部已勾 ✅'));
+      out.push('  ' + (miss ? '⚠️ 還有 ' + miss + ' 條沒勾 → 按「6. 必勾項目全選」' : '全部已勾 ✅'));
     }
 
-    // ⑥ Extras（付費加購）
+    // ⑦ Extras（付費加購）
     const extras = extrasBoxes();
-    out.push('── ⑥ Extras（付費加購，應全部不勾）──');
+    out.push('── ⑦ Extras（付費加購，應全部不勾）──');
     if (!extras.length) {
       out.push('  ℹ️ 沒抓到加購項目（若畫面上確實有，console 執行 __lofiFill.extrasProbe() 回報）');
     } else {
@@ -611,16 +622,7 @@
         out.push('  [' + (cb.checked ? '＄已勾' : '✓未勾') + '] ' + label);
       });
       const on = extras.filter((cb) => cb.checked).length;
-      out.push('  ' + (on ? '❌ 有 ' + on + ' 個付費加購被勾著 → 按「8. 取消 Extras」' : '全部未勾 ✅'));
-    }
-
-    // ⑦ Apple credits（有這個區塊才顯示）
-    const pRole = q('#track-1-performer-1-role');
-    const dRole = q('#track-1-producer-1-role');
-    if (pRole || dRole) {
-      out.push('── ⑦ Apple credits ──');
-      if (pRole) out.push('  performer role=' + pRole.value + (pRole.value === 'Unknown' ? ' ✅' : ''));
-      if (dRole) out.push('  producer  role=' + dRole.value + (dRole.value === 'Engineer' ? ' ✅' : ''));
+      out.push('  ' + (on ? '❌ 有 ' + on + ' 個付費加購被勾著 → 按「7. 取消 Extras」' : '全部未勾 ✅'));
     }
 
     return out.join('\n');
@@ -632,7 +634,7 @@
   //
   // ⚠️ 大坑（0.3.9 修掉）：舊版「從標題往上爬，找到含 ≥2 個 checkbox 的容器就停」。
   //    但「Important checkboxes (mandatory)」與「Extras (optional but awesome)」（付費加購）
-  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「7. 必勾項目全選」會**勾到要付錢的加購**。
+  //    常常共用同一個外層容器 → 往上爬就把加購一起框進來，按「6. 必勾項目全選」會**勾到要付錢的加購**。
   //
   //    2026-10-17 recon（browser/distrokid-recon-main-12tracks-1792219901787.json）證實：
   //    付費加購是固定特徵 → input[name="extras"].extras（例如 #socialmediapack
@@ -856,7 +858,7 @@
     return true;
   }
 
-  // ---------- 步驟 4：AI Credits ----------
+  // ---------- AI Credits：共用小工具（步驟 4）----------
   // 已確認的組合：ai_gate=Yes、ai_music=✓、ai_lyrics=✗
   //
   // 實測到的流程（recon 證據）：
@@ -977,7 +979,7 @@
       if (aiOk(s)) ok++; else bad.push(t.no);
     }
     log('AI Credits 套用結果 ' + ok + '/' + total + ' 首' +
-      (ok === total ? '' : '（沒過的：' + bad.join(',') + ' → 按「5」再跑一次會逐首補）'),
+      (ok === total ? '' : '（沒過的：' + bad.join(',') + ' → 按「4」再跑一次會逐首補）'),
       ok === total ? 'ok' : 'warn');
 
     // 7) Apply to all 沒生效時，退回逐首硬填（保險）
@@ -1007,7 +1009,7 @@
     return true;
   }
 
-  // ---------- 步驟 5：Apple Music credits（performer / producer）----------
+  // ---------- 步驟 5：Apple credits（performer / producer）----------
   // ⚠️ 這一段還沒驗證：recon 時該區塊是收合的（visible=false），
   //    所以 performer/producer 的「姓名輸入框」長在哪還不確定。這裡用啟發式：
   //    從 role 下拉往回找同一列的文字輸入框。跑完請看 log 確認。
@@ -1100,7 +1102,7 @@
     return true;
   }
 
-  // ---------- 步驟 6：Apple Music credits ----------
+  // ---------- 步驟 5：Apple credits ----------
   // 規格（使用者指定）：
   //   Performer → role「Unknown」、姓名「WANG, WEI-CHIEH」→ Copy this performer to all tracks
   //   Producer  → role「Engineer」、姓名「WANG, WEI-CHIEH」→ Copy this producer to all tracks
@@ -1210,13 +1212,12 @@
     '  <div style="color:#ffd479">只填不送：本程式不會按 Continue。</div>',
     '  <div style="display:flex;gap:6px;flex-wrap:wrap">',
     '    <button id="dkf-pick" style="cursor:pointer;font-weight:bold">1. 選取上架包</button>',
-    '    <button id="dkf-album">2. 填專輯層</button>',
-    '    <button id="dkf-tracks">3. 填逐首</button>',
-    '    <button id="dkf-audio">4. 塞音檔</button>',
-    '    <button id="dkf-ai">5. AI Credits</button>',
-    '    <button id="dkf-credits">6. Apple credits</button>',
-    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">7. 必勾項目全選</button>',
-    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">8. 取消 Extras（付費加購）</button>',
+    '    <button id="dkf-basic" style="cursor:pointer;font-weight:bold">2. 填專輯層＋逐首</button>',
+    '    <button id="dkf-audio">3. 塞音檔</button>',
+    '    <button id="dkf-ai">4. AI Credits</button>',
+    '    <button id="dkf-credits">5. Apple credits</button>',
+    '    <button id="dkf-mandatory" style="cursor:pointer;font-weight:bold">6. 必勾項目全選</button>',
+    '    <button id="dkf-extras" style="cursor:pointer;background:#2b3a2f;color:#d7ffe6;border:1px solid #3b7a4c;border-radius:4px">7. 取消 Extras（付費加購）</button>',
     '    <button id="dkf-state" style="cursor:pointer;font-weight:bold">檢查狀態（總檢查）</button>',
     '  </div>',
     '  <textarea id="dkf-preview" readonly placeholder="選取上架包後這裡會顯示讀到什麼" style="width:100%;height:170px;padding:8px;background:#0b0f13;color:#cfe3f5;border:1px solid #2a3540;border-radius:4px;resize:vertical"></textarea>',
@@ -1279,8 +1280,12 @@
     return true;
   };
 
-  $('dkf-album').onclick = () => guard(async () => { if (need()) await fillAlbum(); });
-  $('dkf-tracks').onclick = () => guard(async () => { if (need()) await fillTracks(); });
+  $('dkf-basic').onclick = () => guard(async () => {
+    if (!need()) return;
+    // 專輯層填失敗就不要往下填逐首（例如曲數沒對上，逐首會全部找不到區塊）
+    if (!await fillAlbum()) return;
+    await fillTracks();     // 內含 explicit/instrumental/cleaned 驗證與就地修正
+  });
   $('dkf-audio').onclick = () => guard(async () => { if (need()) await fillAudio(); });
   $('dkf-ai').onclick = () => guard(async () => { if (need()) await fillAi(); });
   $('dkf-credits').onclick = () => guard(async () => { if (need()) await fillAppleCredits(); });
@@ -1306,6 +1311,7 @@
     version: VER, state,
     pick: pickPackage, album: fillAlbum, tracks: fillTracks,
     audio: fillAudio, ai: fillAi, credits: fillAppleCredits,
+    basic: async () => { if (!await fillAlbum()) return false; return fillTracks(); },
     fixExplicit: verifyTracks, verifyTracks, statusReport, radioState, creditsProbe,
     fillMandatory, mandatorySection, setSongCount, formIsEmpty,
     extrasSection, uncheckExtras, extrasProbe,
