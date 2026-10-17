@@ -725,7 +725,7 @@ export LOFI_GUMROAD_TOKEN=...        # 或用環境變數
 | **檔案要 multipart 上傳** | `POST /files/presign`（要 `filename`/`content_type`/`file_size`）→ 逐 part PUT（收 ETag）→ `POST /files/complete`（要 `upload_id`/`key`/`parts`）→ 把回傳 URL 放進 `files[][url]` |
 | **發佈會被帳號狀態擋** | 沒完成 payout settings 或 email 未確認 → 只停 draft 並回 `warning`（程式照實印，不假裝成功） |
 | **圖片可以從本機上傳** | `POST /v2/direct_uploads`（`blob[filename]`/`byte_size`/`checksum`＝**base64(MD5)**/`content_type`）→ 拿 `signed_id` ＋預簽網址 → PUT bytes → `POST /products/:id/covers` 帶 `signed_blob_id`。**這支回傳沒有 `success` 欄位**，不能用 `api()`（會誤判失敗），要走 `raw()` |
-| **縮圖必須正方形** | 16:9 的 artwork 會被退 `Please upload a square thumbnail.` → **封面與縮圖都用方形封面**；16:9 artwork 只留在交付 ZIP 裡（Gumroad 圖庫只掛一張，避免重複曝光） |
+| **縮圖必須正方形** | Gumroad 的 `thumbnail` 只收正方形（16:9 會被退 `Please upload a square thumbnail.`）→ 封面欄位放 16:9 `artwork_3840x2160`、縮圖欄位放方形 `cover_3000x3000`（DistroKid 則是 cover 放方形、沒有 thumb） |
 | **`/covers` 是 append** | 重跑會多掛一張（實測同一張封面掛兩次）→ 用 `logs/.gumroad-covers.json`（商品 id＋圖片 sha1 → cover id）判斷，已在圖庫就跳過 |
 | **建議價 API 只寫不讀** | `customizable_price`／`suggested_price_cents` 在 `create_permitted_params` 內、更新也會套用，但**商品 JSON 不回傳 `suggested_price_cents`** → 無法用 API 驗證，只能到 dashboard 商品頁確認 |
 | **描述要送 HTML** | Gumroad 商品頁吃 HTML：`description` 預設送 `listing.html`（有 `<h3>`／`<ul>`／`<ol>` 才會排版）。純文字會變成一堆換行。要退回純文字用 `--text-description` |

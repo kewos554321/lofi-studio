@@ -75,7 +75,8 @@ output/releases/coastal01/
 ├── artwork_3840x2160.jpg  交付 ZIP 用 4K 高畫質橫式圖（商店 16:9 封面同一套圖；來源優先用該集
 │                          `assets/visuals/<run>/` 的橫式圖，沒有才由方圖衍生：`--artwork-fit`
 │                          `pad`＝模糊背景補滿左右（預設）／`crop`＝裁成 16:9 填滿）
-│  （封面只有兩張：方形給 DistroKid＋Gumroad 縮圖、16:9 給 Gumroad 封面＋交付 ZIP）
+│  （封面只有兩張，**哪張放哪個欄位依平台而定**：Gumroad 的 cover＝16:9 artwork、
+│    thumb＝方形 cover；DistroKid 的 cover＝方形 cover、沒有 thumb）
 ├── download/<album>.zip  交付檔（audio/＋方形與橫式兩張圖＋tracklist＋credits）→ Gumroad／Bandcamp 的「內容」
 │                         原則：買家拿到的＝商店頁看到的（同一套圖，ZIP 給高畫質版）
 ├── release.json          機器用：album/artist/track 順序/genre/explicit/songwriter/AI credits/ISRC 欄/授權 provenance/母帶參數
@@ -84,6 +85,15 @@ output/releases/coastal01/
 ├── credits.txt           隨交付檔附上的 AI 揭露與模型授權（賣點，見 §5）
 └── CHECKLIST.md          各平台上架步驟（DSP／Bandcamp／stock／Gumroad 各一段）
 ```
+
+**封面圖：同一套圖，兩個平台放到不同欄位**（`release gumroad` 已照右表自動處理）
+
+| 平台 | 欄位 | 用哪張 | 規格 |
+|---|---|---|---|
+| **Gumroad** | Cover image（商品主圖） | `artwork_3840x2160.jpg` | 16:9、3840×2160 |
+| **Gumroad** | Thumbnail（縮圖） | `cover_3000x3000.jpg` | **必須正方形**（16:9 會被退 `Please upload a square thumbnail.`） |
+| **DistroKid** | Cover | `cover_3000x3000.jpg` | 正方形 3000×3000、JPG、無文字（§6-1） |
+| 交付 ZIP | 兩張都附 | | 買家拿到高畫質版 |
 
 實作時發現、原規劃沒預期到的幾點（已處理）：
 

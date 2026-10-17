@@ -545,11 +545,17 @@ def load_release(run):
 
 
 def deliverable_paths(run):
-    """交付檔（zip）與封面。"""
+    """交付檔（zip）與方形封面。"""
     d = RELEASES_DIR / run
     zips = sorted((d / "download").glob("*.zip")) if (d / "download").is_dir() else []
     covers = [p for p in sorted(d.glob("cover_*.*")) if p.is_file()]
     return (zips[0] if zips else None), (covers[0] if covers else None)
+
+
+def artwork_path(run):
+    """16:9 交付圖（Gumroad 的**封面**；DistroKid 不用）。"""
+    arts = [p for p in sorted((RELEASES_DIR / run).glob("artwork_*.*")) if p.is_file()]
+    return arts[0] if arts else None
 
 
 def cmd_gumroad(args):
@@ -575,7 +581,9 @@ def cmd_gumroad(args):
     print(f"  價格：{price_txt}")
     print(f"  tags：{', '.join(params.get('tags[]') or []) or '（無）'}")
     print(f"  交付檔：{zip_txt}")
-    print(f"  封面：{cover.name if cover else '⚠️ 沒有封面'}")
+    art = artwork_path(args.run)
+    print(f"  Gumroad cover（16:9）：{art.name if art else '⚠️ 沒有 artwork（會退回方形）'}")
+    print(f"  Gumroad thumb（方形）：{cover.name if cover else '⚠️ 沒有方形封面'}")
     print("─" * 64)
 
     if args.dry_run:
@@ -633,11 +641,15 @@ def cmd_gumroad(args):
             except GumroadError as e:
                 print(f"  ⚠️  封面附加失敗（{e}）→ 請在 dashboard 手動上傳")
         else:
-            # 只掛**一張**封面（方形）。16:9 artwork 不上傳：Gumroad 商品頁的圖庫
-            # 多一張只是重複曝光，而且縮圖本身也要求正方形（見下）。
-            _try_img(cover, "cover", "已附上封面", "封面自動上傳失敗")
+            # 平台欄位對應（兩邊要的圖不一樣，別搞混）：
+            #   Gumroad     cover = artwork_3840x2160（16:9）｜thumb = cover_3000x3000（方形）
+            #   DistroKid  cover = cover_3000x3000（方形）｜沒有 thumb
+            # Gumroad 的 thumbnail **必須正方形**（16:9 會被退），所以縮圖拿方形那張；
+            # 圖庫（covers）只掛 16:9 那張，主圖就是它。
+            gallery = artwork_path(args.run) or cover      # 沒 artwork 才退回方形
+            _try_img(gallery, "cover", "已附上封面（16:9 artwork）", "封面自動上傳失敗")
             if not args.no_thumbnail:
-                _try_img(cover, "thumbnail", "已設定縮圖（方形）", "縮圖自動上傳失敗")
+                _try_img(cover, "thumbnail", "已設定縮圖（方形 cover）", "縮圖自動上傳失敗")
 
     if args.publish:
         body = enable_product(pid, token)

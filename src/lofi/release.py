@@ -512,7 +512,8 @@ def build_listing_md(rec):
         "",
         f"1. Product type：**Digital product**（名稱＝`{album}`）",
         f"2. Price：{price_txt}" + ("（Gumroad 定價填 0 即可）" if not price else ""),
-        f"3. Cover image：上傳 `cover_3000x3000.jpg`（另做縮圖需要 **方形 ≥600×600**）",
+        f"3. Cover image：上傳 `artwork_3840x2160.jpg`（16:9）；"
+        "Thumbnail：上傳 `cover_3000x3000.jpg`（Gumroad 縮圖**必須方形** ≥600×600）",
         f"4. Summary（一句話）：`{listing.get('short') or ''}`",
         "5. Description：貼下面的長版文案",
         f"6. Tags（上限 10）：{', '.join(f'`{t}`' for t in tags) or '（無）'}",
@@ -643,7 +644,7 @@ def build_checklist(rec):
         + ("「名稱你的價錢（pay-what-you-want）」" if not (rec.get("listing") or {}).get("price_usd")
            else f"US${(rec.get('listing') or {}).get('price_usd'):g}")
         + "（先累積聽眾與第一筆真實銷售）",
-        "3. 封面 `cover_3000x3000.jpg`；縮圖另需**方形 ≥600×600**",
+        "3. 封面 `artwork_3840x2160.jpg`（16:9）；縮圖 `cover_3000x3000.jpg`（方形 ≥600×600）",
         "4. Summary／Description 貼 `LISTING.md` 的文案；Tags："
         + (", ".join((rec.get("listing") or {}).get("tags") or []) or "（無）"),
         "5. 選 category（不要選 Other）並打開 ratings（Discover 的必要條件）",
