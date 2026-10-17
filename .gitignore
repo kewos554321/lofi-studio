@@ -26,6 +26,9 @@ models/*
 # 實驗／一次性腳本（本地保留、不進版控）
 /scratch/
 
+# DistroKid 偵察輸出：內含 CSRF token、albumuuid、S3 上傳 policy/signature 等短效憑證
+/browser/distrokid-recon-*.json
+
 # YouTube OAuth 憑證 / token（機密）
 .secrets/
 
